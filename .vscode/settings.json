@@ -1,0 +1,9 @@
+{
+    "hadolint.cliOptions": [
+        "--config",
+        ".vscode/.hadolint.yaml"
+    ],
+    "markdownlint.config": {
+        "extends": ".vscode/.markdownlint.yaml"
+    },
+}
