@@ -1,0 +1,26 @@
+{
+	{$AUTO_HTTPS}
+	order coraza_waf first
+}
+
+{$EDGE_ADDRESS} {
+	encode zstd gzip
+
+	request_body {
+		max_size {$REQUEST_BODY_MAX_SIZE}
+	}
+
+	coraza_waf {
+		directives `
+		Include /opt/coraza/config/coraza.conf
+		Include /opt/coraza/config/crs-setup.conf
+		Include /opt/coraza/owasp-crs/rules/*.conf
+		`
+	}
+
+	{$ROUTES}
+
+	handle {
+		respond "Routes are not configured" 501
+	}
+}

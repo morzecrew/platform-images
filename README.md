@@ -24,5 +24,6 @@ Pushing uses `gh auth token` for registry login to `ghcr.io`.
 | Target | Description |
 |--------|-------------|
 | [postgres](./images/postgres) | PostgreSQL with pg_cron and pgroonga, allowlist-based config overrides via env. |
+| [caddy](./images/caddy) | Caddy with Coraza WAF and OWASP CRS, templated config via env. |
 
-See [images/postgres/README.md](./images/postgres/README.md) for details on the postgres image and configuration.
+See each target's README for details (e.g. [images/postgres/README.md](./images/postgres/README.md), [images/caddy/README.md](./images/caddy/README.md)).

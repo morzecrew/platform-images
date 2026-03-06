@@ -36,7 +36,7 @@ RUN cat /tmp/base.conf /tmp/version.conf > /etc/postgresql/allowlist.conf \
     && chown postgres:postgres /etc/postgresql/allowlist.conf \
     && chmod 0644 /etc/postgresql/allowlist.conf
 
-COPY 18-cron-pgroonga/entrypoint-merge.sh /usr/local/bin/entrypoint-merge.sh
+COPY 18-cron-pgroonga/entrypoint.sh /usr/local/bin/entrypoint-merge.sh
 RUN chmod +x /usr/local/bin/entrypoint-merge.sh
 
 ENTRYPOINT ["/usr/local/bin/entrypoint-merge.sh"]
