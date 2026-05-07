@@ -8,7 +8,7 @@ set -Eeuo pipefail
 : "${STRIP_NATIVE:=1}"
 : "${REMOVE_TESTS:=1}"
 : "${REMOVE_TYPE_HINTS:=1}"
-: "${REMOVE_BUILD_METADATA:=0}"
+: "${REMOVE_BUILD_METADATA:=1}"
 : "${REMOVE_PIP:=1}"
 : "${BOTOCORE_SERVICES:=s3 sts}"
 
@@ -64,5 +64,3 @@ if [[ -n "${BOTOCORE_SERVICES}" ]]; then
 		done
 	fi
 fi
-
-install -d -m 0750 -o 65532 -g 65532 /srv/runtime-tmp
