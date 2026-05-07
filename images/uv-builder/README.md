@@ -30,6 +30,7 @@ Typical flow: `uv sync` → `uv build --wheel` → install wheel into the venv �
 | `APP_ROOT` | `/app` | Project directory. |
 | `VENV_PATH` | `/opt/venv` | Target venv path. |
 | `UV_GROUPS` | `--no-group dev` | Extra arguments passed to `uv sync` (e.g. drop dev groups). |
+| `PYTHON_BIN` | `${VENV_PATH}/bin/python` | Python used for `compileall`, `pip uninstall`, and `uv pip install --python`. |
 | `STRIP_NATIVE` | `1` | Strip `*.so` with `strip --strip-unneeded`. |
 | `REMOVE_TESTS` | `1` | Remove `tests` / `test` / `__pycache__` trees under the venv. |
 | `REMOVE_TYPE_HINTS` | `1` | Delete `*.pyi`. |
@@ -37,9 +38,7 @@ Typical flow: `uv sync` → `uv build --wheel` → install wheel into the venv �
 | `REMOVE_PIP` | `1` | Uninstall pip/setuptools/wheel from the venv. |
 | `BOTOCORE_SERVICES` | `s3 sts` | If non-empty and botocore is present, keep only these data dirs under `botocore/data` (space-separated names); empty disables pruning. |
 
-Proxy build-args **`HTTP_PROXY`**, **`HTTPS_PROXY`**, **`NO_PROXY`** are passed through as environment in the image for corporate networks.
-
-The script creates **`/srv/runtime-tmp`** owned by `65532:65532` mode `0750` for compatibility with non-root distroless runtimes.
+For proxies during image build, pass standard BuildKit build-args (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`) on the `docker buildx bake` invocation; this image does not declare them in the Dockerfile.
 
 ## Layout
 

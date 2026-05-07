@@ -13,9 +13,10 @@ Every image under `images/<name>/` follows the same rules:
 Build from the **repository root**:
 
 ```bash
-just bake              # all images
-just bake flyway       # one target
-just publish           # build + push (requires gh auth)
+just bake               # all images
+just bake flyway        # one target
+just publish            # build + push (requires gh auth)
+just push postgres 18   # push an already-built local tag
 ```
 
-`just` is a thin wrapper around `docker buildx bake -f docker-bake.hcl`.
+`just` is a thin wrapper around `docker buildx bake -f docker-bake.hcl` (`just push` uses `docker push` separately).

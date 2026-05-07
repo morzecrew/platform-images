@@ -14,16 +14,16 @@ just bake python-distroless
 
 Published tag: `ghcr.io/morzecrew/python-distroless:<PYTHON_VERSION>`.
 
-`PYTHON_VERSION` and `DEBIAN_VERSION` are build-args from [`docker-bake.hcl`](../../docker-bake.hcl). They must match a real tag on **`al3xos/python-distroless`** (format `python<version>-debian<major>`, e.g. `3.14.3-debian13`). If upstream only publishes full semvers, set `PYTHON_VERSION` in bake to that value so `FROM al3xos/python-distroless:${PYTHON_VERSION}-debian${DEBIAN_VERSION}` resolves.
+`PYTHON_VERSION` and `DEBIAN_VERSION` (from the `DISTROLESS_DEBIAN_VERSION` bake variable) are build-args from [`docker-bake.hcl`](../../docker-bake.hcl). They must resolve to a real tag on **`al3xos/python-distroless`**: the Dockerfile uses `FROM al3xos/python-distroless:${PYTHON_VERSION}-debian${DEBIAN_VERSION}` (e.g. `3.14.3-debian13`). If upstream tags are full semver, set `PYTHON_VERSION` in bake to that exact string—**the GHCR tag for this image uses the same string**, because bake passes `PYTHON_VERSION` to both `tags` and build args.
 
 ## Runtime behavior
 
-- **User** `65532:65532` (non-root).
-- **Environment** `LANG` / `LC_ALL` `C.UTF-8`, `TZ=UTC`, `PYTHONUNBUFFERED=1`, `PYTHONFAULTHANDLER=1`.
-- **Writable temp**: `TMPDIR` and `XDG_CACHE_HOME` under `/srv/runtime-tmp` (ensure this path exists and is writable in your final image or volume—`uv-builder`’s `build-uv-app` creates `/srv/runtime-tmp` with the expected ownership when you use that flow).
+- **User** `65532:65532` by default (overridable via **`APP_UID`** / **`APP_GID`** build args).
+- **Environment** `LANG` / `LC_ALL` `C.UTF-8`, `TZ=UTC`, `PYTHONUNBUFFERED=1`, `PYTHONFAULTHANDLER=1`, plus **`APP_RUNTIME_DIR`**, **`APP_TMP_DIR`** (defaults `/srv/runtime` and `/srv/runtime/tmp`).
+- **Writable temp**: `TMPDIR` is **`APP_TMP_DIR`** (default `/srv/runtime/tmp`); `XDG_CACHE_HOME` is `${TMPDIR}/.cache`. Those directories are created in the deps stage and copied into the final image; mount a volume over them if you need a writable layer at runtime.
 
 Bundled from bookworm: updated CA certs, **`libmagic.so.1`** and **`magic.mgc`** data, plus **`libbz2`**, **`liblzma`**, **`libz`** for typical binary wheels. **`LD_LIBRARY_PATH=/usr/lib`** is set so these libs resolve.
 
 ## Layout
 
-- `Dockerfile` — deps stage from `debian:bookworm-slim`; runtime `FROM al3xos/python-distroless`
+- `Dockerfile` — deps stage from `debian:bookworm-slim` (certs, libmagic, runtime dir layout); runtime `FROM al3xos/python-distroless`
