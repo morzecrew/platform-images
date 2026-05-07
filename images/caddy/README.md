@@ -4,26 +4,26 @@ Custom Caddy Docker images for the Morze platform. Based on official `caddy` wit
 
 ## Contents
 
-- **Caddy 2.11** (variant `2.11-coraza-crs`) with:
+- **Tag `2.11`** — Caddy with:
   - [Coraza WAF](https://coraza.io/) — Web Application Firewall for Caddy
   - [OWASP CRS](https://coreruleset.org/) — Core Rule Set for ModSecurity/Coraza
-- Base config in the image (`Caddyfile`, `waf/coraza.conf`, `waf/crs-setup.conf`) plus **overrides** via environment variables.
+- Base config in the image (`rootfs/Caddyfile`, `rootfs/waf/coraza.conf`, `rootfs/waf/crs-setup.conf`) plus **overrides** via environment variables.
+
+Coraza/CRS pin versions are **build args** in [`Dockerfile`](./Dockerfile); `CADDY_VERSION` matches the registry tag (see [`docker-bake.hcl`](../../docker-bake.hcl)).
 
 ## Building
 
-Build from the **repo root** with [just](https://github.com/casey/just):
+From the repo root (see [images/README.md](../README.md)):
 
 ```bash
-just build -t caddy -v 2.11-coraza-crs
+just bake caddy
 ```
 
-Image: `ghcr.io/morzecrew/caddy:2.11-coraza-crs`.
-
-Optional: `--push` to push after build, or run `just push -t caddy -v 2.11-coraza-crs` separately.
+Image: `ghcr.io/morzecrew/caddy:2.11`.
 
 ## Configuration overrides
 
-The image uses a custom entrypoint (`entrypoint.sh`) that validates the Caddy config and then launches Caddy. The `Caddyfile` is templated with environment variables.
+The image uses a custom entrypoint (`rootfs/entrypoint.sh`) that validates the Caddy config and then launches Caddy. The `Caddyfile` is templated with environment variables.
 
 ### Environment variables
 
@@ -38,4 +38,5 @@ If `ROUTES` is empty, Caddy responds with `501 Routes are not configured`.
 
 ## Layout
 
-- `2.11-coraza-crs/` — Caddy 2.11 + Coraza + CRS: `Dockerfile`, `Caddyfile`, `entrypoint.sh`, `waf/coraza.conf`, `waf/crs-setup.conf`
+- `Dockerfile` — multi-stage Coraza + CRS build and runtime image
+- `rootfs/` — `Caddyfile`, `entrypoint.sh`, and `waf/` copied into the image

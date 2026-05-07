@@ -61,9 +61,9 @@ FROM caddy:${CADDY_VERSION}-alpine
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 COPY --from=crs /opt/coraza /opt/coraza
 
-COPY 2.11-coraza-crs/waf/ /opt/coraza/config/
-COPY 2.11-coraza-crs/Caddyfile /etc/caddy/Caddyfile
-COPY 2.11-coraza-crs/entrypoint.sh /entrypoint.sh
+COPY rootfs/waf/ /opt/coraza/config/
+COPY rootfs/Caddyfile /etc/caddy/Caddyfile
+COPY rootfs/entrypoint.sh /entrypoint.sh
 
 RUN chmod +x /entrypoint.sh
 

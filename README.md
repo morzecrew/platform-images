@@ -2,29 +2,44 @@
 
 Docker image definitions for the Morze platform. This repo holds Dockerfiles and config used to build and publish images to [ghcr.io/morzecrew](https://ghcr.io/morzecrew).
 
+## Layout
+
+Every image lives under `images/<name>/` with the **same shape**: a `Dockerfile` at the root of that folder, optional **`rootfs/`** for files that are copied into the image, and a `README.md`. See [images/README.md](./images/README.md) for the full convention.
+
+Tags and build arguments are declared once in **[`docker-bake.hcl`](./docker-bake.hcl)**.
+
 ## Building
 
-Requires [just](https://github.com/casey/just). Builds and pushes are run from the **repo root**.
+From the **repo root**. Requires [just](https://github.com/casey/just) and [Docker Buildx](https://docs.docker.com/build/).
 
 ```bash
-# Build an image (target = directory under images/, version = subdir with Dockerfile)
-just build -t postgres -v 18-cron-pgroonga
+just bake                 # all images (default group)
+just bake postgres        # single image
+just publish              # build + push everything (uses gh auth)
+just push postgres 18
+just push uv-builder 3.14
+```
 
-# Build and push
-just build -t postgres -v 18-cron-pgroonga --push
+Equivalent without `just`:
 
-# Push only (after building)
-just push -t postgres -v 18-cron-pgroonga
+```bash
+docker buildx bake -f docker-bake.hcl
+docker buildx bake -f docker-bake.hcl postgres
+docker buildx bake -f docker-bake.hcl --push
 ```
 
 Pushing uses `gh auth token` for registry login to `ghcr.io`.
 
+**Tags** are short version identifiers where it fits (`postgres:18`, `caddy:2.11`, `flyway:12.5`, `uv-builder:3.14`, `python-distroless:3.14`). The image name carries *what* is inside; bake variables set both the tag and matching build-args (Bake cannot read Dockerfile `ARG` defaults for tags—you wire both from the same `variable` blocks in [`docker-bake.hcl`](./docker-bake.hcl)). For `python-distroless`, the tag must stay aligned with published **`al3xos/python-distroless`** tags (often full `x.y.z`); adjust `PYTHON_VERSION` in bake if needed.
+
 ## Images
 
-| Target | Description |
-|--------|-------------|
+| Directory | Description |
+|-----------|-------------|
 | [postgres](./images/postgres) | PostgreSQL with pg_cron and pgroonga, allowlist-based config overrides via env. |
 | [caddy](./images/caddy) | Caddy with Coraza WAF and OWASP CRS, templated config via env. |
-| [flyway](./images/flyway) | Flyway with essential drivers, pinned versions. |
+| [flyway](./images/flyway) | Flyway with essential JDBC drivers, pinned versions. |
+| [uv-builder](./images/uv-builder) | uv-based Python build stage: sync, wheel, slim venv (`build-uv-app`). |
+| [python-distroless](./images/python-distroless) | Distroless Python runtime with libmagic and CA bundle for small final images. |
 
-See each target's README for details (e.g. [images/postgres/README.md](./images/postgres/README.md), [images/caddy/README.md](./images/caddy/README.md)).
+Each image README documents usage; platform services focus on runtime env, builder/runtime pair on multi-stage workflows.

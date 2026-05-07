@@ -4,28 +4,28 @@ Custom PostgreSQL Docker images for the Morze platform. Based on official `postg
 
 ## Contents
 
-- **PostgreSQL 18** (variant `18-cron-pgroonga`) with:
+- **PostgreSQL 18** (tag `18`) with:
   - [pg_cron](https://github.com/citusdata/pg_cron) — cron-style job scheduling inside Postgres
   - [pgroonga](https://pgroonga.github.io/) — full-text search via Groonga
-- Base config in the image (`postgres.conf`) plus **allowlist-based overrides** via environment variables.
+- Base config in the image (`rootfs/postgresql.conf`) plus **allowlist-based overrides** via environment variables.
+
+`PG_MAJOR` drives the registry tag; `POSTGRES_IMAGE_TAG` pins the upstream `postgres` image (e.g. `18.1`). Both are **build args** in [`docker-bake.hcl`](../../docker-bake.hcl) and [`Dockerfile`](./Dockerfile).
 
 ## Building
 
-Build from the **repo root** with [just](https://github.com/casey/just):
+From the repo root (see [images/README.md](../README.md)):
 
 ```bash
-just build -t postgres -v 18-cron-pgroonga
+just bake postgres
 ```
 
-Image: `ghcr.io/morzecrew/postgres:18-cron-pgroonga`.
-
-Optional: `--push` to push after build, or run `just push -t postgres -v 18-cron-pgroonga` separately.
+Image: `ghcr.io/morzecrew/postgres:18`.
 
 ## Configuration overrides
 
-The image uses a custom entrypoint (`entrypoint-merge.sh`) that:
+The image uses a custom entrypoint (`rootfs/entrypoint.sh` → `/usr/local/bin/entrypoint-merge.sh`) that:
 
-1. Reads an **allowlist** of PostgreSQL parameter names from `/etc/postgresql/allowlist.conf` (built from `allowlists/base.conf` and version-specific `allowlists/18.conf`).
+1. Reads an **allowlist** of PostgreSQL parameter names from `/etc/postgresql/allowlist.conf` (copied from `rootfs/allowlist.conf` in the image).
 2. Scans the environment for variables named `PG_CONF__<param>` (e.g. `PG_CONF__shared_buffers`, `PG_CONF__work_mem`). Names are normalized (case-insensitive, dashes → underscores).
 3. Writes allowed overrides to `/etc/postgresql/conf.d/99-overrides.conf` and starts Postgres with the official entrypoint, so the main config plus overrides are applied.
 
@@ -41,5 +41,7 @@ Some parameters are **denylisted** (e.g. `shared_preload_libraries`, `data_direc
 
 ## Layout
 
-- `18-cron-pgroonga/` — PostgreSQL 18 + cron + pgroonga: `Dockerfile`, `postgres.conf`, `entrypoint-merge.sh`
-- `allowlists/` — `base.conf` (shared allowed params) and `18.conf` (version-specific)
+- `Dockerfile` — image build
+- `rootfs/postgresql.conf` — bundled server config
+- `rootfs/entrypoint.sh` — allowlist merge entrypoint
+- `rootfs/allowlist.conf` — parameter names allowed for `PG_CONF__*` env overrides (also copied to `/etc/postgresql/allowlist.conf`)
