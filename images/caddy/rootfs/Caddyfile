@@ -18,9 +18,9 @@
 		`
 	}
 
-	{$ROUTES}
+	import /etc/caddy/config/*.caddy
 
 	handle {
-		respond "Routes are not configured" 501
+		respond "No configuration injected" 501
 	}
 }

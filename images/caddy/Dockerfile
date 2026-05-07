@@ -65,12 +65,12 @@ COPY rootfs/waf/ /opt/coraza/config/
 COPY rootfs/Caddyfile /etc/caddy/Caddyfile
 COPY rootfs/entrypoint.sh /entrypoint.sh
 
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh \
+    && mkdir -p /etc/caddy/config
 
 ENV EDGE_ADDRESS=${EDGE_ADDRESS:-:80} \
     REQUEST_BODY_MAX_SIZE=${REQUEST_BODY_MAX_SIZE:-"30MB"} \
-    AUTO_HTTPS=${AUTO_HTTPS:-"auto_https off"} \
-    ROUTES=${ROUTES:-""}
+    AUTO_HTTPS=${AUTO_HTTPS:-"auto_https off"}
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
