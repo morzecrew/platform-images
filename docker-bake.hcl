@@ -56,6 +56,7 @@ target "caddy" {
     CADDY_VERSION        = CADDY_VERSION
     CORAZA_CADDY_VERSION = "v2.1.0"
     CRS_VERSION          = "v4.24.0"
+    MHOLT_RL_SHA         = "b8d8c9a9d99ee352d675cbbe416ec2b489fc8cab"
   }
 }
 

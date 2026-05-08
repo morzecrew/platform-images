@@ -1,6 +1,8 @@
 {
 	{$AUTO_HTTPS}
-	order coraza_waf first
+	order coraza_waf after rate_limit
+
+	import {$SERVERS_DIR:/etc/caddy/servers.d}/*.caddy
 }
 
 {$EDGE_ADDRESS} {
@@ -14,11 +16,16 @@
 		directives `
 		Include /opt/coraza/config/coraza.conf
 		Include /opt/coraza/config/crs-setup.conf
+		Include /opt/coraza/overrides/*.conf
 		Include /opt/coraza/owasp-crs/rules/*.conf
 		`
 	}
 
-	import /etc/caddy/config/*.caddy
+	import {$CONFIG_DIR:/etc/caddy/config.d}/*.caddy
+
+	handle /__platform_healthz {
+		respond "ok" 200
+	}
 
 	handle {
 		respond "No configuration injected" 501

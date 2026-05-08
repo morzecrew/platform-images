@@ -1,0 +1,9 @@
+(rate_limit_api) {
+	rate_limit {
+		zone api_zone {
+			key {remote_host}
+			events 100
+			window 1m
+		}
+	}
+}

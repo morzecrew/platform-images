@@ -1,0 +1,5 @@
+(trusted_proxies) {
+	servers {
+		trusted_proxies static private_ranges
+	}
+}

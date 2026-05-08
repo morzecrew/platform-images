@@ -6,4 +6,7 @@
     "markdownlint.config": {
         "extends": ".vscode/.markdownlint.yaml"
     },
+    "files.associations": {
+        "*.caddy": "caddyfile"
+    }
 }

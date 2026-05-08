@@ -1,0 +1,10 @@
+(cors_default) {
+	header {
+		Access-Control-Allow-Origin "{$CORS_ALLOW_ORIGIN:*}"
+		Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+		Access-Control-Allow-Headers "*"
+		Access-Control-Expose-Headers "*"
+	}
+	@options method OPTIONS
+	respond @options 204
+}

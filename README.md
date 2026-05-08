@@ -37,7 +37,7 @@ Pushing uses `gh auth token` for registry login to `ghcr.io`.
 | Directory | Description |
 |-----------|-------------|
 | [postgres](./images/postgres) | PostgreSQL with pg_cron and pgroonga, allowlist-based config overrides via env. |
-| [caddy](./images/caddy) | Caddy with Coraza WAF and OWASP CRS; base config via env, optional `import /etc/caddy/config/*.caddy`. |
+| [caddy](./images/caddy) | Caddy with Coraza WAF and OWASP CRS; env-templated base, `CONFIG_DIR` / `SERVERS_DIR` imports, bundled snippets. |
 | [flyway](./images/flyway) | Flyway with essential JDBC drivers, pinned versions. |
 | [uv-builder](./images/uv-builder) | uv-based Python build stage: sync, wheel, slim venv (`build-uv-app`). |
 | [python-distroless](./images/python-distroless) | Distroless Python runtime with libmagic and CA bundle for small final images. |

@@ -1,0 +1,3 @@
+(websocket_proxy) {
+	reverse_proxy {$WS_UPSTREAM:localhost:8081}
+}
