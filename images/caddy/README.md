@@ -65,10 +65,7 @@ You may also use a fragment here only for **`import`** lines—for example loadi
 import /etc/caddy/snippets/security.caddy
 import /etc/caddy/snippets/cache_static.caddy
 import /etc/caddy/snippets/spa.caddy
-import /etc/caddy/snippets/spa_secure.caddy
 ```
-
-Then site-level fragments under **`CONFIG_DIR`** can use **`import spa_secure`** (or add matcher-specific wrappers as needed).
 
 Caddy expands `{$VAR}` and `{$VAR:default}` in the Caddyfile from the environment. The base file already sets **`encode zstd gzip`** on the site; add more `encode` only if you need different options.
 
