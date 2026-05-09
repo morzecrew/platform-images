@@ -1,10 +1,14 @@
 ARG POSTGRES_IMAGE_TAG=18.1
+
 FROM postgres:${POSTGRES_IMAGE_TAG}
 
-ARG PG_MAJOR=18
+ARG POSTGRES_IMAGE_TAG
 
-# hadolint ignore=DL3008,DL3015,DL4006,DL3047
+# ....................... #
+# Install pg_cron and pgroonga
+
 RUN set -eux; \
+    PG_MAJOR="${POSTGRES_IMAGE_TAG%%.*}"; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates wget gnupg lsb-release "postgresql-${PG_MAJOR}-cron"; \
     echo "OS:"; cat /etc/os-release; \
@@ -24,6 +28,9 @@ RUN set -eux; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*
 
+# ....................... #
+# Copy configuration files
+
 COPY rootfs/postgresql.conf /etc/postgresql.conf
 
 RUN mkdir -p /etc/postgresql/conf.d \
@@ -35,6 +42,9 @@ RUN chown postgres:postgres /etc/postgresql/allowlist.conf \
 
 COPY rootfs/entrypoint.sh /usr/local/bin/entrypoint-merge.sh
 RUN chmod +x /usr/local/bin/entrypoint-merge.sh
+
+# ....................... #
+# Entrypoint
 
 ENTRYPOINT ["/usr/local/bin/entrypoint-merge.sh"]
 CMD ["postgres", "-c", "config_file=/etc/postgresql.conf"]
