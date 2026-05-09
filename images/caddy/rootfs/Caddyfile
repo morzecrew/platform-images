@@ -11,6 +11,10 @@ import {$SNIPPET_DEFS_DIR:/etc/caddy/snippet_defs.d}/*.caddy
 {$EDGE_ADDRESS} {
 	encode zstd gzip
 
+	handle {$HEALTH_PATH:/__platform_healthz} {
+		respond "ok" 200
+	}
+
 	request_body {
 		max_size {$REQUEST_BODY_MAX_SIZE}
 	}
@@ -25,10 +29,6 @@ import {$SNIPPET_DEFS_DIR:/etc/caddy/snippet_defs.d}/*.caddy
 	}
 
 	import {$CONFIG_DIR:/etc/caddy/config.d}/*.caddy
-
-	handle /__platform_healthz {
-		respond "ok" 200
-	}
 
 	handle {
 		respond "No configuration injected" 501

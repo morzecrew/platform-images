@@ -95,6 +95,7 @@ RUN addgroup -S caddy && adduser -S -G caddy caddy \
 
 ENV EDGE_ADDRESS=":8080" \
     REQUEST_BODY_MAX_SIZE="30MB" \
+    HEALTH_PATH="/__platform_healthz" \
     AUTO_HTTPS="auto_https off" \
     TEMPLATE_DIR="/etc/caddy/templates" \
     CONFIG_DIR="/etc/caddy/config.d" \

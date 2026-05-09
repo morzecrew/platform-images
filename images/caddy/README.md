@@ -7,7 +7,7 @@ Custom Caddy Docker images for the Morze platform. Based on official `caddy` wit
 - **Tag `2.11`** — Caddy built with [coraza-caddy](https://github.com/corazawaf/coraza-caddy), CRS rules under `/opt/coraza/`, and a small **platform Caddyfile** (`rootfs/Caddyfile`).
 - **Runtime injection** — site fragments as `*.caddy` under **`CONFIG_DIR`** (default **`/etc/caddy/config.d`**), plus optional **global options** fragments under **`SERVERS_DIR`** (default **`/etc/caddy/servers.d`**) merged into the top-level `{ }` block (see below).
 - **Named snippets** — bundled patterns under **`BUILTIN_SNIPPETS_DIR`** (default **`/etc/caddy/snippets`**) are **`import`ed at top level** in the base Caddyfile, so from **`CONFIG_DIR`** you can compose the app with e.g. `import spa` and `import security_headers`. Add your own **`(name) { }`** definitions as `*.caddy` under **`SNIPPET_DEFS_DIR`** (default **`/etc/caddy/snippet_defs.d`**); see [Snippets](#snippets-composable-patterns).
-- **Health** — `GET /__platform_healthz` → `200` with body `ok` (defined in the base Caddyfile, before the fallback handler).
+- **Health** — `GET {$HEALTH_PATH}` (default **`/__platform_healthz`**) → `200` with body `ok`. The base Caddyfile handles this **first** (before `request_body`, Coraza, and **`CONFIG_DIR`** imports) so probes stay cheap and predictable; override with **`HEALTH_PATH`**.
 
 Coraza/CRS versions are **build args** in [`Dockerfile`](./Dockerfile); `CADDY_VERSION` matches the registry tag (see [`docker-bake.hcl`](../../docker-bake.hcl)).
 
@@ -39,6 +39,7 @@ The entrypoint runs `caddy fmt` and `caddy adapt` on `/etc/caddy/Caddyfile`, the
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `EDGE_ADDRESS` | `:8080` | Site block address (e.g. `:443` with TLS). |
+| `HEALTH_PATH` | `/__platform_healthz` | Path for the built-in liveness handler (`handle {$HEALTH_PATH:…}` → `200` / `ok`). Must match Caddy’s path matcher form (leading slash). |
 | `REQUEST_BODY_MAX_SIZE` | `30MB` | `request_body` max size for the site. |
 | `AUTO_HTTPS` | `auto_https off` | Global auto-HTTPS directive in the options block. |
 | `TEMPLATE_DIR` | `/etc/caddy/templates` | Reserved for custom templating workflows (not used by the default entrypoint). |
@@ -67,14 +68,14 @@ Caddy expands `{$VAR}` and `{$VAR:default}` in the Caddyfile from the environmen
 
 ### Injected site config (`CONFIG_DIR`, default `/etc/caddy/config.d/*.caddy`)
 
-Add one or more `.caddy` files under **`CONFIG_DIR`** (volume, `COPY`, or derived image). The Caddyfile imports **`{$CONFIG_DIR}/*.caddy`** (default `/etc/caddy/config.d`). Fragments are merged **inside** the same server block as Coraza and `encode`—in glob sort order, before `handle /__platform_healthz` and the `501` fallback.
+Add one or more `.caddy` files under **`CONFIG_DIR`** (volume, `COPY`, or derived image). The Caddyfile imports **`{$CONFIG_DIR}/*.caddy`** (default `/etc/caddy/config.d`). Fragments are merged **inside** the same server block as Coraza and `encode`—in glob sort order, **after** the built-in **`HEALTH_PATH`** handler and **before** the `501` fallback.
 
 **Rules:**
 
 - Use **site-level directives only** (`root`, `handle`, `reverse_proxy`, `file_server`, named matchers like `@api`, `header`, `try_files`, etc.).
 - Do **not** open another listener block (no second `:80 { }` / duplicate of `{$EDGE_ADDRESS}`).
 
-If the glob matches **no** files, Caddy logs a warning and continues; traffic that does not match your handlers falls through to **`501`** with body **`No configuration injected`** (except `/__platform_healthz`).
+If the glob matches **no** files, Caddy logs a warning and continues; traffic that does not match your handlers falls through to **`501`** with body **`No configuration injected`** (except **`HEALTH_PATH`**, default **`/__platform_healthz`**).
 
 **Example — Vite / SPA** (dist on `/srv`, uncached `config.json`, long-lived hashed assets, SPA fallback):
 
@@ -154,7 +155,7 @@ Then in **`CONFIG_DIR`**: `import my_api`.
 
 | File | Snippet name | Purpose |
 |------|----------------|--------|
-| `spa.caddy` | `spa` | `root`, `try_files` → `/index.html`, `file_server`; `{$WEB_ROOT:/srv}` |
+| `spa.caddy` | `spa` | `root`, `handle { try_files …; file_server }`; `{$WEB_ROOT:/srv}` |
 | `security.caddy` | `security_headers` | Baseline security headers, strip `Server` |
 | `cache_static.caddy` | `cache_static` | Long cache for common static extensions and `/assets/*` |
 | `no_cache.caddy` | `no_cache` | `Cache-Control` / `Pragma` / `Expires` for no caching |
@@ -177,8 +178,8 @@ Use the module’s Caddyfile syntax (`rate_limit { zone ... { key, events, windo
 
 ## Files in this directory
 
-- `Dockerfile` — multi-stage Coraza + CRS build, **`xcaddy`** with Coraza + **mholt/caddy-ratelimit** (`MHOLT_RL_SHA`), optional **`caddy` user** + ownership, **`CONFIG_DIR`** / **`SERVERS_DIR`** / **`snippet_defs.d`**
-- `rootfs/Caddyfile` — global `{ }` (`AUTO_HTTPS`, **`order coraza_waf after rate_limit`**, **`import {$SERVERS_DIR}/*.caddy`**) + top-level **`import {$BUILTIN_SNIPPETS_DIR}/*.caddy`** + **`import {$SNIPPET_DEFS_DIR}/*.caddy`** + templated site + **`import {$CONFIG_DIR}/*.caddy`** + health + fallback
+- `Dockerfile` — multi-stage Coraza + CRS build, **`xcaddy`** with Coraza + **mholt/caddy-ratelimit** (`MHOLT_RL_SHA`), optional **`caddy` user** + ownership, **`HEALTH_PATH`**, **`CONFIG_DIR`** / **`SERVERS_DIR`** / **`snippet_defs.d`**
+- `rootfs/Caddyfile` — global `{ }` (`AUTO_HTTPS`, **`order coraza_waf after rate_limit`**, **`import {$SERVERS_DIR}/*.caddy`**) + top-level **`import {$BUILTIN_SNIPPETS_DIR}/*.caddy`** + **`import {$SNIPPET_DEFS_DIR}/*.caddy`** + templated site + **`HEALTH_PATH`** handle (first) + **`import {$CONFIG_DIR}/*.caddy`** + fallback
 - `rootfs/entrypoint.sh` — `docker-entrypoint.d`, validate, exec
 - `rootfs/waf/` — Coraza config copied to `/opt/coraza/config/`
 - `rootfs/snippets/` — copied to `/etc/caddy/snippets/`
