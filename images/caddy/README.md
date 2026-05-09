@@ -127,11 +127,13 @@ import {$SNIPPET_DEFS_DIR:/etc/caddy/snippet_defs.d}/*.caddy
 
 That matches Caddy’s rule that **`(snippet_name) { ... }` must not sit inside** the global options `{ }` block **or** inside a site block—only as **top-level** siblings.
 
-**In `CONFIG_DIR`**, invoke by **snippet name** (same as upstream Caddyfile `import`):
+**In `CONFIG_DIR`**, invoke by **snippet name** (same as upstream Caddyfile `import`). Snippets can take **arguments** (see [Snippets with arguments](https://caddyserver.com/docs/caddyfile/concepts#snippets-with-arguments)); e.g. **`no_cache`** expects a **matcher** as the first token: `import no_cache @config`.
 
 ```caddy
 import security_headers
 import spa
+@config path /config.json
+import no_cache @config
 handle /api/* {
 	import proxy_defaults
 }
@@ -158,7 +160,7 @@ Then in **`CONFIG_DIR`**: `import my_api`.
 | `spa.caddy` | `spa` | `root`, `handle { try_files …; file_server }`; `{$WEB_ROOT:/srv}` |
 | `security.caddy` | `security_headers` | Baseline security headers, strip `Server` |
 | `cache_static.caddy` | `cache_static` | Long cache for common static extensions and `/assets/*` |
-| `no_cache.caddy` | `no_cache` | `Cache-Control` / `Pragma` / `Expires` for no caching |
+| `no_cache.caddy` | `no_cache` | No-cache headers on **`{args[0]}`** (pass a matcher, e.g. `import no_cache @config`) |
 | `cors.caddy` | `cors_default` | CORS headers + `OPTIONS` → `204`; `{$CORS_ALLOW_ORIGIN:*}` |
 | `reverse_proxy.caddy` | `proxy_defaults` | Upstream `{$UPSTREAM:localhost:8080}`, forwarded headers, HTTP transport timeouts |
 | `websocket.caddy` | `websocket_proxy` | `reverse_proxy` for `{$WS_UPSTREAM:localhost:8081}` |
