@@ -80,6 +80,7 @@ RUN addgroup -S caddy && adduser -S -G caddy caddy \
     /etc/caddy/config.d \
     /etc/caddy/servers.d \
     /etc/caddy/snippets \
+    /etc/caddy/snippet_defs.d \
     /etc/caddy/templates \
     /docker-entrypoint.d \
     /srv \
@@ -97,7 +98,9 @@ ENV EDGE_ADDRESS=":8080" \
     AUTO_HTTPS="auto_https off" \
     TEMPLATE_DIR="/etc/caddy/templates" \
     CONFIG_DIR="/etc/caddy/config.d" \
-    SERVERS_DIR="/etc/caddy/servers.d"
+    SERVERS_DIR="/etc/caddy/servers.d" \
+    BUILTIN_SNIPPETS_DIR="/etc/caddy/snippets" \
+    SNIPPET_DEFS_DIR="/etc/caddy/snippet_defs.d"
 
 EXPOSE 8080
 

@@ -6,7 +6,7 @@ Custom Caddy Docker images for the Morze platform. Based on official `caddy` wit
 
 - **Tag `2.11`** — Caddy built with [coraza-caddy](https://github.com/corazawaf/coraza-caddy), CRS rules under `/opt/coraza/`, and a small **platform Caddyfile** (`rootfs/Caddyfile`).
 - **Runtime injection** — site fragments as `*.caddy` under **`CONFIG_DIR`** (default **`/etc/caddy/config.d`**), plus optional **global options** fragments under **`SERVERS_DIR`** (default **`/etc/caddy/servers.d`**) merged into the top-level `{ }` block (see below).
-- **Bundled snippets** — `/etc/caddy/snippets/*.caddy` are **reference** patterns (headers, SPA, proxy defaults, etc.); see [Snippets directory](#snippets-directory) below.
+- **Named snippets** — bundled patterns under **`BUILTIN_SNIPPETS_DIR`** (default **`/etc/caddy/snippets`**) are **`import`ed at top level** in the base Caddyfile, so from **`CONFIG_DIR`** you can compose the app with e.g. `import spa` and `import security_headers`. Add your own **`(name) { }`** definitions as `*.caddy` under **`SNIPPET_DEFS_DIR`** (default **`/etc/caddy/snippet_defs.d`**); see [Snippets](#snippets-composable-patterns).
 - **Health** — `GET /__platform_healthz` → `200` with body `ok` (defined in the base Caddyfile, before the fallback handler).
 
 Coraza/CRS versions are **build args** in [`Dockerfile`](./Dockerfile); `CADDY_VERSION` matches the registry tag (see [`docker-bake.hcl`](../../docker-bake.hcl)).
@@ -44,6 +44,8 @@ The entrypoint runs `caddy fmt` and `caddy adapt` on `/etc/caddy/Caddyfile`, the
 | `TEMPLATE_DIR` | `/etc/caddy/templates` | Reserved for custom templating workflows (not used by the default entrypoint). |
 | `CONFIG_DIR` | `/etc/caddy/config.d` | Directory for injected site fragments (`*.caddy`). The Caddyfile uses `import {$CONFIG_DIR}/*.caddy` (with this default). |
 | `SERVERS_DIR` | `/etc/caddy/servers.d` | Fragments merged into the **global options** `{ }` block (`import {$SERVERS_DIR}/*.caddy`), after `order coraza_waf after rate_limit`. |
+| `BUILTIN_SNIPPETS_DIR` | `/etc/caddy/snippets` | Glob `import {$BUILTIN_SNIPPETS_DIR}/*.caddy` runs **between** the global `{ }` block and the site block so bundled **`(name) { }`** snippets are real definitions. Point elsewhere only if you replace the shipped tree. |
+| `SNIPPET_DEFS_DIR` | `/etc/caddy/snippet_defs.d` | Extra top-level snippet definitions (`*.caddy` containing `(myapp) { ... }`). Empty directory logs a harmless import warning. |
 
 ### Global / `servers` injection (`SERVERS_DIR`)
 
@@ -59,13 +61,7 @@ servers {
 
 You can scope by listener if needed, e.g. `servers :8080 { ... }` (see Caddy global options docs). An empty glob only emits a warning.
 
-You may also use a fragment here only for **`import`** lines—for example loading snippet definitions before they are invoked from **`CONFIG_DIR`**:
-
-```caddy
-import /etc/caddy/snippets/security.caddy
-import /etc/caddy/snippets/cache_static.caddy
-import /etc/caddy/snippets/spa.caddy
-```
+Snippet **`(name) { }` definitions** are **not** loaded here (they are invalid inside the global options block). They are loaded via **`BUILTIN_SNIPPETS_DIR`** and **`SNIPPET_DEFS_DIR`**; see [Snippets](#snippets-composable-patterns).
 
 Caddy expands `{$VAR}` and `{$VAR:default}` in the Caddyfile from the environment. The base file already sets **`encode zstd gzip`** on the site; add more `encode` only if you need different options.
 
@@ -119,24 +115,55 @@ handle /api/* {
 }
 ```
 
-### Snippets directory
+### Snippets (composable patterns)
 
-These files define **named reusable blocks** in Caddyfile syntax, e.g. `(spa) { ... }`, `(security_headers) { ... }`. In Caddy, such definitions must live at **global** scope. This image’s main template imports **`config.d` only inside the site block**, so you **cannot** reliably `import` a snippet file from `config.d` and then invoke `spa` on the next line—Caddy will reject `(name) { }` when that import is expanded inside the server.
+The base **`Caddyfile`** loads snippet definitions **at top level** (after the global `{ }` block, before the site block):
 
-**Practical use:** open the snippet, copy the **inner** directives into your `config.d` fragment (or flatten multiple snippets into one file); use **`SERVERS_DIR`** for global `servers { }` / [`trusted_proxies`](https://caddyserver.com/docs/caddyfile/options#trusted-proxies); or **`import`** snippet files from a **`SERVERS_DIR`** fragment so definitions exist before you invoke snippets from **`CONFIG_DIR`**.
+```caddy
+import {$BUILTIN_SNIPPETS_DIR:/etc/caddy/snippets}/*.caddy
+import {$SNIPPET_DEFS_DIR:/etc/caddy/snippet_defs.d}/*.caddy
+```
 
-| File | Purpose |
-|------|---------|
-| `spa.caddy` | `root`, `try_files` → `/index.html`, `file_server`; `{$WEB_ROOT:/srv}` |
-| `security.caddy` | Baseline security headers, strip `Server` |
-| `cache_static.caddy` | Long cache for common static extensions and `/assets/*` |
-| `no_cache.caddy` | `Cache-Control` / `Pragma` / `Expires` for no caching |
-| `cors.caddy` | CORS headers + `OPTIONS` → `204`; `{$CORS_ALLOW_ORIGIN:*}` |
-| `reverse_proxy.caddy` | `(proxy_defaults)` — upstream `{$UPSTREAM:localhost:8080}`, forwarded headers, HTTP transport timeouts |
-| `websocket.caddy` | `reverse_proxy` for `{$WS_UPSTREAM:localhost:8081}` |
-| `logging_json.caddy` | Access log to stdout as JSON |
-| `rate_limit.caddy` | Example **`rate_limit`** zone (`rate_limit_api`) — module is compiled into the image; see [Rate limiting](#rate-limiting) |
-| `trusted_proxies.caddy` | Wraps `servers { trusted_proxies ... }` — deploy the **inner** `servers` block via **`SERVERS_DIR`**, not **`CONFIG_DIR`** |
+That matches Caddy’s rule that **`(snippet_name) { ... }` must not sit inside** the global options `{ }` block **or** inside a site block—only as **top-level** siblings.
+
+**In `CONFIG_DIR`**, invoke by **snippet name** (same as upstream Caddyfile `import`):
+
+```caddy
+import security_headers
+import spa
+handle /api/* {
+	import proxy_defaults
+}
+```
+
+Order your own `*.caddy` files with numeric prefixes if needed (`10-front.caddy`, `20-api.caddy`). Combine snippets with plain directives in the same files.
+
+**Custom definitions:** add `snippet_defs.d/50-myapp.caddy`:
+
+```caddy
+(my_api) {
+	handle /v1/* {
+		reverse_proxy {$API_UPSTREAM:localhost:3000}
+	}
+}
+```
+
+Then in **`CONFIG_DIR`**: `import my_api`.
+
+**`trusted_proxies`:** the `servers { trusted_proxies ... }` directive belongs **only** in **`SERVERS_DIR`**, not inside a site snippet. The shipped `trusted_proxies.caddy` under **`BUILTIN_SNIPPETS_DIR`** is comments only; copy the inner `servers { ... }` into **`servers.d`**.
+
+| File | Snippet name | Purpose |
+|------|----------------|--------|
+| `spa.caddy` | `spa` | `root`, `try_files` → `/index.html`, `file_server`; `{$WEB_ROOT:/srv}` |
+| `security.caddy` | `security_headers` | Baseline security headers, strip `Server` |
+| `cache_static.caddy` | `cache_static` | Long cache for common static extensions and `/assets/*` |
+| `no_cache.caddy` | `no_cache` | `Cache-Control` / `Pragma` / `Expires` for no caching |
+| `cors.caddy` | `cors_default` | CORS headers + `OPTIONS` → `204`; `{$CORS_ALLOW_ORIGIN:*}` |
+| `reverse_proxy.caddy` | `proxy_defaults` | Upstream `{$UPSTREAM:localhost:8080}`, forwarded headers, HTTP transport timeouts |
+| `websocket.caddy` | `websocket_proxy` | `reverse_proxy` for `{$WS_UPSTREAM:localhost:8081}` |
+| `logging_json.caddy` | `logging_json` | Access log to stdout as JSON |
+| `rate_limit.caddy` | `rate_limit_api` | Example **`rate_limit`** zone — see [Rate limiting](#rate-limiting) |
+| `trusted_proxies.caddy` | — | Comments only; use **`SERVERS_DIR`** for `servers { trusted_proxies ... }` |
 
 ### Rate limiting
 
@@ -144,14 +171,14 @@ The binary includes **[mholt/caddy-ratelimit](https://github.com/mholt/caddy-rat
 
 **Global directive order** in `rootfs/Caddyfile` is **`order coraza_waf after rate_limit`**, so **`rate_limit` runs before Coraza** when you add zones under **`CONFIG_DIR`**. (Using **`order rate_limit before coraza_waf`** fails Caddyfile parsing for this directive pair in current Caddy — prefer **`coraza_waf after rate_limit`**.)
 
-Use the module’s Caddyfile syntax (`rate_limit { zone ... { key, events, window } }` — see the [upstream README](https://github.com/mholt/caddy-ratelimit/blob/master/README.md)). The bundled snippet **`rate_limit.caddy`** defines a **named snippet** `(rate_limit_api)`; invoke or inline it per normal snippet rules.
+Use the module’s Caddyfile syntax (`rate_limit { zone ... { key, events, window } }` — see the [upstream README](https://github.com/mholt/caddy-ratelimit/blob/master/README.md)). The bundled snippet **`rate_limit.caddy`** defines **`(rate_limit_api)`**; from **`CONFIG_DIR`** use `import rate_limit_api` (or inline the body).
 
 **Check:** `caddy list-modules` should list **`http.handlers.rate_limit`** (use **`docker run --entrypoint caddy … list-modules`** if your entrypoint runs validation first).
 
 ## Files in this directory
 
-- `Dockerfile` — multi-stage Coraza + CRS build, **`xcaddy`** with Coraza + **mholt/caddy-ratelimit** (`MHOLT_RL_SHA`), optional **`caddy` user** + ownership, **`CONFIG_DIR`** / **`SERVERS_DIR`**
-- `rootfs/Caddyfile` — global `{ }` (`AUTO_HTTPS`, **`order coraza_waf after rate_limit`**, **`import {$SERVERS_DIR}/*.caddy`**) + templated site + **`import {$CONFIG_DIR}/*.caddy`** + health + fallback
+- `Dockerfile` — multi-stage Coraza + CRS build, **`xcaddy`** with Coraza + **mholt/caddy-ratelimit** (`MHOLT_RL_SHA`), optional **`caddy` user** + ownership, **`CONFIG_DIR`** / **`SERVERS_DIR`** / **`snippet_defs.d`**
+- `rootfs/Caddyfile` — global `{ }` (`AUTO_HTTPS`, **`order coraza_waf after rate_limit`**, **`import {$SERVERS_DIR}/*.caddy`**) + top-level **`import {$BUILTIN_SNIPPETS_DIR}/*.caddy`** + **`import {$SNIPPET_DEFS_DIR}/*.caddy`** + templated site + **`import {$CONFIG_DIR}/*.caddy`** + health + fallback
 - `rootfs/entrypoint.sh` — `docker-entrypoint.d`, validate, exec
 - `rootfs/waf/` — Coraza config copied to `/opt/coraza/config/`
 - `rootfs/snippets/` — copied to `/etc/caddy/snippets/`
