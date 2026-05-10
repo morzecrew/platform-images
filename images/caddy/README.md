@@ -56,7 +56,7 @@ Add `*.caddy` files here for directives allowed in the **global** Caddyfile opti
 
 ```caddy
 servers {
-	trusted_proxies static private_ranges
+  trusted_proxies static private_ranges
 }
 ```
 
@@ -84,23 +84,23 @@ root * /srv
 
 @config path /config.json
 header @config {
-	Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
-	Pragma "no-cache"
-	Expires "0"
+  Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+  Pragma "no-cache"
+  Expires "0"
 }
 
 @assets {
-	path /assets/*
-	path *.js
-	path *.css
-	path *.svg
-	path *.png
-	path *.jpg
-	path *.woff2
+  path /assets/*
+  path *.js
+  path *.css
+  path *.svg
+  path *.png
+  path *.jpg
+  path *.woff2
 }
 
 header @assets {
-	Cache-Control "public, max-age=31536000, immutable"
+  Cache-Control "public, max-age=31536000, immutable"
 }
 
 try_files {path} /index.html
@@ -112,7 +112,7 @@ file_server
 
 ```caddy
 handle /api/* {
-	reverse_proxy localhost:8080
+  reverse_proxy localhost:8080
 }
 ```
 
@@ -132,10 +132,20 @@ That matches Caddy’s rule that **`(snippet_name) { ... }` must not sit inside*
 ```caddy
 import security_headers
 import spa
+
 @config path /config.json
 import no_cache @config
+
 handle /api/* {
-	import proxy_defaults
+  reverse_proxy localhost:8080
+}
+
+handle /other/* {
+  reverse_proxy backend:9090
+}
+
+handle /ws/* {
+  reverse_proxy localhost:8081
 }
 ```
 
@@ -145,9 +155,9 @@ Order your own `*.caddy` files with numeric prefixes if needed (`10-front.caddy`
 
 ```caddy
 (my_api) {
-	handle /v1/* {
-		reverse_proxy {$API_UPSTREAM:localhost:3000}
-	}
+handle /v1/* {
+  reverse_proxy {$API_UPSTREAM:localhost:3000}
+}
 }
 ```
 
@@ -162,11 +172,8 @@ Then in **`CONFIG_DIR`**: `import my_api`.
 | `cache_static.caddy` | `cache_static` | Long cache for common static extensions and `/assets/*` |
 | `no_cache.caddy` | `no_cache` | No-cache headers on **`{args[0]}`** (pass a matcher, e.g. `import no_cache @config`) |
 | `cors.caddy` | `cors_default` | CORS headers + `OPTIONS` → `204`; `{$CORS_ALLOW_ORIGIN:*}` |
-| `reverse_proxy.caddy` | `proxy_defaults` | Upstream `{$UPSTREAM:localhost:8080}`, forwarded headers, HTTP transport timeouts |
-| `websocket.caddy` | `websocket_proxy` | `reverse_proxy` for `{$WS_UPSTREAM:localhost:8081}` |
 | `logging_json.caddy` | `logging_json` | Access log to stdout as JSON |
 | `rate_limit.caddy` | `rate_limit_api` | Example **`rate_limit`** zone — see [Rate limiting](#rate-limiting) |
-| `trusted_proxies.caddy` | — | Comments only; use **`SERVERS_DIR`** for `servers { trusted_proxies ... }` |
 
 ### Rate limiting
 

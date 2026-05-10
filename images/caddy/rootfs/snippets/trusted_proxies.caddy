@@ -1,6 +1,0 @@
-# trusted_proxies belongs in the global options block, not inside a site.
-# Add a fragment under SERVERS_DIR (e.g. servers.d/10-trusted-proxies.caddy):
-#
-# servers {
-# 	trusted_proxies static private_ranges
-# }
