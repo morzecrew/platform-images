@@ -6,7 +6,7 @@ function "tag" {
 # ....................... #
 
 variable "FLYWAY_VERSION" {
-  default = "12.6"
+  default = "12.6.2"
 }
 
 target "flyway" {
@@ -23,7 +23,7 @@ target "flyway" {
 # ....................... #
 
 variable "CADDY_VERSION" {
-  default = "2.11.2"
+  default = "2.11.3"
 }
 
 target "caddy" {
@@ -34,14 +34,14 @@ target "caddy" {
     CADDY_VERSION        = CADDY_VERSION
     CORAZA_CADDY_VERSION = "v2.5.0" # pin manually to avoid drift
     CRS_VERSION          = "v4.26.0" # pin manually to avoid drift
-    MHOLT_RL_SHA         = "b8d8c9a9d99ee352d675cbbe416ec2b489fc8cab" # pin manually to avoid drift
+    MHOLT_RL_SHA         = "16aecbbcb8ca07dc1c671e263379606ff9493c55" # pin manually to avoid drift
   }
 }
 
 # ....................... #
 
 variable "POSTGRES_VERSION" {
-  default = "18.3"
+  default = "18.4"
 }
 
 target "postgres" {
