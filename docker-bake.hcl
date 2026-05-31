@@ -6,7 +6,7 @@ function "tag" {
 # ....................... #
 
 variable "FLYWAY_VERSION" {
-  default = "12.6.2"
+  default = "12.7"
 }
 
 target "flyway" {
