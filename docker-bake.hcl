@@ -62,6 +62,7 @@ target "postgres" {
 
 # ....................... #
 
+# renovate: datasource=docker depName=ghcr.io/astral-sh/uv extractVersion=^python(?<version>.+)-trixie$
 variable "BUILDER_PYTHON_VERSION" {
   default = "3.14"
 }
@@ -82,6 +83,7 @@ target "uv-builder" {
 
 # ....................... #
 
+# renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
 variable "DISTROLESS_PYTHON_VERSION" {
   default = "3.14.5"
 }
