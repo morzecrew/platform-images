@@ -1,0 +1,35 @@
+name: Bake Images (build only)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - docker-bake.hcl
+      - images/**
+      - justfile
+      - .github/workflows/bake.yml
+      - "!images/**/README.md"
+      - "!README.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bake-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Bake images
+        run: just bake
