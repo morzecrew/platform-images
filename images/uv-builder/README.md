@@ -1,10 +1,16 @@
-# uv-builder
+# uv-builder images
 
 Build-stage image for Python applications managed with **[uv](https://docs.astral.sh/uv/)**. Based on Astral’s official `ghcr.io/astral-sh/uv:python*` images, with a small Debian layer (`bash`, `binutils`, `findutils`, `ca-certificates`) and a **`build-uv-app`** helper script for reproducible, slimmer venvs.
 
-Use this image in a **multi-stage** Dockerfile: mount or copy your project into `/app`, run `build-uv-app`, then copy `/opt/venv` (and your app if needed) into a minimal runtime image such as [`python-distroless`](../python-distroless).
+## Contents
 
-## Building the image
+**Tag `3.14`** — `uv` on `ghcr.io/astral-sh/uv:python3.14-trixie`, with **`build-uv-app`** (`rootfs/build.sh`) for sync → wheel → slim venv.
+
+Use in a **multi-stage** Dockerfile: mount or copy your project into `/app`, run `build-uv-app`, then copy `/opt/venv` (and your app if needed) into a minimal runtime image such as [`python-distroless`](../python-distroless).
+
+`BUILDER_PYTHON_VERSION` and `BUILDER_DEBIAN_SUITE` in [`docker-bake.hcl`](../../docker-bake.hcl) set the registry tag and map to `PYTHON_VERSION` / `DEBIAN_SUITE` in [`Dockerfile`](./Dockerfile).
+
+## Building
 
 From the repo root (see [images/README.md](../README.md)):
 
@@ -12,9 +18,9 @@ From the repo root (see [images/README.md](../README.md)):
 just bake uv-builder
 ```
 
-Published tag: `ghcr.io/morzecrew/uv-builder:<PYTHON_VERSION>` (see [`docker-bake.hcl`](../../docker-bake.hcl); defaults align `PYTHON_VERSION` and `DEBIAN_SUITE` with the upstream uv base).
+Image: `ghcr.io/morzecrew/uv-builder:3.14`.
 
-## Using `build-uv-app`
+## `build-uv-app`
 
 Entrypoint script: **`/usr/local/bin/build-uv-app`** (`rootfs/build.sh`). It assumes:
 

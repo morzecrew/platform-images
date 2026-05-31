@@ -4,12 +4,12 @@
 
 ## Contents
 
-**Tag `12.5`** — extends `flyway/flyway:12.5-alpine` with pinned drivers:
+**Tag `12.7`** — extends `flyway/flyway:12.7-alpine` with pinned drivers:
 
 - PostgreSQL JDBC (42.7.11) under `/flyway/drivers/`
 - ClickHouse JDBC (0.9.8, `*-all.jar`) under `/flyway/drivers/`
 
-`FLYWAY_VERSION` and driver versions are **build args** in [`Dockerfile`](./Dockerfile), defaults aligned with bake.
+`FLYWAY_VERSION` and driver versions are **build args** in [`Dockerfile`](./Dockerfile) and [`docker-bake.hcl`](../../docker-bake.hcl).
 
 ## Building
 
@@ -21,7 +21,7 @@ From the repo root (see [images/README.md](../README.md)):
 just bake flyway
 ```
 
-Image: `ghcr.io/morzecrew/flyway:12.5`.
+Image: `ghcr.io/morzecrew/flyway:12.7`.
 
 ## Layout
 

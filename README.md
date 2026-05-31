@@ -16,7 +16,7 @@ From the **repo root**. Requires [just](https://github.com/casey/just) and [Dock
 just bake                 # all images (default group)
 just bake postgres        # single image
 just publish              # build + push everything (uses gh auth)
-just push postgres 18
+just push postgres 18.4
 just push uv-builder 3.14
 ```
 
@@ -30,7 +30,7 @@ docker buildx bake -f docker-bake.hcl --push
 
 Pushing uses `gh auth token` for registry login to `ghcr.io`.
 
-**Tags** are short version identifiers where it fits (`postgres:18`, `caddy:2.11`, `flyway:12.5`, `uv-builder:3.14`, `python-distroless:3.14`). The image name carries *what* is inside; bake variables set both the tag and matching build-args (Bake cannot read Dockerfile `ARG` defaults for tags—you wire both from the same `variable` blocks in [`docker-bake.hcl`](./docker-bake.hcl)). For `python-distroless`, **`PYTHON_VERSION` in bake must match an existing `al3xos/python-distroless` tag** (`${PYTHON_VERSION}-debian${DISTROLESS_DEBIAN_VERSION}`), and the same value becomes your GHCR tag. Docker Hub often uses full `x.y.z` for `PYTHON_VERSION`; bump it in bake whenever the upstream tag you need changes.
+**Tags** follow bake defaults (e.g. `postgres:18.4`, `caddy:2.11.3`, `flyway:12.7`, `uv-builder:3.14`, `python-distroless:3.14.5`). The image name carries *what* is inside; bake variables set both the tag and matching build-args (Bake cannot read Dockerfile `ARG` defaults for tags—you wire both from the same `variable` blocks in [`docker-bake.hcl`](./docker-bake.hcl)). For `python-distroless`, **`DISTROLESS_PYTHON_VERSION` must match an existing `al3xos/python-distroless` tag** (`${PYTHON_VERSION}-debian${DISTROLESS_DEBIAN_VERSION}`), and the same value becomes your GHCR tag. Bump it in bake whenever the upstream tag you need changes.
 
 ## Images
 

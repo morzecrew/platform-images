@@ -4,12 +4,13 @@ Custom PostgreSQL Docker images for the Morze platform. Based on official `postg
 
 ## Contents
 
-- **PostgreSQL 18** (tag `18`) with:
-  - [pg_cron](https://github.com/citusdata/pg_cron) — cron-style job scheduling inside Postgres
-  - [pgroonga](https://pgroonga.github.io/) — full-text search via Groonga
+**Tag `18.4`** — extends official `postgres:18.4` with:
+
+- [pg_cron](https://github.com/citusdata/pg_cron) — cron-style job scheduling inside Postgres
+- [pgroonga](https://pgroonga.github.io/) — full-text search via Groonga
 - Base config in the image (`rootfs/postgresql.conf`) plus **allowlist-based overrides** via environment variables.
 
-`PG_MAJOR` drives the registry tag; `POSTGRES_IMAGE_TAG` pins the upstream `postgres` image (e.g. `18.1`). Both are **build args** in [`docker-bake.hcl`](../../docker-bake.hcl) and [`Dockerfile`](./Dockerfile).
+`POSTGRES_VERSION` in [`docker-bake.hcl`](../../docker-bake.hcl) sets the registry tag and `POSTGRES_IMAGE_TAG` in [`Dockerfile`](./Dockerfile).
 
 ## Building
 
@@ -19,7 +20,7 @@ From the repo root (see [images/README.md](../README.md)):
 just bake postgres
 ```
 
-Image: `ghcr.io/morzecrew/postgres:18`.
+Image: `ghcr.io/morzecrew/postgres:18.4`.
 
 ## Configuration overrides
 

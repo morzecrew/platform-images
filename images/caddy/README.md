@@ -4,7 +4,8 @@ Custom Caddy Docker images for the Morze platform. Based on official `caddy` wit
 
 ## Contents
 
-- **Tag `2.11`** — Caddy built with [coraza-caddy](https://github.com/corazawaf/coraza-caddy), CRS rules under `/opt/coraza/`, and a small **platform Caddyfile** (`rootfs/Caddyfile`).
+**Tag `2.11.3`** — Caddy built with [coraza-caddy](https://github.com/corazawaf/coraza-caddy), CRS rules under `/opt/coraza/`, and a small **platform Caddyfile** (`rootfs/Caddyfile`).
+
 - **Runtime injection** — site fragments as `*.caddy` under **`CONFIG_DIR`** (default **`/etc/caddy/config.d`**), plus optional **global options** fragments under **`SERVERS_DIR`** (default **`/etc/caddy/servers.d`**) merged into the top-level `{ }` block (see below).
 - **Named snippets** — bundled patterns under **`BUILTIN_SNIPPETS_DIR`** (default **`/etc/caddy/snippets`**) are **`import`ed at top level** in the base Caddyfile, so from **`CONFIG_DIR`** you can compose the app with e.g. `import spa` and `import security_headers`. Add your own **`(name) { }`** definitions as `*.caddy` under **`SNIPPET_DEFS_DIR`** (default **`/etc/caddy/snippet_defs.d`**); see [Snippets](#snippets-composable-patterns).
 - **Health** — `GET {$HEALTH_PATH}` (default **`/__platform_healthz`**) → `200` with body `ok`. The base Caddyfile handles this **first** (before `request_body`, Coraza, and **`CONFIG_DIR`** imports) so probes stay cheap and predictable; override with **`HEALTH_PATH`**.
@@ -19,7 +20,7 @@ From the repo root (see [images/README.md](../README.md)):
 just bake caddy
 ```
 
-Image: `ghcr.io/morzecrew/caddy:2.11`.
+Image: `ghcr.io/morzecrew/caddy:2.11.3`.
 
 ## Process and layout
 
@@ -177,7 +178,7 @@ Then in **`CONFIG_DIR`**: `import my_api`.
 
 ### Rate limiting
 
-The binary includes **[mholt/caddy-ratelimit](https://github.com/mholt/caddy-ratelimit)** via **`xcaddy build`**. The Git commit is pinned with Docker build-arg **`MHOLT_RL_SHA`** (default **`b8d8c9a9d99ee352d675cbbe416ec2b489fc8cab`**), mirrored by **`MHOLT_RL_SHA`** in **[`docker-bake.hcl`](../../docker-bake.hcl)** so Bake and `docker build` stay aligned.
+The binary includes **[mholt/caddy-ratelimit](https://github.com/mholt/caddy-ratelimit)** via **`xcaddy build`**. The Git commit is pinned with Docker build-arg **`MHOLT_RL_SHA`** (default **`16aecbbcb8ca07dc1c671e263379606ff9493c55`**), mirrored by **`MHOLT_RL_SHA`** in **[`docker-bake.hcl`](../../docker-bake.hcl)** so Bake and `docker build` stay aligned.
 
 **Global directive order** in `rootfs/Caddyfile` is **`order coraza_waf after rate_limit`**, so **`rate_limit` runs before Coraza** when you add zones under **`CONFIG_DIR`**. (Using **`order rate_limit before coraza_waf`** fails Caddyfile parsing for this directive pair in current Caddy — prefer **`coraza_waf after rate_limit`**.)
 
@@ -185,7 +186,7 @@ Use the module’s Caddyfile syntax (`rate_limit { zone ... { key, events, windo
 
 **Check:** `caddy list-modules` should list **`http.handlers.rate_limit`** (use **`docker run --entrypoint caddy … list-modules`** if your entrypoint runs validation first).
 
-## Files in this directory
+## Layout
 
 - `Dockerfile` — multi-stage Coraza + CRS build, **`xcaddy`** with Coraza + **mholt/caddy-ratelimit** (`MHOLT_RL_SHA`), optional **`caddy` user** + ownership, **`HEALTH_PATH`**, **`CONFIG_DIR`** / **`SERVERS_DIR`** / **`snippet_defs.d`**
 - `rootfs/Caddyfile` — global `{ }` (`AUTO_HTTPS`, **`order coraza_waf after rate_limit`**, **`import {$SERVERS_DIR}/*.caddy`**) + top-level **`import {$BUILTIN_SNIPPETS_DIR}/*.caddy`** + **`import {$SNIPPET_DEFS_DIR}/*.caddy`** + templated site + **`HEALTH_PATH`** handle (first) + **`import {$CONFIG_DIR}/*.caddy`** + fallback
