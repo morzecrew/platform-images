@@ -62,34 +62,40 @@ target "postgres" {
 
 # ....................... #
 
-variable "PYTHON_VERSION" {
+variable "BUILDER_PYTHON_VERSION" {
   default = "3.14"
 }
 
-variable "DEBIAN_SUITE" {
+variable "BUILDER_DEBIAN_SUITE" {
   default = "trixie"
+}
+
+target "uv-builder" {
+  context    = "./images/uv-builder"
+  dockerfile = "Dockerfile"
+  tags       = tag("uv-builder", BUILDER_PYTHON_VERSION)
+  args = {
+    PYTHON_VERSION = BUILDER_PYTHON_VERSION
+    DEBIAN_SUITE   = BUILDER_DEBIAN_SUITE
+  }
+}
+
+# ....................... #
+
+variable "DISTROLESS_PYTHON_VERSION" {
+  default = "3.14.5"
 }
 
 variable "DISTROLESS_DEBIAN_VERSION" {
   default = "13"
 }
 
-target "uv-builder" {
-  context    = "./images/uv-builder"
-  dockerfile = "Dockerfile"
-  tags       = tag("uv-builder", PYTHON_VERSION)
-  args = {
-    PYTHON_VERSION = PYTHON_VERSION
-    DEBIAN_SUITE   = DEBIAN_SUITE
-  }
-}
-
 target "python-distroless" {
   context    = "./images/python-distroless"
   dockerfile = "Dockerfile"
-  tags       = tag("python-distroless", PYTHON_VERSION)
+  tags       = tag("python-distroless", DISTROLESS_PYTHON_VERSION)
   args = {
-    PYTHON_VERSION = PYTHON_VERSION
+    PYTHON_VERSION = DISTROLESS_PYTHON_VERSION
     DEBIAN_VERSION = DISTROLESS_DEBIAN_VERSION
   }
 }

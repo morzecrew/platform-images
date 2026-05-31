@@ -7,6 +7,23 @@
     ],
     "prHourlyLimit": 2,
     "prConcurrentLimit": 5,
+    "packageRules": [
+        {
+            "matchManagers": [
+                "dockerfile"
+            ],
+            "enabled": false
+        },
+        {
+            "matchManagers": [
+                "dockerfile"
+            ],
+            "matchPackageNames": [
+                "docker/dockerfile"
+            ],
+            "enabled": true
+        }
+    ],
     "customManagers": [
         {
             "customType": "regex",
