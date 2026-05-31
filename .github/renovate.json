@@ -1,0 +1,24 @@
+{
+    "extends": [
+        "config:recommended"
+    ],
+    "labels": [
+        "dependencies"
+    ],
+    "prHourlyLimit": 2,
+    "prConcurrentLimit": 5,
+    "customManagers": [
+        {
+            "customType": "regex",
+            "description": "Update annotated versions in docker-bake.hcl",
+            "managerFilePatterns": [
+                "/(^|/)docker-bake\\.hcl$/"
+            ],
+            "matchStrings": [
+                "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+variable \"[^\"]+\" \\{\\s+default = \"(?<currentValue>[^\"]+)\"",
+                "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+[A-Z0-9_]+\\s*=\\s*\"(?<currentValue>[^\"]+)\""
+            ],
+            "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver-coerced{{/if}}"
+        }
+    ]
+}

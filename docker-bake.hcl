@@ -5,6 +5,7 @@ function "tag" {
 
 # ....................... #
 
+# renovate: datasource=docker depName=flyway/flyway versioning=docker
 variable "FLYWAY_VERSION" {
   default = "12.7"
 }
@@ -15,13 +16,16 @@ target "flyway" {
   tags       = tag("flyway", FLYWAY_VERSION)
   args = {
     FLYWAY_VERSION          = FLYWAY_VERSION
-    POSTGRES_JDBC_VERSION   = "42.7.11" # pin manually to avoid drift
-    CLICKHOUSE_JDBC_VERSION = "0.9.8" # pin manually to avoid drift
+    # renovate: datasource=maven depName=org.postgresql:postgresql
+    POSTGRES_JDBC_VERSION   = "42.7.11"
+    # renovate: datasource=maven depName=com.clickhouse:clickhouse-jdbc
+    CLICKHOUSE_JDBC_VERSION = "0.9.8"
   }
 }
 
 # ....................... #
 
+# renovate: datasource=docker depName=caddy versioning=docker
 variable "CADDY_VERSION" {
   default = "2.11.3"
 }
@@ -32,14 +36,17 @@ target "caddy" {
   tags       = tag("caddy", CADDY_VERSION)
   args = {
     CADDY_VERSION        = CADDY_VERSION
-    CORAZA_CADDY_VERSION = "v2.5.0" # pin manually to avoid drift
-    CRS_VERSION          = "v4.26.0" # pin manually to avoid drift
-    MHOLT_RL_SHA         = "16aecbbcb8ca07dc1c671e263379606ff9493c55" # pin manually to avoid drift
+    # renovate: datasource=github-releases depName=corazawaf/coraza-caddy
+    CORAZA_CADDY_VERSION = "v2.5.0"
+    # renovate: datasource=github-releases depName=coreruleset/coreruleset
+    CRS_VERSION          = "v4.26.0"
+    MHOLT_RL_SHA         = "16aecbbcb8ca07dc1c671e263379606ff9493c55"
   }
 }
 
 # ....................... #
 
+# renovate: datasource=docker depName=postgres versioning=docker
 variable "POSTGRES_VERSION" {
   default = "18.4"
 }
