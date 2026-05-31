@@ -1,3 +1,7 @@
+# syntax=docker/dockerfile:1.24
+
+# ....................... #
+
 ARG FLYWAY_VERSION=12.5
 FROM flyway/flyway:${FLYWAY_VERSION}-alpine
 

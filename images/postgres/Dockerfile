@@ -1,3 +1,7 @@
+# syntax=docker/dockerfile:1.24
+
+# ....................... #
+
 ARG POSTGRES_IMAGE_TAG=18.1
 
 FROM postgres:${POSTGRES_IMAGE_TAG}
