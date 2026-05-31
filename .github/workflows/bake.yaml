@@ -10,6 +10,8 @@ on:
       - .github/workflows/bake.yml
       - "!images/**/README.md"
       - "!README.md"
+  
+  workflow_dispatch:
 
 permissions:
   contents: read
