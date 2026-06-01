@@ -1,6 +1,6 @@
 # Morze :: Platform Images
 
-Docker image definitions for the Morze platform. This repo holds Dockerfiles and config used to build and publish images to [ghcr.io/morzecrew](https://ghcr.io/morzecrew).
+Docker definitions for сommon platform images. This repo holds Dockerfiles and config used to build and publish images to [ghcr.io/morzecrew](https://ghcr.io/morzecrew).
 
 ## Layout
 
@@ -20,17 +20,9 @@ just push postgres 18.4
 just push uv-builder 3.14
 ```
 
-Equivalent without `just`:
-
-```bash
-docker buildx bake -f docker-bake.hcl
-docker buildx bake -f docker-bake.hcl postgres
-docker buildx bake -f docker-bake.hcl --push
-```
-
 Pushing uses `gh auth token` for registry login to `ghcr.io`.
 
-**Tags** follow bake defaults (e.g. `postgres:18.4`, `caddy:2.11.3`, `flyway:12.7`, `uv-builder:3.14`, `python-distroless:3.14.5`). The image name carries *what* is inside; bake variables set both the tag and matching build-args (Bake cannot read Dockerfile `ARG` defaults for tags—you wire both from the same `variable` blocks in [`docker-bake.hcl`](./docker-bake.hcl)). For `python-distroless`, **`DISTROLESS_PYTHON_VERSION` must match an existing `al3xos/python-distroless` tag** (`${PYTHON_VERSION}-debian${DISTROLESS_DEBIAN_VERSION}`), and the same value becomes your GHCR tag. Bump it in bake whenever the upstream tag you need changes.
+Tags follow bake defaults. The image name carries what is inside; bake variables set both the tag and matching build-args.
 
 ## Images
 
@@ -41,5 +33,3 @@ Pushing uses `gh auth token` for registry login to `ghcr.io`.
 | [flyway](./images/flyway) | Flyway with essential JDBC drivers, pinned versions. |
 | [uv-builder](./images/uv-builder) | uv-based Python build stage: sync, wheel, slim venv (`build-uv-app`). |
 | [python-distroless](./images/python-distroless) | Distroless Python runtime with libmagic and CA bundle for small final images. |
-
-Each image README documents usage; platform services focus on runtime env, builder/runtime pair on multi-stage workflows.
