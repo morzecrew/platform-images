@@ -39,7 +39,7 @@ target "caddy" {
     # renovate: datasource=github-releases depName=corazawaf/coraza-caddy
     CORAZA_CADDY_VERSION = "v2.5.0"
     # renovate: datasource=github-releases depName=coreruleset/coreruleset
-    CRS_VERSION          = "v4.26.0"
+    CRS_VERSION          = "v4.27.0"
     MHOLT_RL_SHA         = "16aecbbcb8ca07dc1c671e263379606ff9493c55"
   }
 }
