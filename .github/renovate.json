@@ -8,6 +8,9 @@
     "prHourlyLimit": 2,
     "prConcurrentLimit": 5,
     "dependencyDashboard": true,
+    "automerge": true,
+    "platformAutomerge": true,
+    "automergeType": "pr",
     "packageRules": [
         {
             "matchManagers": [
