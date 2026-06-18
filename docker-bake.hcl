@@ -7,7 +7,7 @@ function "tag" {
 
 # renovate: datasource=docker depName=flyway/flyway versioning=docker
 variable "FLYWAY_VERSION" {
-  default = "12.8"
+  default = "12.9"
 }
 
 target "flyway" {
