@@ -17,7 +17,7 @@ target "flyway" {
   args = {
     FLYWAY_VERSION          = FLYWAY_VERSION
     # renovate: datasource=maven depName=org.postgresql:postgresql
-    POSTGRES_JDBC_VERSION   = "42.7.12"
+    POSTGRES_JDBC_VERSION   = "42.7.13"
     # renovate: datasource=maven depName=com.clickhouse:clickhouse-jdbc
     CLICKHOUSE_JDBC_VERSION = "0.9.8"
   }
