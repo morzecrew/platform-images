@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.25
+# syntax=docker/dockerfile:1.26
 
 ARG PYTHON_VERSION=3.14.3
 ARG DEBIAN_VERSION=13
