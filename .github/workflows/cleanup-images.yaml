@@ -16,9 +16,8 @@ on:
         type: string
         default: ""
 
-  # Uncomment once a manual run looks right.
-  # schedule:
-  #   - cron: "0 4 * * 1"
+  schedule:
+    - cron: "0 4 * * 1"
 
 # All registry access uses GHCR_CLEANUP_TOKEN; GITHUB_TOKEN needs nothing here.
 permissions: {}
