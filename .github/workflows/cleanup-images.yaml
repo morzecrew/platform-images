@@ -20,8 +20,8 @@ on:
   # schedule:
   #   - cron: "0 4 * * 1"
 
-permissions:
-  packages: write
+# All registry access uses GHCR_CLEANUP_TOKEN; GITHUB_TOKEN needs nothing here.
+permissions: {}
 
 concurrency:
   group: cleanup-images
@@ -37,13 +37,28 @@ jobs:
     name: Cleanup Untagged Images
 
     steps:
+      # Deleting versions of an org-owned package is only allowed for a classic PAT
+      # with read:packages + delete:packages. GITHUB_TOKEN and fine-grained tokens
+      # get 404 on every DELETE, which the cleanup action reports as "already
+      # deleted" -- a green run that removed nothing. Fail up front instead.
+      - name: Verify token can delete packages
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_CLEANUP_TOKEN }}
+        run: |
+          scopes=$(gh api -i /user 2>/dev/null | tr -d '\r' | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes: //p')
+          echo "Token scopes: ${scopes:-<none>}"
+          case ",${scopes// /}," in
+            *,delete:packages,*) ;;
+            *) echo "::error::GHCR_CLEANUP_TOKEN must be a classic PAT with read:packages + delete:packages"; exit 1 ;;
+          esac
+
       # Untagged versions are not junk by default: buildx pushes an OCI index per
       # tag whose platform manifest and provenance attestation both show up as
       # untagged. This action resolves those children and keeps them.
       - name: Delete untagged versions
         uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GHCR_CLEANUP_TOKEN }}
           owner: ${{ github.repository_owner }}
           packages: ${{ inputs.packages || env.PACKAGES }}
           delete-untagged: true
