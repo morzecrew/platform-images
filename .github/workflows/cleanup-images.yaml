@@ -1,0 +1,54 @@
+name: Cleanup Untagged Images
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Only report what would be deleted
+        type: boolean
+        default: true
+      packages:
+        description: Comma-separated package names (empty = every target in docker-bake.hcl)
+        type: string
+        default: ""
+      older_than:
+        description: 'Only touch versions older than this, e.g. "30 days" (empty = any age)'
+        type: string
+        default: ""
+
+  # Uncomment once a manual run looks right.
+  # schedule:
+  #   - cron: "0 4 * * 1"
+
+permissions:
+  packages: write
+
+concurrency:
+  group: cleanup-images
+  cancel-in-progress: false
+
+env:
+  # Targets of docker-bake.hcl; keep in sync when adding an image.
+  PACKAGES: flyway,caddy,postgres,uv-builder,python-distroless
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    name: Cleanup Untagged Images
+
+    steps:
+      # Untagged versions are not junk by default: buildx pushes an OCI index per
+      # tag whose platform manifest and provenance attestation both show up as
+      # untagged. This action resolves those children and keeps them.
+      - name: Delete untagged versions
+        uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          owner: ${{ github.repository_owner }}
+          packages: ${{ inputs.packages || env.PACKAGES }}
+          delete-untagged: true
+          delete-orphaned-images: true
+          older-than: ${{ inputs.older_than }}
+          validate: true
+          # Empty on a scheduled run, which is the point: cron deletes for real.
+          dry-run: ${{ inputs.dry_run || false }}
