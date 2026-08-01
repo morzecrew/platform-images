@@ -85,7 +85,7 @@ target "uv-builder" {
 
 # renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
 variable "DISTROLESS_PYTHON_VERSION" {
-  default = "3.14.5"
+  default = "3.14.6"
 }
 
 variable "DISTROLESS_DEBIAN_VERSION" {

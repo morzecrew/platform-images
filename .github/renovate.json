@@ -31,13 +31,13 @@
     "customManagers": [
         {
             "customType": "regex",
-            "description": "Update annotated versions in docker-bake.hcl",
+            "description": "Update annotated versions in docker-bake.hcl. Annotation order is datasource, depName, then the optional versioning and extractVersion, in that order.",
             "managerFilePatterns": [
                 "/(^|/)docker-bake\\.hcl$/"
             ],
             "matchStrings": [
-                "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+variable \"[^\"]+\" \\{\\s+default = \"(?<currentValue>[^\"]+)\"",
-                "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s+[A-Z0-9_]+\\s*=\\s*\"(?<currentValue>[^\"]+)\""
+                "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?:\\s+versioning=(?<versioning>\\S+))?(?:\\s+extractVersion=(?<extractVersion>\\S+))?\\s+variable \"[^\"]+\" \\{\\s+default = \"(?<currentValue>[^\"]+)\"",
+                "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?:\\s+versioning=(?<versioning>\\S+))?(?:\\s+extractVersion=(?<extractVersion>\\S+))?\\s+[A-Z0-9_]+\\s*=\\s*\"(?<currentValue>[^\"]+)\""
             ],
             "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver-coerced{{/if}}"
         }
