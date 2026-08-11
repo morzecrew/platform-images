@@ -1,8 +1,11 @@
 # RFC 0005 — OpenTelemetry Collector image
 
 - **Status:** 📝 Draft — **gated**, not scheduled. See §gate.
-- **Gate:** A collector is already hand-configured in **two or more** projects, or
-  will be within the quarter — RFC 0003's admission bar, applied. If observability
+- **Gate:** A collector is **already** hand-configured in two or more projects —
+  RFC 0003's admission bar, applied unchanged. Intent within the quarter does not
+  count: RFC 0003 §4.1 rejects anticipated reuse by name, because that is the
+  failure mode the bar exists to catch, and an exception written into the first
+  image to invoke the rule is not an exception, it is a repeal. If observability
   currently means "logs to stdout and hope", this image is speculative
   infrastructure and the gate is unmet.
 - **Scope:** An `otelcol-contrib`-based image carrying a default pipeline whose
@@ -106,16 +109,18 @@ receivers:
 processors:
   memory_limiter:
     check_interval: 1s
-    limit_mib: ${env:OTEL_MEMORY_LIMIT_MIB}
+    limit_mib: ${env:OTEL_MEMORY_LIMIT_MIB:-512}
   batch:
-    timeout: ${env:OTEL_BATCH_TIMEOUT}
+    timeout: ${env:OTEL_BATCH_TIMEOUT:-5s}
   resourcedetection:
     detectors: [env, system]
 
 exporters:
+  debug:
+    verbosity: ${env:OTEL_DEBUG_VERBOSITY:-basic}
   otlp:
-    endpoint: ${env:OTEL_EXPORTER_OTLP_ENDPOINT}
-    headers: ${env:OTEL_EXPORTER_OTLP_HEADERS}
+    endpoint: ${env:OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    headers: ${env:OTEL_EXPORTER_OTLP_HEADERS:-}
 
 extensions:
   health_check:
@@ -124,30 +129,56 @@ extensions:
 service:
   extensions: [health_check]
   pipelines:
-    traces:  { receivers: [otlp], processors: [memory_limiter, batch, resourcedetection], exporters: [otlp] }
-    metrics: { receivers: [otlp], processors: [memory_limiter, batch, resourcedetection], exporters: [otlp] }
-    logs:    { receivers: [otlp], processors: [memory_limiter, batch, resourcedetection], exporters: [otlp] }
+    # exporters: rewritten per signal by the selected exporter fragment, §5.2
+    traces:  { receivers: [otlp], processors: [memory_limiter, batch, resourcedetection], exporters: [debug] }
+    metrics: { receivers: [otlp], processors: [memory_limiter, batch, resourcedetection], exporters: [debug] }
+    logs:    { receivers: [otlp], processors: [memory_limiter, batch, resourcedetection], exporters: [debug] }
 ```
 
 `memory_limiter` first in every chain and `health_check` on by default — the
 alternative to the second is a container reported "up" while its pipeline is
 broken.
 
+**Every value has a default, because `${env:VAR}` on an unset variable expands
+to empty, not to "leave it alone".** A bare `limit_mib: ${env:OTEL_MEMORY_LIMIT_MIB}`
+therefore yields an invalid config on a container started with no environment at
+all — the exact case §6's first test exercises. So each reference carries a
+`:-default`, and the zero-configuration pipeline exports to `debug`: an endpoint
+this image cannot know must not be the default, and a collector that starts and
+visibly discards is a better default than one that refuses to start or silently
+retries against an empty endpoint.
+
 Ports 4317, 4318 and 13133 are all above 1024, so the image is rootless-clean by
 construction (RFC 0002 §5.5).
 
 ### 5.2 Exporter selection
 
-`OTEL_EXPORTER` takes `otlp`, `debug`, `prometheus`, or a comma-separated list.
-Selection is by config-file switching, not config surgery: the image ships one
-small file per exporter and the Collector is invoked with the base config plus
-the selected exporter files, relying on its own multi-`--config` merge.
+`OTEL_EXPORTER` selects per signal, not globally. `OTEL_EXPORTER=otlp` is
+shorthand for all three; `OTEL_EXPORTER_TRACES`, `_METRICS` and `_LOGS` override
+one each. Default: `debug` everywhere (§5.1).
 
-The `${env:}` mechanism cannot express "include this exporter conditionally" —
-it substitutes values, not structure — so exporter *selection* is the one place
-that needs something outside the config language. Choosing between multiple
-`--config` arguments is the smallest such thing, and it is a mechanism the
-Collector already has.
+**Two things make a naive design wrong here**, and both were nearly missed:
+
+1. **Defining an exporter does not select it.** The base pipelines name their
+   exporters explicitly, so an additional `--config` fragment that merely adds a
+   `prometheus:` block under `exporters:` changes nothing — the pipeline still
+   references what it referenced. Each shipped fragment must therefore rewrite
+   `service.pipelines.<signal>.exporters` as well as define the exporter. That
+   this list is a *sequence*, and sequences replace on merge (§5.3), is what makes
+   the rewrite work at all — the same rule that makes overlays dangerous is the
+   one selection depends on. Every fragment consequently restates the full
+   `processors` list including `memory_limiter`; a fragment that omits it is the
+   §5.3 failure, shipped by us rather than by a user.
+2. **`prometheus` is metrics-only.** A global `OTEL_EXPORTER=prometheus` cannot
+   be satisfied for traces and logs. The entrypoint refuses a signal/exporter
+   pair the exporter does not support, naming both, rather than starting with two
+   silently dead pipelines.
+
+The image ships one fragment per (exporter, signal) pair it supports, and the
+entrypoint composes `--config` arguments from the resolved selection. `${env:}`
+substitutes values, not structure, so selection is the one thing that lives
+outside the config language — and choosing between `--config` files is the
+smallest mechanism that does it, using only what the Collector already has.
 
 ### 5.3 Config directory overlay
 
@@ -181,9 +212,12 @@ firmly.
 
 ### 5.4 Env surface, first cut
 
-`OTEL_EXPORTER`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`,
-`OTEL_MEMORY_LIMIT_MIB`, `OTEL_BATCH_TIMEOUT`, `OTEL_LOG_LEVEL`,
-`OTEL_PROMETHEUS_PORT`, `OTEL_SERVICE_NAME_OVERRIDE`, `CONFIG_DIR`.
+`OTEL_EXPORTER` (plus `OTEL_EXPORTER_TRACES` / `_METRICS` / `_LOGS`),
+`OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_HEADERS`,
+`OTEL_MEMORY_LIMIT_MIB`, `OTEL_BATCH_TIMEOUT`, `OTEL_DEBUG_VERBOSITY`,
+`OTEL_LOG_LEVEL`, `OTEL_PROMETHEUS_PORT`, `OTEL_SERVICE_NAME_OVERRIDE`,
+`CONFIG_DIR`. Every one has a default baked into the config's `${env:…:-…}`
+reference (§5.1), so the zero-configuration container is a valid one.
 
 Names reuse the upstream OTel SDK spec wherever it already defines one — a
 variable meaning something different here than in the SDK spec is a trap, since
@@ -226,15 +260,24 @@ by RFC 0002's smoke tests.
 
 Per RFC 0002 §5.5, under rootless Podman:
 
-- Starts with no configuration at all and reports healthy on `:13133`.
-- Accepts an OTLP span on 4317 and on 4318 and exports it to a `debug` exporter.
+- Starts with **no environment set at all** and reports healthy on `:13133`.
+  This is the test the `:-default` fallbacks exist for; without them the default
+  config is invalid and the container never reaches the health endpoint.
+- Accepts an OTLP span on 4317 and on 4318 and exports it to the default `debug`
+  exporter.
 - **Overlay merge:** a `CONFIG_DIR` fragment adding one receiver leaves the
   default pipeline intact; a fragment that redefines `traces.processors` is
   asserted against the memory-limit guarantee. This is the phase-2 test and the
   one whose result may change the design.
-- **Exporter matrix:** every selectable value of `OTEL_EXPORTER` starts. A
-  misconfigured exporter is a startup failure, not a warning, so an unexercised
-  exporter value is an untested failure path.
+- **Exporter matrix:** every selectable (exporter, signal) pair starts *and the
+  selected exporter is the one the pipeline references* — asserted by observing
+  output, not by reading config, since defining an exporter without referencing
+  it is precisely the bug (§5.2). A misconfigured exporter is a startup failure,
+  not a warning, so an unexercised pair is an untested failure path.
+- **Invalid pair refused:** `OTEL_EXPORTER=prometheus` exits non-zero naming
+  traces and logs, rather than starting with dead pipelines.
+- **Every shipped fragment keeps the limiter:** each (exporter, signal) fragment
+  is asserted to restate `memory_limiter` in its `processors` list.
 - `OTEL_MEMORY_LIMIT_MIB` at a small value causes refusal under load rather than
   an OOM kill.
 
@@ -306,6 +349,9 @@ Each of these is a measurement against the *pinned version*, not a judgement:
 | 6 | `OPEN` | Exporter selection by multiple `--config` files (§5.2) versus a single file with all exporters defined and only the selected ones referenced in the pipeline. The second is simpler and validates unused exporter blocks at startup, which may be a feature or a foot-gun. |
 | 7 | `ASSUMED` | No `OTEL_CONF__` passthrough channel; nested YAML does not flatten honestly. Depart if a real case appears that overlays cannot cover. |
 | 8 | `ASSUMED` | Upstream SDK-spec variable names are reused verbatim where they exist. Depart only where upstream's meaning genuinely differs here — and then rename ours, never theirs. |
+| 9 | `LOCKED` | Every `${env:}` reference in the shipped config carries a `:-default`, and the zero-configuration pipeline exports to `debug`. An unset variable expands to empty, so a bare reference makes the no-config container invalid — and no endpoint this image could guess is a safe default. |
+| 10 | `LOCKED` | Exporter selection is per signal, and a shipped fragment rewrites the pipeline's `exporters` sequence rather than only defining the exporter. Defining without referencing selects nothing. Consequence: every fragment restates `processors` including `memory_limiter`, so the fragments themselves are the most likely place decision 2 gets violated — hence the §6 assertion on each. |
+| 11 | `LOCKED` | A signal/exporter pair the exporter cannot serve (`prometheus` for traces or logs) is refused at startup naming both, not started with dead pipelines. |
 
 ## 12. Phasing
 
