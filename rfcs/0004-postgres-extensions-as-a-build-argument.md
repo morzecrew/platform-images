@@ -99,7 +99,8 @@ the variable. `label()` returns a fixed five-entry map for every target.
 - A second extension combination costs a bake target, not a directory.
 - The preload line cannot disagree with the installed set.
 - `docker inspect` answers what is installed, without pulling and running.
-- The default build produces today's image, byte-for-byte equivalent in content.
+- The default build reproduces today's image's **effective server state** — same
+  extensions, same effective settings, same preload order (§6 defines the test).
 
 **Non-goals**
 
@@ -125,12 +126,20 @@ none), snippet file (empty if none).
 # name : apt package (%M = PG major) : preload lib : conf snippet
 cron     : postgresql-%M-cron            : pg_cron   : cron.conf
 pgroonga : postgresql-%M-pgdg-pgroonga   :           :
-vector   : postgresql-%M-pgvector        :           :
 ```
 
-`pg_stat_statements` is not listed: it ships with the server, needs no package,
-and is preloaded unconditionally. It stays a constant in the generated preload
-line rather than becoming an optional entry nobody would ever deselect.
+**The manifest ships with exactly the two extensions the image installs today.**
+Every example below uses only those two. An unadmitted extension must not appear
+as a manifest row, because decision 4 makes manifest membership the definition of
+a valid `PG_EXTENSIONS` value — a `vector` row would advertise a build input
+whose packaging §10 records as unverified. pgvector and pgmq are added by the
+one-line change this RFC exists to make possible, each when it has a consumer and
+a verified package, not before.
+
+`pg_stat_statements` is not listed either, on different grounds: it ships with
+the server, needs no package, and is preloaded unconditionally. It stays a
+constant in the generated preload line rather than an optional entry nobody would
+deselect. §5.4 records what that means for the label.
 
 pgroonga's apt source (`groonga-apt-source-latest-${CODENAME}.deb`) is a
 prerequisite step, not a package, so it stays a conditional block in the
@@ -151,22 +160,43 @@ The build script, run in the existing `RUN` layer:
 2. Installs the resolved apt packages, adding the groonga source first when
    pgroonga is requested.
 3. Writes `/etc/postgresql/conf.d/10-extensions.conf`:
-   `shared_preload_libraries = 'pg_stat_statements,pg_cron'` — the preload
-   column of the selected rows, in manifest order, always including
-   `pg_stat_statements`.
+   `shared_preload_libraries = 'pg_cron,pg_stat_statements'` — the preload column
+   of the selected rows in manifest order, then the unconditional
+   `pg_stat_statements`. That ordering is not cosmetic: it reproduces today's
+   line exactly (§6).
 4. Copies each selected row's snippet into `/etc/postgresql/conf.d/`, so
    `cron.database_name` and friends arrive if and only if pg_cron does.
-5. Verifies each requested extension is visible to the server
-   (`SELECT * FROM pg_available_extensions`) before the layer is accepted.
+5. Verifies each selected row's extension **control file** exists —
+   `/usr/share/postgresql/<major>/extension/<sql name>.control` — and that each
+   preload library is present under the server's `pkglibdir`, before the layer is
+   accepted.
 
-Line 809 and lines 885–887 are removed from `rootfs/postgresql.conf`. The base
-config stops mentioning any extension; `conf.d/10-*.conf` becomes the only place
-extensions appear. Because `include_dir` sits at line 874, after everything, and
-the entrypoint's `99-overrides.conf` sorts after `10-extensions.conf`, precedence
-is unchanged: baked → extensions → mounted → env.
+**Step 5 is a filesystem check, not a SQL one.** Querying
+`pg_available_extensions` needs a running server, and the build has none: the
+image never runs `initdb`, so a SQL gate would mean standing up a temporary
+cluster, waiting for readiness, authenticating and tearing it down inside the
+`RUN` layer — machinery worth more than the check it performs. The control file
+is what the server itself reads to decide an extension is available, so testing
+for it answers the same question deterministically and in one `test -f`.
+
+It does need the logical→SQL name mapping (`cron` → `pg_cron`), which the
+manifest already implies and §5.4 makes explicit as a column.
 
 Step 5 is what makes the trap in §3 unreachable: an image whose preload line
 names an uninstalled library fails the build, not the deployment.
+
+**Removals from `rootfs/postgresql.conf`.** Four settings move out, not three:
+`shared_preload_libraries` (line 809), the three `cron.*` settings (885–887), and
+**`pg_stat_statements.max` / `.track` (890–891)**. The last pair matters more
+than it looks: `include_dir` is at line 874, and both sit *after* it, so today
+they override anything in `conf.d` — including the generated
+`10-extensions.conf` and the entrypoint's `99-overrides.conf`. Leaving them would
+make this RFC's precedence claim false for exactly the settings it generates.
+They move into the `pg_stat_statements` snippet alongside the preload constant.
+
+With those gone the base config stops mentioning any extension, and precedence
+holds as stated: baked → extensions (`10-*.conf`) → mounted (`NN-*.conf`) → env
+(`99-overrides.conf`).
 
 ### 5.3 Bake targets and tags
 
@@ -183,19 +213,26 @@ target "postgres" {
   }
 }
 
-target "postgres-queue" {
+# Shape of a future variant. Not shipped by P1, and not addable until its
+# extension has both a verified package (§10) and a consumer (RFC 0003).
+target "postgres-search" {
   inherits = ["postgres"]
-  tags     = tag("postgres", "${POSTGRES_VERSION}-queue")
+  tags     = tag("postgres", "${POSTGRES_VERSION}-search")
   labels   = merge(label("postgres", POSTGRES_VERSION), {
-    "io.morze.postgres.extensions" = "cron pgmq"
+    "io.morze.postgres.extensions" = "cron pgroonga"
   })
-  args = { PG_EXTENSIONS = "cron pgmq" }
+  args = { PG_EXTENSIONS = "cron pgroonga" }
 }
 ```
 
+The second target is **illustrative**: it shows the shape, using only manifest
+rows that exist. A snippet naming `pgmq` would not build — decision 4 fails on
+any name the manifest does not carry — so writing one here would put a
+copy-pasteable defect in the document that motivates the mechanism.
+
 **The unsuffixed tag keeps today's meaning.** `ghcr.io/morzecrew/postgres:18.4`
 remains pg_cron + pgroonga; anyone pinning it sees no change. Variants take a
-suffix: `:18.4-queue`.
+suffix: `:18.4-<name>`.
 
 **Variants are tags, not registry names.** One GHCR package, so no new entry in
 `cleanup-images.yaml`'s hand-maintained `PACKAGES` list
@@ -214,6 +251,26 @@ stays acceptable.
 `PG_EXTENSIONS` must restate `POSTGRES_IMAGE_TAG` if HCL's map merge does not
 apply — verified per buildx version at implementation time (decision 6).
 
+### 5.4 What the label says
+
+`io.morze.postgres.extensions` is **the canonicalized `PG_EXTENSIONS` selection**
+— the manifest names, normalized and sorted — and nothing else. It is not read
+back from the database, because neither catalog answers the question:
+`pg_available_extensions` lists everything installable in the image, base
+Postgres included, and `pg_extension` lists what some database happens to have
+run `CREATE EXTENSION` for. The build-selected set exists only at build time, so
+the build is what records it.
+
+Two consequences worth stating rather than discovering:
+
+- **Logical names are not SQL names.** The manifest's `cron` is `pg_cron` to the
+  server. The manifest carries both — the logical name is the build input and the
+  label's vocabulary, the SQL name drives §5.2's control-file check.
+- **`pg_stat_statements` is outside the label**, because the label describes the
+  optional selection and that extension is unconditional. The image README says
+  so; otherwise a reader diffs the label against `\dx` and concludes the label
+  lies.
+
 ### Alternatives considered
 
 - **A directory per combination.** Rejected: duplicates a 900-line config, an
@@ -231,10 +288,20 @@ apply — verified per buildx version at implementation time (decision 6).
 
 ## 6. Tests
 
-- **Equivalence:** the default build's installed-extension set and generated
-  `10-extensions.conf` match today's image — `pg_available_extensions` and
-  `SHOW shared_preload_libraries` are compared against the pre-refactor image.
+- **Equivalence, defined precisely.** The refactor moves settings between files
+  and would otherwise reorder the preload list, so file-level comparison is the
+  wrong instrument. Equivalence is asserted on the **effective server state**: for
+  a container started from each image, every row of `pg_settings` that differs
+  from the server's built-in default must match, and the installed package set
+  must match. Both images are started and diffed; nothing is compared as text.
   This is the test that makes the refactor safe to merge.
+- **Preload order is preserved.** `shared_preload_libraries` stays
+  `pg_cron,pg_stat_statements` rather than becoming
+  `pg_stat_statements,pg_cron`. Load order is observable — extensions initialize
+  in list order and some are order-sensitive — so the generator emits manifest
+  rows first and the unconditional constant last, and the test pins the exact
+  string. Reordering it would be a behavioural change smuggled inside a refactor
+  whose entire claim is that nothing changed.
 - **Fail-fast:** `PG_EXTENSIONS="cron pgvektor"` fails the build with the valid
   names listed.
 - **The §3 trap, directly:** a variant that omits `cron` produces an image whose
@@ -246,8 +313,9 @@ apply — verified per buildx version at implementation time (decision 6).
   reaches the effective config, and `PG_CONF__shared_preload_libraries` is still
   refused (denylist, both strict modes) — RFC 0001 §6 covers this generally; it
   is re-asserted here because §5.2 moves the preload line.
-- **Label:** `io.morze.postgres.extensions` on each variant matches what
-  `pg_available_extensions` reports.
+- **Label:** `io.morze.postgres.extensions` on each variant equals the
+  canonicalized `PG_EXTENSIONS` it was built with (§5.4), and every name in it
+  has a matching control file in the image.
 
 ## 7. Docs
 
@@ -324,6 +392,11 @@ apply — verified per buildx version at implementation time (decision 6).
 | 6 | `OPEN` | Whether bake `inherits` merges or replaces `args`, and therefore whether each variant restates `POSTGRES_IMAGE_TAG`. Verify against the pinned buildx and write the answer into the bake file as a comment. |
 | 7 | `OPEN` | The ceiling on shipped variants. Two or three is the stated intent; the enforcement is review, and RFC 0003's admission rule does not cover tag variants. Decide whether it should. |
 | 8 | `ASSUMED` | Extension packages stay unpinned in this RFC, as they are today. Pinning is a separate change so that §6's equivalence test means something. |
+| 9 | `LOCKED` | The build-time availability gate is a control-file and library check on the filesystem, not a SQL query. `pg_available_extensions` needs a running server; the image never runs `initdb`, so a SQL gate would mean standing up a throwaway cluster inside the `RUN` layer. |
+| 10 | `LOCKED` | `io.morze.postgres.extensions` is the canonicalized `PG_EXTENSIONS` selection, not a catalog read-back. Neither `pg_available_extensions` (everything installable) nor `pg_extension` (what one database created) describes the build selection. Consequence: `pg_stat_statements` sits outside the label and the README must say so. |
+| 11 | `LOCKED` | `pg_stat_statements.max` and `.track` move out of the base config along with the preload line and the `cron.*` block. They sit after `include_dir` ([postgresql.conf:890-891](../images/postgres/rootfs/postgresql.conf#L890-L891)), so leaving them would let the base file override the generated extension config — making this RFC's precedence claim false exactly where it generates settings. |
+| 12 | `LOCKED` | Preload order is preserved (`pg_cron,pg_stat_statements`), and equivalence is asserted on effective server state rather than on file contents. Load order is observable, and a refactor claiming "nothing changed" must not reorder it silently. |
+| 13 | `LOCKED` | The manifest ships only extensions the image actually installs; unadmitted ones are not rows and do not appear in executable examples. Decision 4 makes manifest membership the definition of a valid input, so a speculative row advertises a build that fails. |
 
 ## 12. Phasing
 
