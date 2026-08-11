@@ -78,7 +78,10 @@ rather than a judgement.
 - A Valkey that cannot eat the host.
 - One explicit decision — cache or durable store — that the operator must make in
   words, not by omission.
-- Secrets that do not travel in `docker inspect` output.
+- A supported path by which secrets do not travel in `docker inspect` output.
+  `VALKEY_PASSWORD_FILE` is that path; `VALKEY_PASSWORD` stays supported for
+  compatibility and remains inspect-visible, so the guarantee is conditional on
+  which one an operator uses and the README says exactly that (§7).
 - Second consumer of RFC 0001's contract, proving it is a contract rather than a
   description of `postgres`.
 
@@ -142,6 +145,13 @@ per RFC 0001 decision 4, with an unreadable `_FILE` aborting rather than falling
 back. Env vars leak into `docker inspect` output and crash dumps; morzer delivers
 secrets as files or env by design, so the file path must be first-class.
 
+Note what this does **not** claim. Keeping `VALKEY_PASSWORD` means a deployment
+that uses it still exposes the password to anyone who can inspect the container;
+precedence does not retract that. The plain variable stays because removing it
+would break the ordinary Compose case for no gain the operator asked for, and the
+startup summary names which of the two supplied the credential — so an operator
+reading the log can see they took the visible path.
+
 ### 5.3 Two refusals
 
 The defaults above are safe for a cache and actively wrong for anything durable.
@@ -192,6 +202,12 @@ rather than inherited silently.
 `VALKEY_TCP_KEEPALIVE`, `VALKEY_RENAME_DANGEROUS`, plus `VALKEY_CONF__<key>` for
 anything the allowlist permits (RFC 0001 §5.1).
 
+Several curated names here have a passthrough spelling for the same setting —
+`VALKEY_MAXMEMORY_POLICY` and `VALKEY_CONF__maxmemory_policy` are the same knob.
+RFC 0001 decision 11 governs: setting both aborts startup naming both, rather
+than one silently winning. This image is where that rule was found, so it is also
+where it must be tested (§6).
+
 ### Alternatives considered
 
 - **Redis instead of Valkey.** Licence trajectory, and Valkey is the distro and
@@ -216,6 +232,8 @@ Per RFC 0002 §5.5:
 - `VALKEY_PASSWORD_FILE` beats `VALKEY_PASSWORD`; an unreadable `_FILE` exits
   non-zero.
 - Both §5.3 refusals exit non-zero with both offending settings named.
+- Setting `VALKEY_MAXMEMORY_POLICY` and `VALKEY_CONF__maxmemory_policy` together
+  exits non-zero naming both (RFC 0001 decision 11).
 - `VALKEY_PERSISTENCE=rdb` with `noeviction` starts and survives a restart with
   data intact — the durable path must be tested, not just permitted.
 - Renamed commands are absent and `CONFIG GET` still works by default.
