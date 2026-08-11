@@ -170,10 +170,22 @@ unambiguous and it is already shipping in `postgres`.
 
 Curated names are a closed set an image README enumerates. There is no allowlist
 for them because the image implements each one by hand; an unrecognized
-`<PREFIX>_*` name that is not a curated name and not `_CONF__` is **ignored with
-a warning**, not fatal — the environment of a real container is full of
-unrelated variables and a fail-closed rule there would refuse to start on a
-sibling service's config.
+`<PREFIX>_*` name that is not a curated name and not `_CONF__` is not fatal —
+the environment of a real container is full of unrelated variables and a
+fail-closed rule there would refuse to start on a sibling service's config.
+Whether it warns or passes silently is **provisional and open** — decision 9 owns
+it, and this paragraph follows whatever that row settles on.
+
+**Collision between the two channels is refused.** A curated name and a
+passthrough key can target the same upstream setting —
+`VALKEY_MAXMEMORY_POLICY` and `VALKEY_CONF__maxmemory_policy` are the concrete
+case, from RFC 0006 §5.5. Picking a winner means an operator who set both gets
+the other one silently. So each image declares, alongside each curated name, the
+upstream key(s) it writes; if a passthrough key targets a setting a curated
+variable also wrote, startup aborts naming both variables. The rule is the same
+fail-closed instinct as decision 2, applied to a pair rather than a key, and it
+is what keeps the two-channel split from reintroducing the ambiguity it exists to
+remove.
 
 ### 5.2 The shared helper
 
@@ -186,11 +198,23 @@ arrays and `${var,,}` (the postgres script's two bash dependencies — replaced 
 # Contract exported by the helper.
 envconf_load_allowlist  <path>            # one key per line, '#' comments, blank lines skipped
 envconf_collect         <prefix>          # scan env for <prefix>_CONF__*, normalize, check
-                                          #   allowlist + denylist, emit "key<TAB>value" on stdout
+                                          #   allowlist + denylist, emit NUL-delimited key/value
+                                          #   pairs on stdout (see "Value safety")
 envconf_render          <fmt> <infile>    # fmt: pgconf | keyvalue | valkeyconf
-envconf_summary         <prefix>          # print effective settings, redacting sensitive keys
+envconf_summary         <prefix> <srcmap> # print effective settings, redacting sensitive keys;
+                                          #   <srcmap> supplies per-key source attribution
 envconf_secret          <name>            # value of <name>_FILE if set and readable, else $<name>
 ```
+
+**Value safety.** A line-oriented `key<TAB>value` stream is unsafe: environment
+values may contain tabs and newlines, and one such value splits into several
+records and renders malformed config. Two rules close it. The wire format
+between `envconf_collect` and `envconf_render` is **NUL-delimited**, since NUL is
+the one byte an environment value cannot contain. And a value containing a
+newline or a carriage return is **refused** by `envconf_collect`, naming the
+variable: none of the config formats in scope (`postgresql.conf`, `valkey.conf`,
+key-value) can represent an embedded newline, so accepting one only defers the
+corruption to the server's parser. §6 tests both.
 
 **Failure semantics, fail-closed by default.** A key in the denylist aborts
 unconditionally. A key absent from the allowlist aborts when
@@ -218,7 +242,28 @@ cheapest high-value behaviour in this RFC:
 ```
 
 The `source=` column is the point. "Which layer won" is the question the summary
-exists to answer, and the answer costs a label on a line we were printing anyway.
+exists to answer.
+
+**It is also the one part of this contract the helper cannot compute alone**, and
+saying so is what keeps the contract implementable:
+
+- A prefix and the process environment are not enough. `envconf_summary` must be
+  handed a **source map** — the baked config path, the mounted `conf.d` files it
+  found, and the keys `envconf_collect` took from the environment. Each image
+  builds that map, because only the image knows where its layers live. Hence the
+  second argument in the signature above.
+- **`ENV`-defaulted values are not attributable at all.** A Dockerfile
+  `ENV EDGE_ADDRESS=":8080"` is indistinguishable in `environ` from an
+  operator-supplied one, so an image configured that way — `caddy`, and the
+  curated channel generally — cannot report `baked` versus `env` for those keys.
+  Those lines print `source=env-or-default`, which is the true statement.
+
+So the summary is normative in two parts: **the effective value and the
+redaction are required of every image; full `source=` attribution is required
+only of images that generate a config file** from layers they can enumerate
+(`postgres`, `valkey`). RFC 0005 §5.5 is a further exception, on different
+grounds. An image that promises attribution it cannot compute would be printing a
+guess, which is worse than printing less.
 
 ### 5.3 Distributing the helper into per-image contexts
 
@@ -252,7 +297,9 @@ it is data, not logic. The startup summary is new behaviour and the only
 observable change.
 
 `caddy` gains the summary only: it prints its `ENV`-defaulted variables and their
-effective values. Its config path is Caddy's own and is not touched.
+effective values, marked `source=env-or-default` per §5.2 — it cannot say more
+without a source map it has no way to build. Its config path is Caddy's own and
+is not touched.
 
 ### Alternatives considered
 
@@ -286,6 +333,12 @@ built image:
 - The summary prints `<redacted>` for a `!secret` key, and the plain value for a
   non-secret one, and the whole summary appears before the server's first log
   line.
+- **Value safety (§5.2):** a passthrough value containing a tab survives intact
+  into the rendered config, and one containing a newline is refused by name. Both
+  are one-line tests and both guard a corruption that is otherwise found by the
+  server's parser at a much worse moment.
+- **Channel collision (§5.1):** setting a curated variable and a passthrough key
+  that target the same upstream setting exits non-zero naming both.
 - Precedence: a baked value, a mounted `50-*.conf` value and an env value for the
   same key resolve to the env value, and the summary attributes each correctly.
 
@@ -370,6 +423,9 @@ RFC 0002 §on rootless CI covers running these under rootless Podman.
 | 8 | `OPEN` | Summary to stdout or stderr, and its exact line format. Settled by whichever keeps `caddy adapt` and Postgres startup logs readable in `docker logs`; log the choice and use it in all images. |
 | 9 | `OPEN` | Whether unrecognized curated-channel `<PREFIX>_*` names warn or are silent. Warning risks noise from unrelated environment variables sharing a prefix; silence risks a typo'd curated knob. Decide with a real container's environment in front of you. |
 | 10 | `ASSUMED` | `postgres` keeps `PG_CONF_STRICT_MODE` and `PG_CONF_ALLOWLIST_PATH` as published; new images use `<PREFIX>_CONF_STRICT` and `<PREFIX>_CONF_ALLOWLIST`. Accepting one inconsistent pair beats breaking a shipped surface. |
+| 11 | `LOCKED` | A curated variable and a passthrough key targeting the same upstream setting abort startup naming both, rather than one silently winning (§5.1). Consequence: each image must declare the upstream key(s) behind every curated name — work its README was going to do anyway. |
+| 12 | `LOCKED` | The collect→render wire format is NUL-delimited, and values containing a newline are refused (§5.2). A `key<TAB>value` stream splits a tab-bearing value into two malformed records, and no config format in scope can represent an embedded newline. |
+| 13 | `LOCKED` | Full `source=` attribution is required only of images that generate a config file from enumerable layers; `ENV`-defaulted values print `source=env-or-default`, because `environ` cannot distinguish a Dockerfile default from a supplied value (§5.2). Effective value and redaction stay required of every image. Consequence: `caddy`'s summary is weaker than `postgres`'s, by construction rather than by omission. |
 
 ## 12. Phasing
 
