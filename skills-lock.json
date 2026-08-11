@@ -5,7 +5,7 @@
       "source": "morzecrew/agent-skills",
       "sourceType": "github",
       "skillPath": "skills/gitmoji-conventional/SKILL.md",
-      "computedHash": "51a6f9fe65cdd3fdf39a8c44af9455e5297a1939a1149c55da95e47ecb0078e7"
+      "computedHash": "eb00eb7b5c576705b53aa5d254e5b053e32c82603665197e9921d9c6ab716b68"
     },
     "keep-a-changelog": {
       "source": "morzecrew/agent-skills",
