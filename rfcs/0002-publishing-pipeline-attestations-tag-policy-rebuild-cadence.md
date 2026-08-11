@@ -8,7 +8,9 @@
   rootless-Podman smoke-test stage in CI. Does **not** cover image content,
   runtime configuration (RFC 0001), which images exist (RFC 0003), or signing
   with cosign/Sigstore — the last is named in §8 as the deliberate next step,
-  not built here.
+  not built here. Nothing here blocks another RFC; the one place this RFC leans
+  on RFC 0001 (the smoke stage's startup-summary assertion) is written as a
+  conditional so the ordering stays free, §5.5.
 - **Related:** [docker-bake.hcl](../docker-bake.hcl),
   [.github/workflows/publish.yaml](../.github/workflows/publish.yaml),
   [.github/workflows/bake.yaml](../.github/workflows/bake.yaml),
@@ -126,6 +128,7 @@ sync when adding an image — a per-new-image cost that RFC 0003 counts.
 ```hcl
 variable "GIT_REVISION" { default = "" }   # set by CI: ${{ github.sha }}
 variable "BUILD_DATE"   { default = "" }   # set by CI: RFC 3339, UTC
+variable "BUILD_STAMP"  { default = "" }   # set by CI: see §5.3; empty = no dated tag
 
 function "label" {
   params = [name, version]
@@ -183,15 +186,21 @@ function "tag" {
 - **`:<version>`** — mutable, repointed on every rebuild. Consumers who want CVE
   fixes without action track this. This is what happens today; the change is
   saying so.
-- **`:<version>-<yyyymmdd>`** — written once, never repointed. Consumers who need
-  a fixed artifact pin this, or pin the digest.
+- **`:<version>-<stamp>`** — written once, never repointed. Consumers who need a
+  fixed artifact pin this, or pin the digest.
 
-`BUILD_STAMP` is empty for local builds, in which case `tag()` returns only the
-mutable tag — a developer's `just bake postgres` should not mint dated tags.
-Date, not a git short SHA: two rebuilds of an unchanged tree produce different
-images (that is the whole point of §5.4) and the SHA would collide while the date
-would not. Same-day rebuilds collide, which is accepted; a second same-day
-rebuild is a re-run, and the digest remains the exact identifier.
+**The stamp must be unique per build, not per day.** A bare `<yyyymmdd>` is
+repointed by the second build on the same date, which contradicts "written once"
+outright — an immutable tag that silently moves is worse than no immutable tag,
+because consumers pinned it precisely to avoid that. So the stamp is
+`<yyyymmdd>-<run>`, where `<run>` is the CI run number: monotonic, unique, and
+already available. Not a git short SHA — two rebuilds of an unchanged tree
+produce different images (that is the whole point of §5.4), so the SHA would
+collide exactly when the date-based stamp must not.
+
+`BUILD_STAMP` is declared with an empty default and set only by publish CI. When
+it is empty, `tag()` emits the mutable tag alone — a developer's
+`just bake postgres` should not mint dated tags.
 
 **Neither tag is a substitute for the digest**, and the README says so: the
 digest is the only true immutable reference, the dated tag is the ergonomic
@@ -214,6 +223,16 @@ build is precisely the thing that will not pick up a rebuilt base layer. That
 makes the weekly run slow and correct; the push-triggered run stays cached and
 fast.
 
+**Build once, smoke-test that artifact, then push it.** The obvious arrangement —
+smoke tests in `bake.yaml`, an independent `--no-cache` rebuild in
+`publish.yaml` — tests one artifact and publishes a different one. Two builds of
+the same tree are not the same image (that is §5.4's entire premise), so a green
+smoke stage would say nothing about the bytes that reached the registry. Instead
+every publishing run is one job that builds to a local OCI layout
+(`--set *.output=type=oci,dest=…` or a loaded image), runs §5.5's smoke script
+against **that** artifact, and pushes it only if the script passes. The digest
+tested is the digest published, and the gate is a gate rather than a coincidence.
+
 Consequence to state plainly in the README: **on the mutable tag, the bytes
 behind `:18.4` change weekly even when nothing in this repo changed.** That is
 the intended behaviour and it is exactly why §5.3's dated tag exists.
@@ -227,7 +246,10 @@ per-image `images/<name>/smoke.sh`:
 - The container starts and stays up for a fixed interval.
 - Its health signal responds where it has one (`caddy`'s `HEALTH_PATH`, default
   `/__platform_healthz`; `pg_isready` for Postgres).
-- The RFC 0001 startup summary appears before the server's first log line.
+- **Conditionally**, once RFC 0001 has shipped for that image: its startup
+  summary appears before the server's first log line. This assertion is skipped
+  on images that do not yet emit one, so the smoke stage can land before RFC 0001
+  rather than after it (§scope, and decision 10).
 - Build-stage images (`uv-builder`, `flyway`) run their entrypoint helper with
   `--help`-equivalent instead; `python-distroless` runs `python -c` importing
   `magic`, which is the one claim its README makes that a build cannot verify.
@@ -317,11 +339,13 @@ The smoke stage of §5.5 is itself most of this RFC's verification. Beyond it:
 
 ## 10. Unresolved questions
 
-- Whether the weekly rebuild should push to the mutable tag directly or build,
-  smoke-test, and only then push. The second is obviously better and needs the
-  §5.5 harness to exist first; implementation may sequence it.
-- Whether `BUILD_STAMP` should be a date or an ISO week. Date is finer-grained
-  than the cadence; a week stamp collides with intentional mid-week rebuilds.
+- ~~Whether the weekly rebuild should push directly or build, smoke-test, then
+  push.~~ **Settled** by decision 10: build once, test that artifact, push it.
+  What remains is sequencing — P4 needs the §5.5 harness to exist first, which
+  the phasing already orders.
+- ~~Whether `BUILD_STAMP` should be a date or an ISO week.~~ **Settled** by
+  decision 11: neither, since both are reused by a second build in the same
+  period. It is `<yyyymmdd>-<run>`.
 - Whether the GHCR Packages panel is empty because nothing has been pushed or
   because of package visibility settings. This is a five-minute check and it
   changes nothing in the design, but it must be answered before the README tells
@@ -336,10 +360,13 @@ The smoke stage of §5.5 is itself most of this RFC's verification. Beyond it:
 | 3 | `LOCKED` | The weekly scheduled rebuild uses `--no-cache`. A cached rebuild does not pick up a rebuilt base layer, which makes the cadence pointless. |
 | 4 | `LOCKED` | Attestations are described as unsigned evidence in all documentation. Signing is a separate RFC with its own identity policy (§8). |
 | 5 | `ASSUMED` | Rootless Podman for smoke tests, on stock `ubuntu-latest`. Depart if runner support proves fragile enough to make the stage flaky — but degrade to rootless Docker, not to root. |
-| 6 | `ASSUMED` | `BUILD_STAMP` is a UTC date; same-day rebuilds reuse the dated tag. Depart if a same-day rebuild ever needs distinguishing by tag rather than by digest. |
+| 6 | ~~`ASSUMED`~~ | ~~`BUILD_STAMP` is a UTC date; same-day rebuilds reuse the dated tag.~~ **Superseded by row 11**: a reused stamp repoints a tag decision 1 calls immutable, so the two could not both hold. |
 | 7 | `ASSUMED` | `GIT_REVISION` / `BUILD_DATE` default to empty so local builds stay cache-stable. Depart if an empty `.created` label turns out to break a downstream tool. |
 | 8 | `OPEN` | Where the failure notification for the scheduled rebuild goes. A silent scheduled failure is the single most likely way this RFC ends up delivering nothing; pick a channel and wire it in the same PR. |
 | 9 | `OPEN` | Whether to fix the `.yml`/`.yaml` path-filter mismatch in both workflows in this PR or leave it. It is a one-character bug with no current impact; the argument for fixing it now is that it will otherwise be diagnosed twice. |
+| 10 | `LOCKED` | Every publishing run builds once, smoke-tests that exact artifact, and pushes only on success (§5.4). A separate test build and publish build produce different digests, so the gate would attest to bytes nobody shipped. |
+| 11 | `LOCKED` | `BUILD_STAMP` is unique per build (`<yyyymmdd>-<run>`), declared with an empty default, and omitted from `tag()` when empty. Supersedes row 6. Consequence: dated tags accumulate faster than weekly under repeated dispatches, which §8's absent retention policy now has to account for. |
+| 12 | `LOCKED` | The scheduled-rebuild failure notification is a **precondition for enabling P4**, not a follow-up. Row 8 still owns which channel; what is settled here is that P4 does not ship without one, because a silent weekly failure leaves the mutable tag on stale bytes while claiming freshness. |
 
 ## 12. Phasing
 
@@ -351,5 +378,7 @@ The smoke stage of §5.5 is itself most of this RFC's verification. Beyond it:
   complete.
 - **P3 — smoke stage.** §5.5. Blocked on nothing; most valuable before RFC
   0005/0006 land, since those images will otherwise arrive untested.
-- **P4 — weekly rebuild.** §5.4 last, because it should push only what P3 has
-  smoke-tested, and because it is the step whose failure mode is silence.
+- **P4 — weekly rebuild.** §5.4 last, because it pushes only what the smoke stage
+  passed on the same artifact (decision 10), and because it is the step whose
+  failure mode is silence. **Does not ship without the failure notification**
+  (decision 12).
