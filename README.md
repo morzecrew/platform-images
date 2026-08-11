@@ -33,3 +33,7 @@ Tags follow bake defaults. The image name carries what is inside; bake variables
 | [flyway](./images/flyway) | Flyway with essential JDBC drivers, pinned versions. |
 | [uv-builder](./images/uv-builder) | uv-based Python build stage: sync, wheel, slim venv (`build-uv-app`). |
 | [python-distroless](./images/python-distroless) | Distroless Python runtime with libmagic and CA bundle for small final images. |
+
+## License
+
+[MIT](./LICENSE) © Morze Technologies

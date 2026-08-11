@@ -3,6 +3,19 @@ function "tag" {
   result = ["ghcr.io/morzecrew/${name}:${version}"]
 }
 
+# MIT covers the Dockerfiles and config here; bundled upstream software keeps
+# its own license.
+function "label" {
+  params = [name, version]
+  result = {
+    "org.opencontainers.image.title"    = name
+    "org.opencontainers.image.version"  = version
+    "org.opencontainers.image.licenses" = "MIT"
+    "org.opencontainers.image.vendor"   = "Morze Technologies"
+    "org.opencontainers.image.source"   = "https://github.com/morzecrew/platform-images"
+  }
+}
+
 # ....................... #
 
 # renovate: datasource=docker depName=flyway/flyway versioning=docker
@@ -14,6 +27,7 @@ target "flyway" {
   context    = "./images/flyway"
   dockerfile = "Dockerfile"
   tags       = tag("flyway", FLYWAY_VERSION)
+  labels     = label("flyway", FLYWAY_VERSION)
   args = {
     FLYWAY_VERSION          = FLYWAY_VERSION
     # renovate: datasource=maven depName=org.postgresql:postgresql
@@ -34,6 +48,7 @@ target "caddy" {
   context    = "./images/caddy"
   dockerfile = "Dockerfile"
   tags       = tag("caddy", CADDY_VERSION)
+  labels     = label("caddy", CADDY_VERSION)
   args = {
     CADDY_VERSION        = CADDY_VERSION
     # renovate: datasource=github-releases depName=corazawaf/coraza-caddy
@@ -55,6 +70,7 @@ target "postgres" {
   context    = "./images/postgres"
   dockerfile = "Dockerfile"
   tags       = tag("postgres", POSTGRES_VERSION)
+  labels     = label("postgres", POSTGRES_VERSION)
   args = {
     POSTGRES_IMAGE_TAG = POSTGRES_VERSION
   }
@@ -75,6 +91,7 @@ target "uv-builder" {
   context    = "./images/uv-builder"
   dockerfile = "Dockerfile"
   tags       = tag("uv-builder", BUILDER_PYTHON_VERSION)
+  labels     = label("uv-builder", BUILDER_PYTHON_VERSION)
   args = {
     PYTHON_VERSION = BUILDER_PYTHON_VERSION
     DEBIAN_SUITE   = BUILDER_DEBIAN_SUITE
@@ -96,6 +113,7 @@ target "python-distroless" {
   context    = "./images/python-distroless"
   dockerfile = "Dockerfile"
   tags       = tag("python-distroless", DISTROLESS_PYTHON_VERSION)
+  labels     = label("python-distroless", DISTROLESS_PYTHON_VERSION)
   args = {
     PYTHON_VERSION = DISTROLESS_PYTHON_VERSION
     DEBIAN_VERSION = DISTROLESS_DEBIAN_VERSION
