@@ -12,6 +12,12 @@
       "sourceType": "github",
       "skillPath": "skills/keep-a-changelog/SKILL.md",
       "computedHash": "b2468a766d2adc403801a5bf0685a81c19936aede4f866501e29b0f5de5b35e6"
+    },
+    "rfc-writer": {
+      "source": "morzecrew/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/rfc-writer/SKILL.md",
+      "computedHash": "1048601ec78d4a7e7aaaac5b38b479ad5d02ee70b928228760ed040f3382605f"
     }
   }
 }
