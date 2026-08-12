@@ -69,8 +69,15 @@ arguably zero** — forze's is a documented example and a test fixture, not a
 running collector. RFC 0003's bar wants two. **The gate is shut**, and the
 correct outcome is that this image is not built.
 
-What would change it: a second project running a collector, which would also
-supply the thirty duplicated lines §2 argues about. Until then §2's motivation is
+**RFC 0003's second admission route does not rescue this.** Route 2 (its decision
+9) admits an image when two or more projects run the same upstream image and have
+drifted apart — it is what opened RFC 0006's gate on the same day. It cannot
+apply here: zero projects run a collector, and zero projects cannot diverge. The
+route was added because the bar was the wrong shape for curation images, not to
+lower it.
+
+What would change the answer: a second project running a collector, which would
+also supply the thirty duplicated lines §2 argues about. Until then §2's motivation is
 asserted rather than observed, and an image built on an asserted motivation is
 the speculative infrastructure the gate exists to refuse.
 

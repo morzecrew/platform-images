@@ -23,8 +23,14 @@ just push postgres 18   # push an already-built local tag
 
 ## Which images belong here
 
-> **Admission.** An image lands here when the same Dockerfile has been
-> hand-rolled in **two or more** projects. One project keeps its own Dockerfile.
+> **Admission, route 1 — duplication.** An image lands here when the same
+> Dockerfile has been hand-rolled in **two or more** projects. One project keeps
+> its own Dockerfile.
+>
+> **Admission, route 2 — drift.** An image also lands here when **two or more**
+> projects run the same upstream image *without* a Dockerfile, and their pinned
+> versions or their configuration have diverged. The image's contribution is
+> then the defaults, not the packaging.
 >
 > **Retirement.** An image that no project has used for a year is deleted, not
 > maintained.
@@ -53,11 +59,28 @@ three produces a red check.
 Items 8 and 9 have no mechanism yet — they are listed so the cost is visible, not
 because there is something to fill in today.
 
-Two clarifications that keep admission from being argued away:
+**Why two routes.** Route 1 counts duplicated Dockerfiles, which is the right
+evidence for a *packaging* image — somebody had to write a build, twice. It is
+the wrong evidence for a *curation* image, whose whole contribution is defaults:
+nobody writes a Dockerfile to run Valkey, they write a `command:` line, so a
+curation image that is badly needed generates no duplicated Dockerfiles at all.
+Route 2 measures what that need actually looks like from outside — the same
+upstream image pinned differently in different places, or configured differently
+for the same job.
+
+Clarifications that keep both routes from being argued away:
 
 - **"Hand-rolled in two projects" means the Dockerfiles exist**, not that two
   projects would benefit. Anticipated reuse is the failure this bar catches — it
   is how a repo acquires images maintained for nobody.
+- **Route 2 needs the divergence, not just the count.** Ten projects running the
+  same pinned image, configured the same way, are not drifting — they are fine,
+  and an image would add a hop for nothing. What route 2 admits is the case
+  where they have already fallen out of step.
+- **Neither route admits an image nobody runs yet.** Both count deployed
+  projects. An image for infrastructure the stack does not have is speculative
+  under either route, and the right way in is to have a first consumer, not a
+  looser rule.
 - **A pair counts as one admission.** `uv-builder` + `python-distroless` are one
   decision about Python, not two about images.
 

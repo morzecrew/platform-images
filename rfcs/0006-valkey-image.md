@@ -1,8 +1,10 @@
 # RFC 0006 — Valkey image
 
-- **Status:** 📝 Draft — **demand measured 2026-08-12: the cache requirement is
-  real and larger than expected** (§3.1). The gate is no longer the blocker; RFC
-  0003's admission bar is, and it does not fit this image cleanly — see §3.2.
+- **Status:** 📝 Draft — **admitted 2026-08-12.** Demand measured (§3.1: 14
+  projects, four pinned images), and RFC 0003 gained a second admission route
+  (its decision 9) that this image meets on drift rather than duplication. The
+  gate is open and the design is unbuilt; what remains is §10's questions and a
+  decision on scheduling.
 - **Gate:** Answer RFC 0004's question first. If Postgres with pgmq covers the
   queue, and Postgres or the application covers the cache, **this image should
   not exist** — and [images/README.md](../images/README.md) should say so. An
@@ -105,9 +107,15 @@ over, because fourteen compose files each re-solve configuration.
 That is a defect in the bar, not a verdict on this image. RFC 0003's rule is
 Dockerfile-shaped, and the contribution of a *configuration-curation* image is
 config-shaped; an image whose whole value is defaults will never appear as a
-duplicated Dockerfile. **This needs settling in RFC 0003 before this image is
-accepted or refused**, and it is recorded there too so the rule gets fixed rather
-than worked around here.
+duplicated Dockerfile.
+
+> **Settled 2026-08-12.** RFC 0003 decision 9 adds a second admission route: two
+> or more projects running the same upstream image whose pinned versions or
+> configuration have diverged. This image meets it — fourteen projects, four
+> distinct pinned images, and a Valkey migration already begun in one of them.
+> **The gate is open.** Note what did not happen: decision 1 was not widened, so
+> route 1 still means what it meant, and RFC 0005 is still refused because zero
+> projects cannot diverge.
 
 ## 4. Goals / Non-goals
 
