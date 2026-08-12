@@ -1,7 +1,10 @@
 # RFC 0008 — JavaScript builder and distroless runtime pair
 
-- **Status:** 📝 Draft — **demand-gated**, not scheduled. §5.1 is blocked on a
-  decision no amount of design work can substitute for.
+- **Status:** 📝 Draft — **gate measured 2026-08-12: JS is a real target, but not
+  the shape this RFC assumed** (§3.1). Five projects build JS; **none runs a Node
+  runtime**. The runtime half of this pair has no consumer, and `caddy` already
+  fills that role. §5.1's manager question is answered by evidence; the design
+  needs re-cutting before P2.
 - **Gate:** Morze ships JS/TS services. If the stack is Python-only — which
   `uv-builder` and `python-distroless` suggest — this is an image maintained for
   nobody, which RFC 0003 §2 prices as the most expensive kind.
@@ -52,8 +55,62 @@ performance argument.
 
 ## 3. Current state
 
-No JS anywhere in the repo. What exists is the pattern to mirror — and one defect
-in it.
+### 3.1 The gate, measured (2026-08-12) — and what it inverts
+
+Swept every Morze repository for a JS lockfile next to a Dockerfile.
+
+**Five projects build JavaScript**: `eis-dag` (frontend), `erp-frontend`,
+`morze-ai-landing`, `morze-erp-landing`, `morze-landing`.
+
+**All five are static-asset builds. None runs Node at runtime.** Every one is a
+multi-stage Dockerfile that builds with Node and then serves the output from a
+web server:
+
+| Project | Build stage | Runtime stage |
+|---|---|---|
+| `erp-frontend` | `node:20-alpine` (with an npm cache mount) | **`ghcr.io/morzecrew/caddy:2.11`** |
+| `morze-ai-landing` | `node:20-bookworm-slim` | `caddy:2-alpine` |
+| `morze-erp-landing` | `node:20-bookworm-slim` | `caddy:2-alpine` |
+| `eis-dag` | `node:22-alpine` | `nginx:1.27-alpine` |
+| `morze-landing` | `node:16` | `nginx:1.26.1-alpine-slim` |
+
+Three consequences, and the first two rewrite this RFC:
+
+1. **`node-distroless` has no consumer.** The runtime half of the pair — §5.3,
+   decision 3, half of §5.4's coupling — solves a problem nobody has. The
+   runtime is already `caddy`, and `erp-frontend` is already using this repo's
+   caddy image for exactly that.
+2. **The duplicated part is the build stage, not the pair.** What five projects
+   re-write is: install with a lockfile, run the build, emit static assets. That
+   is a builder image on its own, whose output is copied into `caddy` — which
+   means the "structural mirror of the Python pair" framing in §2 is wrong here,
+   because the Python pair's runtime half is what makes it a pair.
+3. **The manager question (§5.1) is answered by evidence, not preference.**
+   `package-lock.json` in all five; `pnpm-lock.yaml` additionally in the two
+   landings; **no yarn, no bun anywhere**. So npm is the floor, and §5.1's option
+   3 — "npm only, and misses most of why anyone wants this" — turns out to be
+   what the evidence supports.
+
+Two smaller findings worth keeping:
+
+- **Node majors in use: 16, 20, 20, 20, 22.** The drift a shared builder fixes.
+- `morze-ai-landing` and `morze-erp-landing` ship **byte-identical Dockerfiles**
+  whose build step is `npm run build || yarn build || pnpm build` — a fallback
+  chain that runs whichever happens to work. That is precisely the
+  "subtly different each time" failure §2 describes, caught in the act.
+
+**What this does to the RFC:** the gate is *open* for a builder and *shut* for a
+distroless Node runtime. Re-cutting the design as "JS static-asset builder,
+runtime is `caddy`" is a different RFC from this one, and it should be written as
+one rather than edited in here — that would erase the disagreement between what
+was designed and what was measured. Recorded in §11 as decision 11 and left for
+the author to act on.
+
+### 3.2 The Python pair
+
+**This** repo contains no JavaScript — §3.1 is about the projects that consume
+its images. What exists here is the pattern those projects' builds would mirror,
+and one defect in it.
 
 **The pattern.** `uv-builder` sets `UV_PROJECT_ENVIRONMENT=/opt/venv`
 ([Dockerfile:14](../images/uv-builder/Dockerfile#L14)) and `build-uv-app` emits
@@ -344,9 +401,9 @@ apply once, since a pair is one admission.
    (decision 10).
 4. **Does `python-distroless`'s libmagic/CA-bundle approach transfer**, or does
    distroless Node need a different native-library set (§5.3)?
-5. Whether the Python coupling check belongs in `bake.yaml` as a step or in the
-   bake file as an HCL-level assertion. The second fails earlier and locally;
-   whether HCL can express it in the pinned buildx is unverified.
+5. ~~Whether the Python coupling check belongs in `bake.yaml` or the bake file.~~
+   **Answered: HCL, and buildx can express it** — see decision 9. Shipped
+   2026-08-12.
 
 ## 11. Decisions
 
@@ -360,14 +417,16 @@ apply once, since a pair is one admission.
 | 6 | `ASSUMED` | The version-coupling check applies to the Python pair too, and lands independently of this RFC's gate. Depart only if it proves impossible to express — not because the pair "already agrees". |
 | 7 | `ASSUMED` | Bun, if chosen, replaces the Node pair rather than extending it, and §5.5's table is filled in concretely at that point or bun leaves the options list (§5.1). Consequence: decision 2's Node-major coupling is Node-path-only and does not constrain a bun build. |
 | 8 | `OPEN` | The `build-js-app` prune list. Derive it by measuring what a real project's tree contains; do not translate `build-uv-app`'s switches, which are Python-specific and more aggressive than JS tolerates. |
-| 9 | `OPEN` | Where the Python coupling assertion lives — CI step or HCL assertion (§10 question 5). |
+| 9 | ~~`OPEN`~~ **Resolved by execution 2026-08-12** | Where the Python coupling assertion lives. **HCL `validation` block on `DISTROLESS_PYTHON_VERSION`**, not a CI step: buildx 0.35 supports variable `validation`, so it fails in `just bake` locally and in CI alike, before any layer is built. Verified red on a builder-only bump, a runtime-only bump, and green on a coordinated one. `startswith` is not available in bake HCL. The shipped condition compares `join("", regexall("^[0-9]+\\.[0-9]+", v))` on both and refuses a value that matches no `major.minor` at all — `slice(split(...))` was tried first and raises an opaque out-of-range error on a version with no minor, replacing the drift message exactly when someone has set something odd. |
 | 10 | `LOCKED` | The package manager is pinned by an exact, integrity-checked `packageManager` declaration, not by a Corepack range. Corepack's Known Good Releases are mutable, and Corepack's presence in the Node image is itself major-dependent, so the builder installs it explicitly. Bun is pinned separately and never through Corepack. |
+| 11 | `OPEN` | **The measured demand (§3.1) does not match this RFC's design.** Five projects need a JS *build stage* whose output goes into `caddy`; none needs `node-distroless`. Decisions 2, 3 and 4 are written for a pair whose runtime half has no consumer. Settle by writing a successor RFC for the builder-plus-caddy shape and marking this one ❌ superseded — not by editing this RFC's prose, which would hide that the design was cut before the evidence arrived. |
 
 ## 12. Phasing
 
-- **P0 — the Python coupling check.** Not gated on anything in this RFC. It
-  closes an existing latent defect (§3) and proves §5.4's mechanism before any JS
-  image exists. If this RFC's gate never opens, this is what it delivered.
+- **P0 — the Python coupling check. ✅ Shipped 2026-08-12** as an HCL
+  `validation` block in [docker-bake.hcl](../docker-bake.hcl) (decision 9). It
+  closes an existing latent defect (§3). Given §3.1, this is likely the whole of
+  what this RFC delivers.
 - **P1 — the manager decision** (§5.1). Nothing else until it is made.
 - **P2 — builder** with cache mount and the frozen-lockfile helper.
 - **P3 — distroless runtime**, single-variable major coupling, and the

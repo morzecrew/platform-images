@@ -1,7 +1,8 @@
 # RFC 0006 — Valkey image
 
-- **Status:** 📝 Draft — **the gate is itself the first deliverable.** A written
-  refusal is a valid and expected outcome of this RFC.
+- **Status:** 📝 Draft — **demand measured 2026-08-12: the cache requirement is
+  real and larger than expected** (§3.1). The gate is no longer the blocker; RFC
+  0003's admission bar is, and it does not fit this image cleanly — see §3.2.
 - **Gate:** Answer RFC 0004's question first. If Postgres with pgmq covers the
   queue, and Postgres or the application covers the cache, **this image should
   not exist** — and [images/README.md](../images/README.md) should say so. An
@@ -67,9 +68,46 @@ Nothing exists in this repo, and the repo's shape is the argument on both sides:
   unmeasured. So the "Postgres covers it" claim is currently untested in both
   directions.
 
-Nothing in the repo records a cache or queue requirement from any project. That
-absence is not evidence of anything — it is why the gate is a measurement (§10)
-rather than a judgement.
+### 3.1 The demand, measured (2026-08-12)
+
+Swept every Morze repository for a Redis or Valkey **service** in a compose file.
+
+**Fourteen repositories run one**: `backend-template`, `demo-ai-consultant`,
+`eis-backend`, `erp-backend`, `erp-standalone`, `fashion-ai-mvp`, `forze`,
+`morze-ai-chat-backend`, `morze-crm-backend`, `morze-crm-backend-v2`,
+`morze-erp-backend`, `morze-erp-infrastructure`, `samolet-ai-mvp`,
+`test-livekit`.
+
+Across them, **four distinct pinned upstream images** are in use:
+`redis:7-alpine` (floating minor), `redis:7.2.3-alpine`, `redis:8.0.3-alpine`,
+and `valkey/valkey:9.0` — somebody has already migrated to Valkey without a
+shared image to land on.
+
+That drift is what this repo exists to remove, and **the cache requirement is not
+hypothetical**: it is in more projects than any image currently published here.
+
+**pgmq appears in zero repositories.** The gate as originally written — "does
+Postgres with pgmq cover the queue" — is therefore moot: no project runs a queue
+on pgmq, and what was measured is demand for a *cache*, not a queue. RFC 0004's
+packaging question no longer blocks this RFC.
+
+### 3.2 Why the admission bar does not fit, and what to do about it
+
+**No project hand-rolls a Dockerfile for Redis or Valkey.** All fourteen consume
+an upstream image directly and configure it through compose — a `command:` line
+or a mounted `redis.conf`.
+
+Read literally, RFC 0003's bar therefore **refuses this image**: the bar counts
+hand-rolled Dockerfiles, and there are none. Read for its purpose — two or more
+projects having separately solved the same problem — it is met several times
+over, because fourteen compose files each re-solve configuration.
+
+That is a defect in the bar, not a verdict on this image. RFC 0003's rule is
+Dockerfile-shaped, and the contribution of a *configuration-curation* image is
+config-shaped; an image whose whole value is defaults will never appear as a
+duplicated Dockerfile. **This needs settling in RFC 0003 before this image is
+accepted or refused**, and it is recorded there too so the rule gets fixed rather
+than worked around here.
 
 ## 4. Goals / Non-goals
 
