@@ -86,9 +86,21 @@ Clarifications that keep both routes from being argued away:
 
 ### The annual review
 
-Once a year, each image is checked against one question: **does a live project
-reference this tag?** The answer comes from consuming repositories, not from GHCR
-pull counts — a scheduled CI job pulling an image is a pull count, not a user.
+Once a year, each image is checked against two questions, both answered from
+consuming repositories rather than GHCR pull counts — a scheduled CI job pulling
+an image is a pull count, not a user.
+
+**1. Does a live project reference this tag?** No, for a year, means retire.
+
+**2. Does a live project *reimplement* this image?** A project that hand-rolls a
+Dockerfile for something already published here is not breaking a rule — it is
+telling you the published image did not fit. The useful output is *why*, and the
+fix is usually ours. Worked example, found 2026-08-12:
+`morze-erp-backend-v2` builds its own `postgres:18.1` with pg_cron and no
+pgroonga, because this repo's `postgres` bundles both and it wanted one. That is
+demand for a build-arg variant, not an adoption problem — and a second project,
+`morze-crm-backend-v2`, copied our Dockerfile near-verbatim while pinning a
+version behind ours.
 
 Outcomes are keep or retire. There is no "keep for now"; that is the state that
 produces images nobody has used since 2024. An image whose only consumer is this
