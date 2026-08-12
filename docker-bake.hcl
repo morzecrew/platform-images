@@ -1,3 +1,26 @@
+# Set by publish CI; empty locally so `just bake` stays cache-stable and does
+# not rebuild every layer on each invocation.
+variable "GIT_REVISION" {
+  default = ""
+}
+
+variable "BUILD_DATE" {
+  default = ""
+}
+
+# One line per image. Shown on the GHCR package page, so it lives here rather
+# than only in the root README. Keys are quoted: bare hyphenated keys parse as
+# subtraction.
+variable "DESCRIPTIONS" {
+  default = {
+    "flyway"            = "Flyway with PostgreSQL and ClickHouse JDBC drivers, pinned."
+    "caddy"             = "Caddy with Coraza WAF and OWASP CRS, env-configured with snippet and config directories."
+    "postgres"          = "PostgreSQL with pg_cron and pgroonga, allowlist-based config overrides via env."
+    "uv-builder"        = "uv-based Python build stage: sync, wheel, slim venv via build-uv-app."
+    "python-distroless" = "Distroless Python runtime with libmagic and CA bundle."
+  }
+}
+
 function "tag" {
   params = [name, version]
   result = ["ghcr.io/morzecrew/${name}:${version}"]
@@ -8,12 +31,36 @@ function "tag" {
 function "label" {
   params = [name, version]
   result = {
-    "org.opencontainers.image.title"    = name
-    "org.opencontainers.image.version"  = version
-    "org.opencontainers.image.licenses" = "MIT"
-    "org.opencontainers.image.vendor"   = "Morze Technologies"
-    "org.opencontainers.image.source"   = "https://github.com/morzecrew/platform-images"
+    "org.opencontainers.image.title"       = name
+    "org.opencontainers.image.version"     = version
+    "org.opencontainers.image.licenses"    = "MIT"
+    "org.opencontainers.image.vendor"      = "Morze Technologies"
+    "org.opencontainers.image.source"      = "https://github.com/morzecrew/platform-images"
+    "org.opencontainers.image.description" = lookup(DESCRIPTIONS, name, "")
+    "org.opencontainers.image.revision"    = GIT_REVISION
+    "org.opencontainers.image.created"     = BUILD_DATE
   }
+}
+
+# Provenance and SBOM are inherited by every target below.
+#
+# mode=max over the default min: min records only the materials, and the
+# question a consumer asks -- which build steps ran -- needs max. Both are
+# emitted by buildx for free on --push, and neither can be applied
+# retroactively to already-published tags.
+#
+# These are UNSIGNED attestations: evidence about what the build did, not proof.
+# Signing is a separate decision with its own identity policy. See RFC 0002.
+#
+# Must be the `attest` list form. The `provenance = "mode=max"` / `sbom = true`
+# shorthand is accepted without error by buildx 0.35 and then silently produces
+# no attestation at all -- verified with `bake --print`, which shows no attest
+# entry for it. A green build would have claimed coverage it did not have.
+target "_attested" {
+  attest = [
+    "type=provenance,mode=max",
+    "type=sbom",
+  ]
 }
 
 # ....................... #
@@ -24,6 +71,7 @@ variable "FLYWAY_VERSION" {
 }
 
 target "flyway" {
+  inherits   = ["_attested"]
   context    = "./images/flyway"
   dockerfile = "Dockerfile"
   tags       = tag("flyway", FLYWAY_VERSION)
@@ -45,6 +93,7 @@ variable "CADDY_VERSION" {
 }
 
 target "caddy" {
+  inherits   = ["_attested"]
   context    = "./images/caddy"
   dockerfile = "Dockerfile"
   tags       = tag("caddy", CADDY_VERSION)
@@ -67,6 +116,7 @@ variable "POSTGRES_VERSION" {
 }
 
 target "postgres" {
+  inherits   = ["_attested"]
   context    = "./images/postgres"
   dockerfile = "Dockerfile"
   tags       = tag("postgres", POSTGRES_VERSION)
@@ -88,6 +138,7 @@ variable "BUILDER_DEBIAN_SUITE" {
 }
 
 target "uv-builder" {
+  inherits   = ["_attested"]
   context    = "./images/uv-builder"
   dockerfile = "Dockerfile"
   tags       = tag("uv-builder", BUILDER_PYTHON_VERSION)
@@ -124,6 +175,7 @@ variable "DISTROLESS_DEBIAN_VERSION" {
 }
 
 target "python-distroless" {
+  inherits   = ["_attested"]
   context    = "./images/python-distroless"
   dockerfile = "Dockerfile"
   tags       = tag("python-distroless", DISTROLESS_PYTHON_VERSION)

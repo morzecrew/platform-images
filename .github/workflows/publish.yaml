@@ -35,7 +35,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
+      # GIT_REVISION / BUILD_DATE default to empty in docker-bake.hcl so local
+      # builds stay cache-stable; CI is what fills them in.
       - name: Publish images
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: just publish
+          GIT_REVISION: ${{ github.sha }}
+        run: |
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          just publish

@@ -1,6 +1,8 @@
 # RFC 0002 — Publishing pipeline: attestations, tag policy, rebuild cadence
 
-- **Status:** 📝 Draft — execution-ready, independent of every other RFC
+- **Status:** 🚧 In progress — **P1 shipped 2026-08-12** (labels, attestations).
+  Execution found that §5.2's specified syntax is silently ignored by buildx;
+  the divergence is recorded in §5.2a and decision 13. P2–P4 not started.
 - **Scope:** What a published `ghcr.io/morzecrew/*` tag guarantees about itself.
   Covers the OCI label set in [docker-bake.hcl](../docker-bake.hcl), buildx
   provenance and SBOM attestations, a stated tag-mutability policy with an
@@ -155,7 +157,8 @@ target "_common" {
 }
 ```
 
-with every target inheriting it. `mode=max` over the default `min` because `min`
+with every target inheriting it — **but not in that syntax; see §5.2a.**
+`mode=max` over the default `min` because `min`
 records only the materials, and the question a consumer actually asks — which
 build steps ran — needs `max`. Both are free at build time and both are exactly
 the material a deployment-attestation chain consumes upstream; turning them on
@@ -168,6 +171,38 @@ so no change is needed there — but the SBOM manifests are new untagged childre
 and that behaviour must be re-verified with `dry_run: true` after the first
 attested publish. A cleanup job that eats SBOMs is worse than no SBOM, because
 the metadata claims coverage that no longer resolves.
+
+### 5.2a Amendment (2026-08-12): the shorthand is silently ignored
+
+§5.2 above specifies `provenance = "mode=max"` and `sbom = true`. **On buildx
+0.35 those attributes are accepted without error and produce no attestation at
+all** — verified with `bake --print`, which emits no `attest` entry for a target
+carrying them, whether inherited or set directly.
+
+The working form is the list:
+
+```hcl
+target "_attested" {
+  attest = [
+    "type=provenance,mode=max",
+    "type=sbom",
+  ]
+}
+```
+
+which does inherit correctly and does appear in `--print`.
+
+This is the failure mode this RFC is otherwise about: a green build claiming
+coverage it does not have. Had P1 shipped as written, every published image would
+have carried the *documentation* of attestations and none of the attestations,
+and the gap would have surfaced only when a consumer went looking for an SBOM
+that was never there. §6's first check — inspect a published image for the
+attestation manifests — is what turns that from a documentation claim into a
+tested one, and it should run against the first attested publish rather than
+being deferred.
+
+The §5.2 text above is left as written rather than corrected in place, so the
+record shows the design was cut before the syntax was verified.
 
 ### 5.3 Tag policy: mutable and immutable, both
 
@@ -370,6 +405,8 @@ The smoke stage of §5.5 is itself most of this RFC's verification. Beyond it:
 | 10 | `LOCKED` | Every publishing run builds once, smoke-tests that exact artifact, and pushes only on success (§5.4). A separate test build and publish build produce different digests, so the gate would attest to bytes nobody shipped. |
 | 11 | `LOCKED` | `BUILD_STAMP` is unique per build (`<yyyymmdd>-<run>`), declared with an empty default, and omitted from `tag()` when empty. Supersedes row 6. Consequence: dated tags accumulate faster than weekly under repeated dispatches, which §8's absent retention policy now has to account for. |
 | 12 | `LOCKED` | The scheduled-rebuild failure notification is a **precondition for enabling P4**, not a follow-up. Row 8 still owns which channel; what is settled here is that P4 does not ship without one, because a silent weekly failure leaves the mutable tag on stale bytes while claiming freshness. |
+| 13 | `LOCKED` | **Found by execution 2026-08-12.** Attestations are declared with the `attest = ["type=provenance,mode=max", "type=sbom"]` list, never the `provenance`/`sbom` shorthand, which buildx 0.35 accepts and silently drops (§5.2a). Consequence: any future attestation change must be verified with `bake --print`, because this class of error is invisible in a passing build. |
+| 14 | `ASSUMED` | **Set by execution.** `.description` comes from a `DESCRIPTIONS` map variable in the bake file, keyed by image name, with keys quoted — bare hyphenated keys parse as subtraction in HCL. Depart if the descriptions need to live somewhere a non-editor can reach. |
 
 ## 12. Phasing
 
