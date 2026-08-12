@@ -1,7 +1,9 @@
 # RFC 0003 — Image admission and retirement rule
 
-- **Status:** 📝 Draft — a policy, not code; execution is one README section plus
-  a retirement checklist
+- **Status:** 🚧 In progress — the rule shipped to
+  [images/README.md](../images/README.md) on 2026-08-12. **Execution surfaced a
+  conflict with decision 1, which is `LOCKED` and therefore not for the executor
+  to resolve** — see decision 7. The rule as written is what shipped.
 - **Scope:** The rule that decides whether an image belongs in this repo, and the
   rule that removes one. Covers the two-project admission bar, the annual
   unused-image review, the mechanical retirement checklist (including what
@@ -66,6 +68,28 @@ told about one.
 
 Nothing in the repo records why any of the five exists, so the rule below has no
 retroactive evidence to work from — it applies from here forward.
+
+### 3.1 What applying the bar actually found (2026-08-12)
+
+The first real application of this rule, across ~40 sibling repositories, turned
+up two things the rule does not handle.
+
+**The bar misses configuration-curation images.** RFC 0006 (Valkey) is the case:
+fourteen projects run a Redis or Valkey service across four different pinned
+upstream images, and **not one hand-rolls a Dockerfile** — they all configure
+through compose. Read literally the bar refuses the image; read for its purpose —
+two or more projects separately solving the same problem — it is met several
+times over. The bar counts duplicated *Dockerfiles*, but an image whose entire
+contribution is defaults never shows up as a duplicated Dockerfile. Decision 7
+records this; decision 1 is `LOCKED`, so the fix is the author's, not
+execution's.
+
+**The inverse problem exists and the rule says nothing about it.** Two projects —
+`morze-crm-backend-v2` and `morze-erp-backend-v2` — hand-roll a Postgres
+Dockerfile that **this repo already publishes**, one of them near-verbatim from
+[images/postgres/Dockerfile](../images/postgres/Dockerfile) including its
+comments. That is duplication of an existing image rather than evidence for a new
+one, and no rule here catches it. Decision 8.
 
 ## 4. Design
 
@@ -181,6 +205,8 @@ carrying our vendor label, which is why the README wording is not optional.
 | 4 | `ASSUMED` | Freeze rather than delete the published GHCR package on retirement, since a deleted public tag breaks consumers we cannot see. Depart per image where a broken pull is the better signal. |
 | 5 | `ASSUMED` | The annual review reads consuming repositories, not GHCR pull counts. Depart if a better usage signal appears — but not toward pull counts, which CI inflates. |
 | 6 | `OPEN` | When in the year the review happens and who runs it. An unscheduled annual review is one that does not occur; pick a month and put it in the README with the rule. |
+| 7 | `OPEN` | **Proposed by execution, for the author.** Decision 1's bar counts hand-rolled Dockerfiles, which structurally excludes configuration-curation images — §3.1, with RFC 0006 as the live case. Options: widen the bar to "the same configuration has been hand-written in two or more projects", add a second admission route for curation images, or accept the exclusion and refuse RFC 0006 on it. Decision 1 is `LOCKED`, so this row records the conflict rather than resolving it; the README shipped the rule unchanged. |
+| 8 | `OPEN` | **Proposed by execution.** The rule governs admitting images that do not exist and retiring ones nobody uses, but says nothing about projects re-implementing an image that *is* published (§3.1, two cases). Whether that belongs in this rule, in the root README's adoption guidance, or nowhere is the author's call. |
 
 ## 8. Phasing
 
