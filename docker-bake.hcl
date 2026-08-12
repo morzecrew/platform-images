@@ -101,8 +101,22 @@ target "uv-builder" {
 # ....................... #
 
 # renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
+#
+# Coupled to BUILDER_PYTHON_VERSION: uv-builder produces /opt/venv and
+# python-distroless executes it, so a venv built for one minor and run by
+# another gives native-module ABI failures at runtime, not at build. The two
+# versions come from different registries and have independent renovate
+# annotations, and renovate automerges -- so without this validation a builder
+# bump that lands before the distroless base catches up ships a broken pair
+# with no human in the loop. Compares major.minor only; the builder pins a
+# minor (3.14) and the runtime a patch (3.14.6). See RFC 0008 sec 5.4.
 variable "DISTROLESS_PYTHON_VERSION" {
   default = "3.14.6"
+
+  validation {
+    condition = join(".", slice(split(".", BUILDER_PYTHON_VERSION), 0, 2)) == join(".", slice(split(".", DISTROLESS_PYTHON_VERSION), 0, 2))
+    error_message = "Python version drift: BUILDER_PYTHON_VERSION and DISTROLESS_PYTHON_VERSION must agree on major.minor. uv-builder builds the venv that python-distroless runs; a mismatch fails at runtime, not at build."
+  }
 }
 
 variable "DISTROLESS_DEBIAN_VERSION" {

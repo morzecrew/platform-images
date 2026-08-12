@@ -400,9 +400,9 @@ apply once, since a pair is one admission.
    (decision 10).
 4. **Does `python-distroless`'s libmagic/CA-bundle approach transfer**, or does
    distroless Node need a different native-library set (§5.3)?
-5. Whether the Python coupling check belongs in `bake.yaml` as a step or in the
-   bake file as an HCL-level assertion. The second fails earlier and locally;
-   whether HCL can express it in the pinned buildx is unverified.
+5. ~~Whether the Python coupling check belongs in `bake.yaml` or the bake file.~~
+   **Answered: HCL, and buildx can express it** — see decision 9. Shipped
+   2026-08-12.
 
 ## 11. Decisions
 
@@ -416,15 +416,16 @@ apply once, since a pair is one admission.
 | 6 | `ASSUMED` | The version-coupling check applies to the Python pair too, and lands independently of this RFC's gate. Depart only if it proves impossible to express — not because the pair "already agrees". |
 | 7 | `ASSUMED` | Bun, if chosen, replaces the Node pair rather than extending it, and §5.5's table is filled in concretely at that point or bun leaves the options list (§5.1). Consequence: decision 2's Node-major coupling is Node-path-only and does not constrain a bun build. |
 | 8 | `OPEN` | The `build-js-app` prune list. Derive it by measuring what a real project's tree contains; do not translate `build-uv-app`'s switches, which are Python-specific and more aggressive than JS tolerates. |
-| 9 | `OPEN` | Where the Python coupling assertion lives — CI step or HCL assertion (§10 question 5). |
+| 9 | ~~`OPEN`~~ **Resolved by execution 2026-08-12** | Where the Python coupling assertion lives. **HCL `validation` block on `DISTROLESS_PYTHON_VERSION`**, not a CI step: buildx 0.35 supports variable `validation`, so it fails in `just bake` locally and in CI alike, before any layer is built. Verified red on a builder-only bump, a runtime-only bump, and green on a coordinated one. `startswith` is not available in bake HCL; the condition compares `join(".", slice(split(".", v), 0, 2))` on both. |
 | 10 | `LOCKED` | The package manager is pinned by an exact, integrity-checked `packageManager` declaration, not by a Corepack range. Corepack's Known Good Releases are mutable, and Corepack's presence in the Node image is itself major-dependent, so the builder installs it explicitly. Bun is pinned separately and never through Corepack. |
 | 11 | `OPEN` | **The measured demand (§3.1) does not match this RFC's design.** Five projects need a JS *build stage* whose output goes into `caddy`; none needs `node-distroless`. Decisions 2, 3 and 4 are written for a pair whose runtime half has no consumer. Settle by writing a successor RFC for the builder-plus-caddy shape and marking this one ❌ superseded — not by editing this RFC's prose, which would hide that the design was cut before the evidence arrived. |
 
 ## 12. Phasing
 
-- **P0 — the Python coupling check.** Not gated on anything in this RFC. It
-  closes an existing latent defect (§3) and proves §5.4's mechanism before any JS
-  image exists. If this RFC's gate never opens, this is what it delivered.
+- **P0 — the Python coupling check. ✅ Shipped 2026-08-12** as an HCL
+  `validation` block in [docker-bake.hcl](../docker-bake.hcl) (decision 9). It
+  closes an existing latent defect (§3). Given §3.1, this is likely the whole of
+  what this RFC delivers.
 - **P1 — the manager decision** (§5.1). Nothing else until it is made.
 - **P2 — builder** with cache mount and the frozen-lockfile helper.
 - **P3 — distroless runtime**, single-variable major coupling, and the
