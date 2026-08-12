@@ -1,7 +1,9 @@
 # RFC 0007 — ClickHouse image
 
-- **Status:** 📝 Draft — **demand-gated**, not scheduled. Highest maintenance load
-  of the four candidates by a wide margin.
+- **Status:** 📝 Draft — **half the gate measured 2026-08-12: analytics is in the
+  stack** (§3.1), but prod leans on managed ClickHouse and no project curates an
+  image, which weakens the case rather than strengthening it. The named owner is
+  still unanswered, and it is now the only thing holding the gate.
 - **Gate:** Analytics is in the stack **and has a named owner**. Not "we might do
   analytics" — a person who will read ClickHouse release notes. ClickHouse's
   release cadence is fast, its config surface is enormous, and its defaults
@@ -53,6 +55,44 @@ whose value expires. See §9.
 ## 3. Current state
 
 Nothing exists in this repo — with one exception that cuts both ways.
+
+### 3.1 The gate, half-measured (2026-08-12)
+
+Swept every Morze repository for ClickHouse outside vendored Pulumi/Terraform
+SDKs and marketing copy.
+
+**Analytics is genuinely in the stack**, in four distinguishable forms:
+
+| Evidence | Where |
+|---|---|
+| A `clickhouse-server` compose service | `morze-erp-backend` (`24.6-alpine`), `morze-erp-infrastructure` (`23.8-alpine`) |
+| Application-level adapters | `morze-crm-backend/ormy/table/clickhouse/`, `morze-erp-backend-v2/packages/erp-infra/.../providers/clickhouse/adapters/` |
+| **Managed** ClickHouse | `morze-erp-infrastructure/environments/dev-managed/databases.tf` (Yandex MDB) |
+| Flyway filtering ClickHouse's banner | `samolet-ai-mvp/docker/flyway/scripts/lib.sh:91` |
+
+Three of those four readings **weaken** the case for this image:
+
+- **Nobody hand-rolls a ClickHouse Dockerfile.** Both compose services run
+  vanilla upstream, so RFC 0003's bar is not met on its own terms.
+- **Prod appears to be managed**, not containerised. An image that curates
+  container-sane defaults is worth nothing to a Yandex MDB cluster, which means
+  this image's addressable use is dev compose only — a much smaller claim than §2
+  makes.
+- The two running versions are `23.8` and `24.6`, both well behind current. That
+  is drift this image would fix, and equally evidence that nobody is watching
+  ClickHouse releases today — which is precisely the named-owner the gate asks
+  for.
+
+The flyway evidence is **weaker than it looks**: the only match is a `grep -Ev`
+line filtering Flyway's "ClickHouse is a community contributed database" banner
+out of log output. That shows somebody ran Flyway against ClickHouse at some
+point; it is not proof of a live migration consumer. §10 question 1 stays open,
+narrowed to: *does `samolet-ai-mvp` still run ClickHouse migrations?*
+
+**Verdict: the gate stays shut on the owner question**, and the measured evidence
+argues for a smaller image or none rather than for building this one now.
+
+### 3.2 The flyway driver
 
 **The flyway image already bundles a ClickHouse JDBC driver.**
 [docker-bake.hcl](../docker-bake.hcl) pins

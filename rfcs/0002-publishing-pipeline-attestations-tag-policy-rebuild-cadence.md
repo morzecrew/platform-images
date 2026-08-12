@@ -346,10 +346,13 @@ The smoke stage of §5.5 is itself most of this RFC's verification. Beyond it:
 - ~~Whether `BUILD_STAMP` should be a date or an ISO week.~~ **Settled** by
   decision 11: neither, since both are reused by a second build in the same
   period. It is `<yyyymmdd>-<run>`.
-- Whether the GHCR Packages panel is empty because nothing has been pushed or
-  because of package visibility settings. This is a five-minute check and it
-  changes nothing in the design, but it must be answered before the README tells
-  anyone to `docker pull`.
+- ~~Whether the GHCR Packages panel is empty because nothing has been pushed or
+  because of package visibility settings.~~ **Answered 2026-08-12: neither.** All
+  five packages are published and **public** (`postgres`, `caddy`, `flyway`,
+  `uv-builder`, `python-distroless`), each updated 2026-08-11. Ten sibling
+  repositories pull them by name. The source note's "the Packages panel is empty"
+  premise was simply wrong, and §2's audience is real: this RFC's tag policy and
+  attestations affect consumers that already exist.
 
 ## 11. Decisions
 

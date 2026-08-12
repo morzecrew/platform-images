@@ -1,6 +1,8 @@
 # RFC 0004 — Postgres extensions as a build argument
 
-- **Status:** 📝 Draft — prerequisite for RFC 0006's gate
+- **Status:** 📝 Draft — **demand measured 2026-08-12** (§3.1): pgvector has two
+  live consumers on a *different base image*, pgmq has none. The first variant is
+  `vector`, and RFC 0006 no longer waits on this RFC.
 - **Scope:** Turn the `postgres` image's hardcoded extension set into a
   `PG_EXTENSIONS` build argument backed by a manifest, so a second extension
   combination is a bake target rather than a second directory. Covers the
@@ -91,6 +93,34 @@ This is the mechanism §5.2 uses; it needs no changes.
 **Bake.** One `postgres` target, `tags = tag("postgres", POSTGRES_VERSION)`,
 `args = { POSTGRES_IMAGE_TAG = POSTGRES_VERSION }`, and a Renovate annotation on
 the variable. `label()` returns a fixed five-entry map for every target.
+
+### 3.1 The demand, measured (2026-08-12)
+
+Swept every Morze repository for pgvector, pgmq and hand-rolled Postgres images.
+
+**pgvector has two live consumers, and they had to leave this image to get it.**
+`demo-ai-consultant` and `fashion-ai-mvp` both run
+`image: pgvector/pgvector:pg18-trixie` — a different upstream base entirely.
+Today the choice is `ghcr.io/morzecrew/postgres` (pg_cron + pgroonga, no vector)
+**or** `pgvector/pgvector` (vector, no cron, no pgroonga). Nobody can have both,
+and two projects have already picked the other side. That is this RFC's
+motivation observed rather than argued, and it names the first variant: **vector,
+not queue.**
+
+**pgmq appears in zero repositories.** §2's framing — that this RFC exists to
+unblock RFC 0006's pgmq question — is therefore not what the evidence supports.
+The mechanism is still worth building; the reason is pgvector.
+
+**Two projects hand-roll a Postgres image that already exists here.**
+
+| Project | Dockerfile | Contents |
+|---|---|---|
+| `morze-crm-backend-v2` | `containers/postgres/Dockerfile` | `postgres:18.1` + pg_cron + pgroonga, including the groonga apt-source block **and its comments**, near-verbatim from [images/postgres/Dockerfile](../images/postgres/Dockerfile) |
+| `morze-erp-backend-v2` | `ops/docker/postgres/Dockerfile` | `postgres:18.1` + pg_cron |
+
+This is duplication of a published image, not of a missing one — the inverse of
+RFC 0003's admission problem, and worth chasing independently of this RFC. It
+also means the `18.1` pin in both is behind this repo's `18.4`.
 
 ## 4. Goals / Non-goals
 

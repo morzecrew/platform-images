@@ -1,6 +1,8 @@
 # RFC 0005 — OpenTelemetry Collector image
 
-- **Status:** 📝 Draft — **gated**, not scheduled. See §gate.
+- **Status:** 📝 Draft — **gate measured 2026-08-12: not met.** Not scheduled.
+  See §3.1 for the evidence; this is the RFC's intended resting state, not a
+  stalled one.
 - **Gate:** A collector is **already** hand-configured in two or more projects —
   RFC 0003's admission bar, applied unchanged. Intent within the quarter does not
   count: RFC 0003 §4.1 rejects anticipated reuse by name, because that is the
@@ -50,6 +52,29 @@ is technically excellent and operationally unopinionated, and the shareable part
 is the opinions.
 
 ## 3. Current state
+
+### 3.1 The gate, measured (2026-08-12)
+
+Swept every Morze repository alongside this one for `otelcol`,
+`opentelemetry-collector` and `otel/opentelemetry` outside vendored trees.
+
+**One repository matches: `forze`** — and there the hits are a Grafana Alloy
+config shipped as documentation assets (`pages/*/running-in-prod/assets/`) plus
+two integration tests (`test_observability_assets.py`,
+`test_telemetry_otlp.py`). No deployed service in any repository carries a
+collector config.
+
+So the count of projects that have hand-configured a collector is **one, and
+arguably zero** — forze's is a documented example and a test fixture, not a
+running collector. RFC 0003's bar wants two. **The gate is shut**, and the
+correct outcome is that this image is not built.
+
+What would change it: a second project running a collector, which would also
+supply the thirty duplicated lines §2 argues about. Until then §2's motivation is
+asserted rather than observed, and an image built on an asserted motivation is
+the speculative infrastructure the gate exists to refuse.
+
+### 3.2 Upstream
 
 Nothing exists in this repo. What matters is what upstream already provides, and
 two facts shrink the work considerably:
