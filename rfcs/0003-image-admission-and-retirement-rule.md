@@ -74,6 +74,11 @@ retroactive evidence to work from — it applies from here forward.
 The first real application of this rule, across ~40 sibling repositories, turned
 up two things the rule does not handle.
 
+> **Resolved 2026-08-12.** Both findings below were referred to the author and
+> settled: the first by a second admission route (row 9), the second by an
+> annual-review question (row 10). The text is kept as written, since it is the
+> evidence those rows were decided on.
+
 **The bar misses configuration-curation images.** RFC 0006 (Valkey) is the case:
 fourteen projects run a Redis or Valkey service across four different pinned
 upstream images, and **not one hand-rolls a Dockerfile** — they all configure
@@ -213,8 +218,10 @@ carrying our vendor label, which is why the README wording is not optional.
 | 4 | `ASSUMED` | Freeze rather than delete the published GHCR package on retirement, since a deleted public tag breaks consumers we cannot see. Depart per image where a broken pull is the better signal. |
 | 5 | `ASSUMED` | The annual review reads consuming repositories, not GHCR pull counts. Depart if a better usage signal appears — but not toward pull counts, which CI inflates. |
 | 6 | `OPEN` | When in the year the review happens and who runs it. An unscheduled annual review is one that does not occur; pick a month and put it in the README with the rule. |
-| 7 | `OPEN` | **Proposed by execution, for the author.** Decision 1's bar counts hand-rolled Dockerfiles, which structurally excludes configuration-curation images — §3.1, with RFC 0006 as the live case. Options: widen the bar to "the same configuration has been hand-written in two or more projects", add a second admission route for curation images, or accept the exclusion and refuse RFC 0006 on it. Decision 1 is `LOCKED`, so this row records the conflict rather than resolving it; the README shipped the rule unchanged. |
-| 8 | `OPEN` | **Proposed by execution.** The rule governs admitting images that do not exist and retiring ones nobody uses, but says nothing about projects re-implementing an image that *is* published (§3.1, two cases). Whether that belongs in this rule, in the root README's adoption guidance, or nowhere is the author's call. |
+| 7 | ~~`OPEN`~~ **Resolved by the author 2026-08-12** | Decision 1's bar counts hand-rolled Dockerfiles, which structurally excludes configuration-curation images (§3.1). **Resolved by adding a second admission route rather than widening decision 1** — see row 9. Decision 1 stays `LOCKED` and unchanged; it was never wrong, it was answering a different question. |
+| 8 | ~~`OPEN`~~ **Resolved by the author 2026-08-12** | Reimplementation of a published image belongs in the annual review, as a question rather than an enforcement — see row 10. |
+| 9 | `LOCKED` | **Route 2, drift.** An image is also admitted when two or more projects run the same upstream image without a Dockerfile *and* their pinned versions or configuration have diverged. Route 1 measures duplicated work; route 2 measures the absence of a shared default. Consequence: RFC 0006's gate opens — 14 projects, four pinned images — while RFC 0005's stays shut, since zero projects cannot diverge. That asymmetry is the test working, not a loophole. |
+| 10 | `LOCKED` | The annual review asks a second question: **does a live project reimplement an image we already publish?** A hit is treated as feedback about the image, not a violation by the project — the useful output is *why* they did not adopt it. §3.1's `morze-erp-backend-v2` is the worked example: it wants pg_cron without pgroonga, which is a `PG_EXTENSIONS` variant (RFC 0004), not an adoption failure. |
 
 ## 8. Phasing
 

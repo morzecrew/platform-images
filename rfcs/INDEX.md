@@ -4,7 +4,7 @@ Design proposals for **Morze :: Platform Images**.
 
 ## Allocating a number
 
-The next free number is **0009**. Before creating an RFC, glance at the table
+The next free number is **0010**. Before creating an RFC, glance at the table
 below (or `ls` this directory) and take the next unused integer — numbers
 collide when minted in parallel. Update this table in the same change.
 
@@ -22,7 +22,8 @@ number in the filename in sync.
 | [0005](0005-opentelemetry-collector-image.md) | OpenTelemetry Collector image | 📝 Draft | Every project rewrites the same collector config, minus the memory limiter; a contrib image with a curated default pipeline of `${env:}` references, env-selected exporters, and an overlay directory. |
 | [0006](0006-valkey-image.md) | Valkey image | 📝 Draft | Whether the cache/queue gap is real at all, and if so a Valkey whose value is a finite `maxmemory`, one persistence switch, file-first secrets, and refusal of the combinations that lose data silently. |
 | [0007](0007-clickhouse-image.md) | ClickHouse image | 📝 Draft | Upstream ClickHouse assumes a dedicated machine; YAML overlays with `from_env`, container-sane memory and cache defaults, a limited default user profile, and a maintained diff from upstream. |
-| [0008](0008-javascript-builder-and-distroless-runtime-pair.md) | JavaScript builder and distroless runtime pair | 📝 Draft | Mirroring `uv-builder`/`python-distroless` for JS: which package manager the builder is named for, and one bake variable coupling builder and runtime majors so they cannot drift. |
+| [0008](0008-javascript-builder-and-distroless-runtime-pair.md) | JavaScript builder and distroless runtime pair | ❌ Superseded | Mirroring `uv-builder`/`python-distroless` for JS: which package manager the builder is named for, and one bake variable coupling builder and runtime majors so they cannot drift. |
+| [0009](0009-javascript-static-asset-builder.md) | JavaScript static-asset builder | 📝 Draft | Five projects each wrote their own Node build stage and diverged; one builder image emitting static assets to a known path, with the published `caddy` image as the runtime. |
 
 ## Status legend
 

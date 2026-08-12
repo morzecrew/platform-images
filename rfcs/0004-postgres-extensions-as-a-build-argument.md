@@ -125,8 +125,18 @@ The mechanism is still worth building; the reason is pgvector.
 | `morze-erp-backend-v2` | `ops/docker/postgres/Dockerfile` | `postgres:18.1` + pg_cron |
 
 This is duplication of a published image, not of a missing one — the inverse of
-RFC 0003's admission problem, and worth chasing independently of this RFC. It
-also means the `18.1` pin in both is behind this repo's `18.4`.
+RFC 0003's admission problem, and it now has a home there (RFC 0003 decision 10
+makes it an annual-review question). It also means the `18.1` pin in both is
+behind this repo's `18.4`.
+
+**`morze-erp-backend-v2` is demand for this RFC, from the opposite direction to
+pgvector.** It installs pg_cron and *not* pgroonga. Today that combination cannot
+be had from this repo at all: `ghcr.io/morzecrew/postgres` bundles both, so a
+project wanting one pays for the other — the groonga apt source, the package, the
+image size — or rebuilds from `postgres:18.1` itself, which is what happened.
+Where pgvector shows the mechanism is needed to *add* an extension, this shows it
+is needed to *omit* one. Both are §12 P2 candidates and the subset case is the
+cheaper of the two, since it needs no new manifest row.
 
 ## 4. Goals / Non-goals
 

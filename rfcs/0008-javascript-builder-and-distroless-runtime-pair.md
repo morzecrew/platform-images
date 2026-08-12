@@ -1,10 +1,14 @@
 # RFC 0008 — JavaScript builder and distroless runtime pair
 
-- **Status:** 📝 Draft — **gate measured 2026-08-12: JS is a real target, but not
-  the shape this RFC assumed** (§3.1). Five projects build JS; **none runs a Node
-  runtime**. The runtime half of this pair has no consumer, and `caddy` already
-  fills that role. §5.1's manager question is answered by evidence; the design
-  needs re-cutting before P2.
+- **Status:** ❌ Superseded 2026-08-12 by
+  [RFC 0009](0009-javascript-static-asset-builder.md) — **except P0, which
+  shipped.** The gate measurement (§3.1) found JS is a real target but not this
+  shape: five projects build JS, **none runs a Node runtime**, and `caddy`
+  already fills that role. The design here is kept unedited as the record of what
+  was cut before the evidence arrived; RFC 0009 is the design that replaces it.
+  The Python coupling check (P0, decision 9) is unaffected by the supersession —
+  it shipped in [docker-bake.hcl](../docker-bake.hcl) and guards a live defect
+  that has nothing to do with JavaScript.
 - **Gate:** Morze ships JS/TS services. If the stack is Python-only — which
   `uv-builder` and `python-distroless` suggest — this is an image maintained for
   nobody, which RFC 0003 §2 prices as the most expensive kind.
@@ -419,7 +423,7 @@ apply once, since a pair is one admission.
 | 8 | `OPEN` | The `build-js-app` prune list. Derive it by measuring what a real project's tree contains; do not translate `build-uv-app`'s switches, which are Python-specific and more aggressive than JS tolerates. |
 | 9 | ~~`OPEN`~~ **Resolved by execution 2026-08-12** | Where the Python coupling assertion lives. **HCL `validation` block on `DISTROLESS_PYTHON_VERSION`**, not a CI step: buildx 0.35 supports variable `validation`, so it fails in `just bake` locally and in CI alike, before any layer is built. Verified red on a builder-only bump, a runtime-only bump, and green on a coordinated one. `startswith` is not available in bake HCL. The shipped condition compares `join("", regexall("^[0-9]+\\.[0-9]+", v))` on both and refuses a value that matches no `major.minor` at all — `slice(split(...))` was tried first and raises an opaque out-of-range error on a version with no minor, replacing the drift message exactly when someone has set something odd. |
 | 10 | `LOCKED` | The package manager is pinned by an exact, integrity-checked `packageManager` declaration, not by a Corepack range. Corepack's Known Good Releases are mutable, and Corepack's presence in the Node image is itself major-dependent, so the builder installs it explicitly. Bun is pinned separately and never through Corepack. |
-| 11 | `OPEN` | **The measured demand (§3.1) does not match this RFC's design.** Five projects need a JS *build stage* whose output goes into `caddy`; none needs `node-distroless`. Decisions 2, 3 and 4 are written for a pair whose runtime half has no consumer. Settle by writing a successor RFC for the builder-plus-caddy shape and marking this one ❌ superseded — not by editing this RFC's prose, which would hide that the design was cut before the evidence arrived. |
+| 11 | ~~`OPEN`~~ **Resolved by the author 2026-08-12** | **The measured demand (§3.1) does not match this RFC's design.** Five projects need a JS *build stage* whose output goes into `caddy`; none needs `node-distroless`. Decisions 2, 3 and 4 are written for a pair whose runtime half has no consumer. Settled as proposed: [RFC 0009](0009-javascript-static-asset-builder.md) carries the builder-plus-caddy design and this RFC is ❌ superseded, prose unedited. Note what 0009 does *not* inherit — decisions 2 and 5 and all of §5.4, because static assets have no runtime to couple to. P0 is excluded from the supersession and remains shipped. |
 
 ## 12. Phasing
 
