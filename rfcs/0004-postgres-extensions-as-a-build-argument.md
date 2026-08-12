@@ -15,8 +15,10 @@
   [images/postgres/rootfs/postgresql.conf](../images/postgres/rootfs/postgresql.conf),
   [images/postgres/rootfs/entrypoint.sh](../images/postgres/rootfs/entrypoint.sh),
   [docker-bake.hcl](../docker-bake.hcl),
-  [images/postgres/README.md](../images/postgres/README.md). Blocks RFC 0006 §gate;
-  depends on nothing.
+  [images/postgres/README.md](../images/postgres/README.md). Depends on nothing.
+  ~~Blocks RFC 0006 §gate~~ — that dependency closed when the 2026-08-12 sweep
+  found pgmq in zero repositories (§3.1), so RFC 0006's gate no longer routes
+  through this RFC.
 - **Origin:** `candidate-images.md` §1.4.
 
 ---

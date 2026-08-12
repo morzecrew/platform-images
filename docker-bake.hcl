@@ -12,9 +12,12 @@ variable "BUILD_DATE" {
 # than only in the root README. Keys are quoted: bare hyphenated keys parse as
 # subtraction.
 #
-# A target with no entry here gets an EMPTY description label, not an error --
-# lookup's default cannot raise. Adding an image therefore has to add a row
-# here too; images/README.md lists it as a touchpoint for that reason.
+# Indexed directly rather than through lookup() with a default: a target with no
+# entry here must fail the build, not publish an empty description label. Bake
+# evaluates every target on every invocation, so a missing row breaks `just
+# bake` immediately and names the line, rather than surfacing on the GHCR page
+# after a push. images/README.md lists the entry as an admission touchpoint and
+# its removal as a retirement step.
 variable "DESCRIPTIONS" {
   default = {
     "flyway"            = "Flyway with PostgreSQL and ClickHouse JDBC drivers, pinned."
@@ -40,7 +43,7 @@ function "label" {
     "org.opencontainers.image.licenses"    = "MIT"
     "org.opencontainers.image.vendor"      = "Morze Technologies"
     "org.opencontainers.image.source"      = "https://github.com/morzecrew/platform-images"
-    "org.opencontainers.image.description" = lookup(DESCRIPTIONS, name, "")
+    "org.opencontainers.image.description" = DESCRIPTIONS[name]
     "org.opencontainers.image.revision"    = GIT_REVISION
     "org.opencontainers.image.created"     = BUILD_DATE
   }

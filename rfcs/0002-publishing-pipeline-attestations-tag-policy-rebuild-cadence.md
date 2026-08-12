@@ -1,8 +1,13 @@
 # RFC 0002 — Publishing pipeline: attestations, tag policy, rebuild cadence
 
-- **Status:** 🚧 In progress — **P1 shipped 2026-08-12** (labels, attestations).
-  Execution found that §5.2's specified syntax is silently ignored by buildx;
-  the divergence is recorded in §5.2a and decision 13. P2–P4 not started.
+- **Status:** 🚧 In progress — **P1's configuration shipped 2026-08-12**: the
+  label set and the attestation declaration are in
+  [docker-bake.hcl](../docker-bake.hcl) and verified with `bake --print`.
+  **Attestations on published images remain unverified** — nothing has been
+  pushed from that configuration yet, and §6's `imagetools inspect` against a
+  real digest is what would turn the declaration into a fact. Execution also
+  found §5.2's specified syntax is silently ignored by buildx (§5.2a, decision
+  13). P2–P4 not started.
 - **Scope:** What a published `ghcr.io/morzecrew/*` tag guarantees about itself.
   Covers the OCI label set in [docker-bake.hcl](../docker-bake.hcl), buildx
   provenance and SBOM attestations, a stated tag-mutability policy with an
@@ -393,8 +398,8 @@ The smoke stage of §5.5 is itself most of this RFC's verification. Beyond it:
 
 | # | Grade | Decision |
 | --- | --- | --- |
-| 1 | `LOCKED` | Both tag forms ship: mutable `:<version>` and immutable `:<version>-<yyyymmdd>`, with the digest documented as the only true immutable reference. Consequence: dated tags accumulate with no retention policy (§8). |
-| 2 | `LOCKED` | `provenance = "mode=max"` and `sbom = true` on every target. Cannot be applied retroactively to already-published tags, which is why it lands before the candidate images. |
+| 1 | `LOCKED` | Both tag forms ship: mutable `:<version>` and immutable ~~`:<version>-<yyyymmdd>`~~ — **stamp format superseded by row 11**, now `:<version>-<yyyymmdd>-<run>` — with the digest documented as the only true immutable reference. Consequence: dated tags accumulate with no retention policy (§8). |
+| 2 | `LOCKED` | Max-mode provenance and an SBOM on every target — ~~declared as `provenance = "mode=max"` / `sbom = true`~~, **syntax superseded by row 13** (§5.2a), since that form is silently ignored. Cannot be applied retroactively to already-published tags, which is why it lands before the candidate images. |
 | 3 | `LOCKED` | The weekly scheduled rebuild uses `--no-cache`. A cached rebuild does not pick up a rebuilt base layer, which makes the cadence pointless. |
 | 4 | `LOCKED` | Attestations are described as unsigned evidence in all documentation. Signing is a separate RFC with its own identity policy (§8). |
 | 5 | `ASSUMED` | Rootless Podman for smoke tests, on stock `ubuntu-latest`. Depart if runner support proves fragile enough to make the stage flaky — but degrade to rootless Docker, not to root. |
@@ -403,11 +408,12 @@ The smoke stage of §5.5 is itself most of this RFC's verification. Beyond it:
 | 8 | `OPEN` | Where the failure notification for the scheduled rebuild goes. A silent scheduled failure is the single most likely way this RFC ends up delivering nothing; pick a channel and wire it in the same PR. |
 | 9 | `OPEN` | Whether to fix the `.yml`/`.yaml` path-filter mismatch in both workflows in this PR or leave it. It is a one-character bug with no current impact; the argument for fixing it now is that it will otherwise be diagnosed twice. |
 | 10 | `LOCKED` | Every publishing run builds once, smoke-tests that exact artifact, and pushes only on success (§5.4). A separate test build and publish build produce different digests, so the gate would attest to bytes nobody shipped. |
-| 11 | `LOCKED` | `BUILD_STAMP` is unique per build (`<yyyymmdd>-<run>`), declared with an empty default, and omitted from `tag()` when empty. Supersedes row 6. Consequence: dated tags accumulate faster than weekly under repeated dispatches, which §8's absent retention policy now has to account for. |
+| 11 | `LOCKED` | `BUILD_STAMP` is unique per build (`<yyyymmdd>-<run>`), declared with an empty default, and omitted from `tag()` when empty. Supersedes row 6, and supersedes the stamp format in row 1. Consequence: dated tags accumulate faster than weekly under repeated dispatches, which §8's absent retention policy now has to account for. |
 | 12 | `LOCKED` | The scheduled-rebuild failure notification is a **precondition for enabling P4**, not a follow-up. Row 8 still owns which channel; what is settled here is that P4 does not ship without one, because a silent weekly failure leaves the mutable tag on stale bytes while claiming freshness. |
-| 13 | `LOCKED` | **Found by execution 2026-08-12.** Attestations are declared with the `attest = ["type=provenance,mode=max", "type=sbom"]` list, never the `provenance`/`sbom` shorthand, which buildx 0.35 accepts and silently drops (§5.2a). Consequence: any future attestation change must be verified with `bake --print`, because this class of error is invisible in a passing build. |
-| 14 | `ASSUMED` | **Set by execution.** `.description` comes from a `DESCRIPTIONS` map variable in the bake file, keyed by image name, with keys quoted — bare hyphenated keys parse as subtraction in HCL. A target with no entry gets an **empty** description, not an error, so adding an image is now a nine-item checklist in [images/README.md](../images/README.md). Depart if the descriptions need to live somewhere a non-editor can reach. |
+| 13 | `LOCKED` | **Found by execution 2026-08-12.** Supersedes the syntax in row 2. Attestations are declared with the `attest = ["type=provenance,mode=max", "type=sbom"]` list, never the `provenance`/`sbom` shorthand, which buildx 0.35 accepts and silently drops (§5.2a). Consequence: any future attestation change must be verified with `bake --print`, because this class of error is invisible in a passing build. |
+| 14 | ~~`ASSUMED`~~ | ~~**Set by execution.** `.description` comes from a `DESCRIPTIONS` map, and a target with no entry gets an **empty** description, not an error.~~ **Superseded by row 16** — an empty label was a silent failure the rest of this RFC exists to remove. |
 | 15 | `ASSUMED` | **Set by execution.** The shared attestation target is named `_attested`, not §5.2's `_common` — it carries only attestations, and a name that says so survives the next thing someone wants to share across targets. |
+| 16 | `LOCKED` | **Set by review.** `DESCRIPTIONS` is indexed directly (`DESCRIPTIONS[name]`), not via `lookup()` with a default, so a target with no entry **fails the build**. Bake evaluates every target on every invocation, so the failure is immediate and local rather than surfacing as a blank GHCR page after a push. Consequence: adding an image is a nine-item checklist and removing one has to drop the row too, both in [images/README.md](../images/README.md). Keys stay quoted — bare hyphenated keys parse as subtraction in HCL. |
 
 ## 12. Phasing
 

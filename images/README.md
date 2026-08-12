@@ -76,7 +76,11 @@ repo is retired even if it builds cleanly.
 Deletion has to be mechanical or it will not happen:
 
 1. Announce in the image's README that the tag is frozen, with a date.
-2. Remove the bake target, its variable, and its `default` group entry.
+2. Remove the bake target, its variable, its `default` group entry, and its
+   `DESCRIPTIONS` row — the last is not optional bookkeeping: `DESCRIPTIONS` is
+   indexed directly, so a stale row is harmless but a missing one fails every
+   bake invocation, and leaving retirement half-done here is how the map drifts
+   out of step with the targets.
 3. Remove the row from the root README images table.
 4. Delete `images/<name>/`.
 5. **Leave `<name>` in `PACKAGES`** — the published package still exists and its
