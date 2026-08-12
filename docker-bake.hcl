@@ -11,6 +11,10 @@ variable "BUILD_DATE" {
 # One line per image. Shown on the GHCR package page, so it lives here rather
 # than only in the root README. Keys are quoted: bare hyphenated keys parse as
 # subtraction.
+#
+# A target with no entry here gets an EMPTY description label, not an error --
+# lookup's default cannot raise. Adding an image therefore has to add a row
+# here too; images/README.md lists it as a touchpoint for that reason.
 variable "DESCRIPTIONS" {
   default = {
     "flyway"            = "Flyway with PostgreSQL and ClickHouse JDBC drivers, pinned."
@@ -164,9 +168,15 @@ target "uv-builder" {
 variable "DISTROLESS_PYTHON_VERSION" {
   default = "3.14.6"
 
+  # regexall, not split/slice: slice raises a bare "end index greater than the
+  # length of the list" on a version with no minor (e.g. "3"), which replaces
+  # the message below with an HCL internal error at exactly the moment someone
+  # has set something odd. regexall returns [] instead of raising, and the
+  # non-empty check then refuses a version that has no major.minor at all --
+  # otherwise two malformed values would compare equal and pass.
   validation {
-    condition = join(".", slice(split(".", BUILDER_PYTHON_VERSION), 0, 2)) == join(".", slice(split(".", DISTROLESS_PYTHON_VERSION), 0, 2))
-    error_message = "Python version drift: BUILDER_PYTHON_VERSION and DISTROLESS_PYTHON_VERSION must agree on major.minor. uv-builder builds the venv that python-distroless runs; a mismatch fails at runtime, not at build."
+    condition = join("", regexall("^[0-9]+\\.[0-9]+", BUILDER_PYTHON_VERSION)) != "" && join("", regexall("^[0-9]+\\.[0-9]+", BUILDER_PYTHON_VERSION)) == join("", regexall("^[0-9]+\\.[0-9]+", DISTROLESS_PYTHON_VERSION))
+    error_message = "Python version drift: BUILDER_PYTHON_VERSION and DISTROLESS_PYTHON_VERSION must agree on major.minor, and both must start with one. uv-builder builds the venv that python-distroless runs; a mismatch fails at runtime, not at build."
   }
 }
 

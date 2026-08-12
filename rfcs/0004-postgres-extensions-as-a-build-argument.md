@@ -98,9 +98,13 @@ the variable. `label()` returns a fixed five-entry map for every target.
 
 Swept every Morze repository for pgvector, pgmq and hand-rolled Postgres images.
 
-**pgvector has two live consumers, and they had to leave this image to get it.**
-`demo-ai-consultant` and `fashion-ai-mvp` both run
-`image: pgvector/pgvector:pg18-trixie` — a different upstream base entirely.
+**pgvector has two deployed consumers, and they had to leave this image to get
+it.** `demo-ai-consultant` and `fashion-ai-mvp` both run
+`image: pgvector/pgvector:pg18-trixie` — a different upstream base entirely. A
+third repository, `forze`, pins the same image in an integration-test fixture
+(`tests/integration/test_forze_postgres/conftest.py`); that is counted separately
+here for the same reason RFC 0005 §3.1 discounts forze's collector assets — a
+test fixture is not a deployment.
 Today the choice is `ghcr.io/morzecrew/postgres` (pg_cron + pgroonga, no vector)
 **or** `pgvector/pgvector` (vector, no cron, no pgroonga). Nobody can have both,
 and two projects have already picked the other side. That is this RFC's

@@ -30,22 +30,28 @@ just push postgres 18   # push an already-built local tag
 > maintained.
 
 The reason is cost, not taste. Every image is a permanent subscription to
-somebody else's CVE feed, and adding one is eight edits, not one:
+somebody else's CVE feed, and adding one is nine edits, not one:
 
 | # | Touchpoint |
 |---|---|
 | 1 | `images/<name>/` — `Dockerfile`, `README.md`, optional `rootfs/` |
 | 2 | Version variable with its Renovate annotation in [`docker-bake.hcl`](../docker-bake.hcl) |
-| 3 | Bake target with `tag()` / `label()` / args |
+| 3 | Bake target with `tag()` / `label()` / args, inheriting `_attested` |
 | 4 | `default` group membership |
 | 5 | `PACKAGES` in [`cleanup-images.yaml`](../.github/workflows/cleanup-images.yaml) |
 | 6 | Images table row in the [root README](../README.md) |
-| 7 | Env-config allowlist and README section |
-| 8 | `smoke.sh` |
+| 7 | A `DESCRIPTIONS` entry in [`docker-bake.hcl`](../docker-bake.hcl) |
+| 8 | Env-config allowlist and README section — *once RFC 0001 ships* |
+| 9 | `smoke.sh` — *once RFC 0002 P3 ships* |
 
-**Items 4 and 5 fail silently.** A missing `default` entry means the image is
+**Items 4, 5 and 7 fail silently.** A missing `default` entry means the image is
 never built by `just bake`; a missing `PACKAGES` entry means its untagged
-versions accumulate in GHCR forever. Neither produces a red check.
+versions accumulate in GHCR forever; a missing `DESCRIPTIONS` entry publishes an
+empty `org.opencontainers.image.description` rather than raising. None of the
+three produces a red check.
+
+Items 8 and 9 have no mechanism yet — they are listed so the cost is visible, not
+because there is something to fill in today.
 
 Two clarifications that keep admission from being argued away:
 

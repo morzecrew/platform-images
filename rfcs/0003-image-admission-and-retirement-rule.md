@@ -84,6 +84,14 @@ contribution is defaults never shows up as a duplicated Dockerfile. Decision 7
 records this; decision 1 is `LOCKED`, so the fix is the author's, not
 execution's.
 
+**The touchpoint count moved from eight to nine.** RFC 0002 P1 shipped a
+`DESCRIPTIONS` map in the bake file on the same day, and a target with no entry
+in it publishes an empty description label rather than failing — a third
+silent-omission touchpoint alongside `default` and `PACKAGES`. §2's table says
+eight because that was true when this RFC was written; the shipped README says
+nine. Expect this count to grow once RFC 0001 and RFC 0002 P3 land, which is
+itself the argument the admission bar is making.
+
 **The inverse problem exists and the rule says nothing about it.** Two projects —
 `morze-crm-backend-v2` and `morze-erp-backend-v2` — hand-roll a Postgres
 Dockerfile that **this repo already publishes**, one of them near-verbatim from
