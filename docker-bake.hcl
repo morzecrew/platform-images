@@ -74,7 +74,7 @@ target "_attested" {
 
 # renovate: datasource=docker depName=flyway/flyway versioning=docker
 variable "FLYWAY_VERSION" {
-  default = "13.2"
+  default = "13.3"
 }
 
 target "flyway" {
