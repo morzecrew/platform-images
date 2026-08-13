@@ -119,7 +119,7 @@ target "caddy" {
 
 # renovate: datasource=docker depName=postgres versioning=docker
 variable "POSTGRES_VERSION" {
-  default = "18.4"
+  default = "18.6"
 }
 
 target "postgres" {
