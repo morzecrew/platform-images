@@ -113,18 +113,35 @@ echo "summary: present"
 
 start "${CTR}" --memory 256m
 wait_ready "${CTR}"
-derived="$(cfg "${CTR}" maxmemory)"
-# 75% of 256 MiB = 201326592. Allow slack for the divide-first rounding and for
-# runtimes that round the limit itself.
-if [ "${derived}" -lt 195000000 ] || [ "${derived}" -gt 210000000 ]; then
-	echo "FAIL: under a 256m limit, derived maxmemory=${derived}, expected ~201326592"
-	"${ENGINE}" logs "${CTR}" 2>&1 | head -5
+
+# Rootless engines cannot always apply a memory limit -- it needs cgroup v2
+# with delegation -- and where it is not applied the image correctly takes its
+# warned fallback. Distinguish the two rather than asserting a number, so this
+# reports on the image and not on the runtime it happens to be running under.
+# Captured rather than piped to grep -q: under `set -o pipefail`, grep exiting
+# early SIGPIPEs the writer and the pipeline reports 141.
+mem_logs="$("${ENGINE}" logs "${CTR}" 2>&1)"
+case "${mem_logs}" in
+*"source=derived"*)
+	derived="$(cfg "${CTR}" maxmemory)"
+	# 75% of 256 MiB = 201326592, less up to 99 bytes for the divide-first
+	# rounding, plus slack for runtimes that round the limit itself.
+	if [ "${derived}" -lt 195000000 ] || [ "${derived}" -gt 210000000 ]; then
+		echo "FAIL: under a 256m limit, derived maxmemory=${derived}, expected ~201326592"
+		"${ENGINE}" logs "${CTR}" 2>&1 | head -5
+		exit 1
+	fi
+	echo "derived from cgroup: ${derived} (~75% of 256m)"
+	;;
+*"source=fallback"*)
+	echo "skip cgroup derivation: this runtime did not apply --memory;"
+	echo "     the image took its warned fallback, which is the documented behaviour"
+	;;
+*)
+	echo "FAIL: maxmemory was neither derived nor the fallback"
+	printf '%s\n' "${mem_logs}" | head -10
 	exit 1
-fi
-echo "derived from cgroup: ${derived} (~75% of 256m)"
-case "$("${ENGINE}" logs "${CTR}" 2>&1)" in
-*"source=derived"*) echo "summary attributes it to the cgroup" ;;
-*) echo "FAIL: summary did not report source=derived"; exit 1 ;;
+	;;
 esac
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 

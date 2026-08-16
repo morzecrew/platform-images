@@ -41,9 +41,15 @@ include
 rename-command
 EOF
 
+# Progress goes to stderr, never stdout. `run` captures the stdout of the case
+# it wraps, so an `ok` line on stdout ends up inside the value the assertion
+# then compares -- which is invisible without -v and breaks every capturing
+# assertion with it.
 ok() {
 	PASS=$((PASS + 1))
-	[ "${VERBOSE}" = "-v" ] && echo "  ok   $1" || true
+	if [ "${VERBOSE}" = "-v" ]; then
+		echo "  ok   $1" >&2
+	fi
 }
 
 bad() {
@@ -170,6 +176,20 @@ expect_contains "  ...not dashed" "${out}" "server_cpulist|0-3|"
 # "VALKEY_CONF__notify, defaulting to the literal keyspace-events".
 # `env` is required to set it: a dashed name is not a valid shell assignment
 # target, so it cannot be set as a prefix on a function call.
+# Whether these can run at all depends on the shell. dash discards environment
+# variables whose names are not valid shell identifiers when it spawns a child,
+# so under dash the variable is gone before awk is reached -- nothing to do with
+# the helper. busybox ash, which is what the Alpine-based images actually run,
+# preserves them.
+#
+# Skipped rather than failed where the shell cannot carry the value, because a
+# red test would be reporting on the test runner's shell rather than on the
+# code. The image path is covered end to end by images/valkey/smoke.sh, which
+# runs against busybox ash.
+shell_keeps_dashed_names() {
+	env "A-B=x" sh -c 'awk "BEGIN { exit !(\"A-B\" in ENVIRON) }"' 2>/dev/null
+}
+
 dashed() {
 	env "VALKEY_CONF__notify-keyspace-events=$1" sh -c '
 		. "$1"
@@ -179,13 +199,18 @@ dashed() {
 	' _ "${HELPER}" "${TMP}/allow.conf" "${TMP}/deny.conf"
 }
 
-out=$(dashed KEA)
-expect_equals "a dashed variable name yields its real value" \
-	"${out}" "notify-keyspace-events|KEA|"
+if shell_keeps_dashed_names; then
+	out=$(dashed KEA)
+	expect_equals "a dashed variable name yields its real value" \
+		"${out}" "notify-keyspace-events|KEA|"
 
-out=$(dashed "")
-expect_equals "a dashed variable set to empty stays empty" \
-	"${out}" "notify-keyspace-events||"
+	out=$(dashed "")
+	expect_equals "a dashed variable set to empty stays empty" \
+		"${out}" "notify-keyspace-events||"
+else
+	echo "  skip dashed variable names -- this shell drops them before awk;" >&2
+	echo "       covered against busybox ash by images/valkey/smoke.sh" >&2
+fi
 
 # --- channel collision (RFC 0001 decision 11) -----------------------------
 
