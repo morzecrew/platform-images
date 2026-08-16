@@ -432,9 +432,14 @@ code disagreeing with an RFC needs to know it was seen.
 Branch `feat/wave-2-weekly-rebuild`. RFC 0002 P4 — the phase wave 1 descoped in
 D-007 and the spike in D-008 unblocked.
 
-**Drift count: 0.** Nothing here contradicts a decision row. The three entries
-below are one `spec-gap` the RFC left between two sections, one `spec-gap` about
-a file the RFC never mentions, and one `discovery` about cron ordering.
+**Drift count: 2** — R-9 and R-10, both found by PR #28's review, neither caught
+during execution or by the self-audit. The count read 0 until review; the
+history is kept because a zero that only survives until someone else looks was
+never a measurement.
+
+The departures below are one `spec-gap` the RFC left between two sections, one
+`spec-gap` about a file the RFC never mentions, and one `discovery` about cron
+ordering — none of which is drift. The drift arrived from the review.
 
 **Scoped deliberately narrow.** The planned wave 2 was RFC 0006 P2+P3 carrying
 RFC 0001 P2. That track was **stopped at the readiness gate** — see D-012 — and
@@ -491,15 +496,34 @@ been deferred only until wave 1 merged.
   *genuine* orphan, from a run that died mid-flight, now waits until the
   following Monday to be collected — a week of unreferenced bytes, which is
   storage rather than a fault, and the cheaper of the two mistakes.
-- **Corrected during the self-audit.** The first version of this entry, and the
-  workflow comment with it, claimed the offset *minimised* orphan lifetime —
-  "an hour instead of a week". That is exactly inverted: an orphan created at
-  05:00 Monday waits for the next Monday's 04:00 cleanup. The ordering is right
-  and the stated reason was wrong, which is the more dangerous shape, because
-  the next person to tune these crons would have optimised against it.
-- **Proposed row (RFC 0002):** `ASSUMED` — the rebuild cron must stay after the
-  cleanup cron, because cleanup deletes untagged versions and a gated publish is
-  briefly untagged by construction.
+- **Corrected twice, and the second one matters more than the first.**
+
+  *First correction (self-audit).* The original entry, and the workflow comment
+  with it, claimed the offset *minimised* orphan lifetime — "an hour instead of
+  a week". Exactly inverted: an orphan created at 05:00 Monday waits for the
+  next Monday's 04:00 cleanup.
+
+  *Second correction (PR #28 review).* The offset does not protect the window at
+  all, except in one of four cases. It separates the two **scheduled** runs.
+  `publish.yaml` also fires on `push` and `workflow_dispatch`, and
+  `cleanup-images.yaml` fires on `workflow_dispatch` — and the two workflows sat
+  in **different concurrency groups**, so nothing serialised them. A merge
+  landing at 03:59 on a Monday, or anyone dispatching cleanup by hand, walks
+  straight into the untagged window and deletes a healthy build moments before
+  promotion.
+
+  Both workflows now share `concurrency: group: ghcr-mutations`. Concurrency
+  groups are repository-scoped rather than per-workflow, so one shared name is
+  what actually serialises them. The cron offset is retained for ordering, and
+  is no longer load-bearing.
+- **Consequence of the fix:** cleanup and publish now queue behind each other.
+  Both are infrequent and neither is latency-sensitive, so the cost is a wait.
+  Splitting the group reopens the race, which is why both files say so.
+- **Proposed row (RFC 0002):** `ASSUMED` — every workflow that mutates GHCR
+  shares one concurrency group, because a gated publish is untagged by
+  construction between its digest push and its promotion, and untagged is what
+  cleanup deletes. The cron offset orders the scheduled runs; it does not
+  protect the window.
 
 ## D-012 — `just publish` refuses instead of publishing
 
@@ -546,6 +570,29 @@ been deferred only until wave 1 merged.
   starts once those three are settled — each is a paragraph, against a
   re-implementation if guessed at.
 
+## Review findings — PR #28, 2026-08-16
+
+`R-` numbers continue from wave 1 rather than restarting, because they are
+identifiers and a number that means two things breaks every citation to it.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| R-9 | `publish.yaml`, `cleanup-images.yaml` | **The cron offset protected one interleaving out of four.** D-011 argued the offset keeps cleanup out of the window where a gated publish is untagged. It only separates the two *scheduled* runs — publish also fires on `push` and `workflow_dispatch`, cleanup on `workflow_dispatch`, and the two workflows were in different concurrency groups, so nothing serialised them. A merge landing at 03:59 Monday deletes a healthy digest moments before promotion. Both now share `concurrency: group: ghcr-mutations`. | `drift` | Fixed |
+| R-10 | `README.md`, `images/README.md` | Both documented `just publish` as "build + push everything" after D-012 made it refuse, and neither mentioned `I_KNOW_THIS_IS_UNGATED`. Following the documentation produced a refusal. | `drift` | Fixed |
+
+**Drift count corrected: 2, not 0.** Both are `drift` by the test that matters —
+the design covered the case and the code did otherwise. R-9 is against a
+`LOCKED` row (10): a publish whose digest is deleted before promotion cannot
+push what it smoke-tested. R-10 is against D-012's own consequence line, which
+claimed a developer "gets it, with both reasons printed first" while the docs
+still advertised the old contract.
+
+R-9 is the one worth dwelling on. It survived being written, being re-derived
+during a self-audit that *corrected this very entry's rationale*, and being
+described in a PR body — and it was still wrong, because every pass reasoned
+about the schedules rather than about the triggers. Getting the rationale right
+is not the same as getting the mechanism right.
+
 ## Self-audit findings — wave 2, 2026-08-16
 
 | # | Where | Finding | Class | Status |
@@ -579,6 +626,11 @@ whole purpose this wave is to make failures loud.
   held for a wrong reason. D-011 was correct and its stated justification was
   backwards — a defect invisible until someone acts on the justification
   rather than the ordering (D-011, corrected in self-audit).
+- A schedule is not a mutual exclusion. Two jobs that must not overlap need a
+  shared concurrency group, because every non-scheduled trigger — push, manual
+  dispatch — bypasses the reasoning the schedules encode. D-011 survived a
+  self-audit that corrected its rationale and still protected only one of four
+  interleavings (D-011, second correction).
 - Specifying a pipeline does not secure it. Ask what the *other* entrances are —
   the local recipe, the manual dispatch — because a rule enforced in one path
   and absent from another is a rule with a documented bypass (D-012).

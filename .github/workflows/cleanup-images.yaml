@@ -22,8 +22,12 @@ on:
 # All registry access uses GHCR_CLEANUP_TOKEN; GITHUB_TOKEN needs nothing here.
 permissions: {}
 
+# Shared with publish.yaml, deliberately. A gated publish is untagged between
+# its digest push and its tag promotion, and this job deletes untagged versions
+# -- so the two must never run at once. Splitting this group back out reopens
+# that race, and neither workflow's schedule is what prevents it.
 concurrency:
-  group: cleanup-images
+  group: ghcr-mutations
   cancel-in-progress: false
 
 env:

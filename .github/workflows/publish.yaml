@@ -35,8 +35,21 @@ permissions:
   # For the scheduled-rebuild failure issue (RFC 0002 decision 8).
   issues: write
 
+# Shared with cleanup-images.yaml, and that sharing is the actual safety
+# mechanism rather than the cron offset above.
+#
+# Between the digest push and the tag promotion below, a healthy build exists in
+# GHCR as an untagged version, which is exactly what cleanup deletes. The cron
+# offset only separates the two *scheduled* runs; this workflow also fires on
+# push and workflow_dispatch, and cleanup fires on workflow_dispatch too, so a
+# merge landing at 03:59 Monday or a manually dispatched cleanup walks straight
+# into that window. A group shared across both workflows is what actually
+# serialises them -- concurrency groups are repository-scoped, not per-workflow.
+#
+# cancel-in-progress stays false on both: cancelling a publish mid-promotion is
+# the failure this exists to prevent.
 concurrency:
-  group: publish-images
+  group: ghcr-mutations
   cancel-in-progress: false
 
 jobs:
