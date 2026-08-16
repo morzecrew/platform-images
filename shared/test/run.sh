@@ -206,6 +206,28 @@ out=$(VALKEY_CONF__loglevel=a VALKEY_CONF__databases=1 VALKEY_CONF__timeout=2 \
 	run "collect emits keys in sorted order" 0 'envconf_collect VALKEY | tr "\0" "|"')
 expect_equals "  ...deterministic" "${out}" "databases|1|loglevel|a|timeout|2|"
 
+# --- unknown curated names (RFC 0001 decision 9) --------------------------
+
+out=$(VALKEY_MAXMEMROY=1 run "a typo'd curated name warns" 0 \
+	'envconf_warn_unknown VALKEY "VALKEY_MAXMEMORY"')
+expect_contains "  ...names the variable" "${out}" "VALKEY_MAXMEMROY is set"
+
+out=$(VALKEY_MAXMEMORY=1 run "a real curated name does not warn" 0 \
+	'envconf_warn_unknown VALKEY "VALKEY_MAXMEMORY"')
+expect_equals "  ...silent" "${out}" ""
+
+# The ignore list is what answers the noise objection: a warning that fires on
+# the image's own control variables teaches operators to ignore all of them.
+out=$(VALKEY_CONF_STRICT=fail VALKEY_CONF_ALLOWLIST=/x VALKEY_CONF__loglevel=a \
+	VALKEY_PASSWORD_FILE=/x run "control variables are not warned about" 0 \
+	'envconf_warn_unknown VALKEY "VALKEY_MAXMEMORY"')
+expect_equals "  ...silent" "${out}" ""
+
+# Not fatal: a real container's environment carries unrelated variables, and a
+# fail-closed rule here would refuse to start over a sibling service's config.
+run "an unknown name warns but does not abort" 0 \
+	'VALKEY_NONSENSE=1 envconf_warn_unknown VALKEY "VALKEY_MAXMEMORY"' >/dev/null
+
 # --- render ---------------------------------------------------------------
 
 out=$(run "valkeyconf renders bare when it can" 0 \

@@ -15,6 +15,7 @@
 #   envconf_load_allowlist <path>
 #   envconf_load_denylist  <path>
 #   envconf_collect        <prefix> [curated_keys]
+#   envconf_warn_unknown   <prefix> <curated_var_names>
 #   envconf_render         <fmt> [infile]
 #   envconf_summary        <prefix> [infile]
 #   envconf_secret         <name>
@@ -224,6 +225,45 @@ envconf_collect() {
 		fi
 
 		printf '%s\0%s\0' "${canon}" "${value}"
+	done
+}
+
+# Warn about <prefix>_* variables that are neither a curated name nor a
+# passthrough key (RFC 0001 decision 9). A typo'd curated knob that silently
+# does nothing is the failure this contract exists to prevent, and one log line
+# is cheaper than that.
+#
+# Not fatal, deliberately: a real container's environment is full of unrelated
+# variables, and a fail-closed rule here would refuse to start because a
+# sibling service shares a prefix.
+#
+# The noise objection is answered by the ignore list rather than by silence.
+# The image's own control variables are excluded -- a warning that fires on
+# <PREFIX>_CONF_STRICT itself teaches operators to ignore all of them.
+#
+#   envconf_warn_unknown <prefix> <curated_var_names>
+envconf_warn_unknown() {
+	local prefix="$1"
+	local curated=" ${2:-} "
+	local names name
+
+	[ -n "${prefix}" ] || envconf_die "envconf_warn_unknown: no prefix given"
+
+	names=$(awk -v pfx="${prefix}_" \
+		'BEGIN { for (k in ENVIRON) if (index(k, pfx) == 1) print k }' | sort)
+
+	for name in ${names}; do
+		# The passthrough channel and its own controls.
+		case "${name}" in
+		"${prefix}_CONF__"*) continue ;;
+		"${prefix}_CONF_STRICT" | "${prefix}_CONF_ALLOWLIST") continue ;;
+		esac
+		# Any <NAME>_FILE, since the base name is what the image declares.
+		case "${name}" in
+		*_FILE) continue ;;
+		esac
+		_envconf_in_set "${curated}" "${name}" && continue
+		envconf_warn "${name} is set but this image does not use it. Check the spelling against images/<name>/README.md, or use ${prefix}_CONF__<directive> for a passthrough setting."
 	done
 }
 

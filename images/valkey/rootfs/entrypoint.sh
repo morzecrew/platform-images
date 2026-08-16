@@ -247,6 +247,15 @@ curated_if_set VALKEY_LOGLEVEL loglevel
 curated_if_set VALKEY_TCP_KEEPALIVE tcp-keepalive
 curated_if_set VALKEY_APPENDFSYNC appendfsync
 
+# RFC 0001 decision 9: a typo'd curated name is warned about, not ignored.
+# Every VALKEY_* the image reads is listed here; adding a curated variable
+# without adding it here makes the image warn about its own knob.
+envconf_warn_unknown "${PREFIX}" "\
+VALKEY_MAXMEMORY VALKEY_MAXMEMORY_PERCENT VALKEY_MAXMEMORY_POLICY \
+VALKEY_PERSISTENCE VALKEY_APPENDFSYNC VALKEY_PASSWORD \
+VALKEY_DATABASES VALKEY_LOGLEVEL VALKEY_TCP_KEEPALIVE \
+VALKEY_RENAME_DANGEROUS"
+
 envconf_load_allowlist "${ALLOWLIST}"
 envconf_load_denylist "${DENYLIST}"
 envconf_collect "${PREFIX}" "${CURATED}" >"${PASSTHROUGH}"

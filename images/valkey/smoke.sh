@@ -282,4 +282,17 @@ case "${peer}" in
 esac
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
+# --- 13. a typo'd curated name is warned about (RFC 0001 decision 9) -------
+
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+start "${CTR}" -e VALKEY_MAXMEMROY=100mb
+wait_ready "${CTR}"
+case "$("${ENGINE}" logs "${CTR}" 2>&1)" in
+*"VALKEY_MAXMEMROY is set but this image does not use it"*)
+	echo "typo'd curated name: warned, and the server still started"
+	;;
+*) echo "FAIL: a typo'd curated variable was ignored silently"; exit 1 ;;
+esac
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
 echo "PASS: valkey"

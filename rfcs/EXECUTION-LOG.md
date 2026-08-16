@@ -674,7 +674,7 @@ RFC 0004 row 5 pre-authorised D-001 — so they wait.
 
 Branch `feat/wave-3-shared-envconf-valkey`. RFC 0001 P2, RFC 0006 P1, P2 and P3.
 
-**Drift count: 4** — D-018, A-7, A-8, A-9. The count read 1 after execution and
+**Drift count: 5** — D-018, A-7, A-8, A-9, A-11. The count read 1 after execution and
 was corrected by the self-audit; all three additions are places where a
 **`LOCKED`** row or an explicit RFC instruction covered the case and the code
 did something else. The rest of the entries are `spec-gap` or `discovery`; the
@@ -857,7 +857,15 @@ Found by the adversarial pass over the finished branch. All four are in the
 | A-7 | `entrypoint.sh` | A mounted fragment was summarised as one `(fragment) = included verbatim` line. RFC 0001 decision 13 (`LOCKED`) requires **full per-setting `source=` attribution** from an image that assembles its config from enumerable layers, and this is one. "Which layer won" is unanswerable when a whole file collapses to a single row. Now parsed and attributed per directive. | `drift` | Fixed |
 | A-8 | `entrypoint.sh` | The §5.3 refusals read the *environment*, so a fragment setting `appendonly yes` turned on persistence without passing through `VALKEY_PERSISTENCE` and walked straight past a refusal decision 6 marks `LOCKED`. The refusals now run a second time against the **assembled** config, which covers all three layers uniformly. | `drift` | Fixed |
 | A-9 | `images/valkey/README.md` | The Networking section said reachability "is the business of your network" and that a password *should* be set. In fact `protected-mode` plus no password means the server **refuses every non-loopback connection** — the service is simply unreachable. RFC 0006 §5.4 requires the bind behaviour "stated explicitly in the README rather than inherited silently", and it was inherited silently. | `drift` | Fixed |
+| A-11 | `envconf.sh`, `entrypoint.sh` | **RFC 0001 decision 9 (`LOCKED` 2026-08-12) was not implemented at all.** A `<PREFIX>_*` variable that is neither a curated name nor a passthrough key must warn — `VALKEY_MAXMEMROY=100mb` did nothing, silently, which the row calls "the failure this contract exists to prevent". Added `envconf_warn_unknown`, with the row's ignore list (`_CONF_STRICT`, `_CONF_ALLOWLIST`, any `_FILE`) and non-fatal by design. | `drift` | Fixed |
 | A-10 | `shared/test/run.sh` | Two surviving mutants. Removing the `_FILE` trailing-newline strip survived, because `$(...)` strips trailing newlines and the assertion could not see the difference. Removing the `sort` in `envconf_collect` survived, because nothing asserted the deterministic ordering the helper claims. | — | Fixed |
+
+**A-11 is why pass 10 is worth running even when the code looks finished.**
+Every other finding here came from probing behaviour; this one came from
+reading the decision table row by row against the implementation, and it is a
+whole `LOCKED` row that was never built. Nothing about the code looked wrong,
+because the missing feature left no trace — which is exactly the shape of
+defect that only an oracle catches.
 
 **A-8 is the one that mattered.** A-7 and A-9 degrade what a reader is told;
 A-8 was a way to reach the exact silent data loss this image exists to prevent,
@@ -886,6 +894,8 @@ looked precise and could not fail. Mutation is what found both.
 - The second implementation of an interface is what tests the interface. Three
   entries here are contract defects that were invisible while `postgres` was
   the only consumer, and none of them needed a *third* (D-014, D-015, D-018).
+- Walk the decision table against the code as a list, not as a memory. A row
+  that was never implemented leaves nothing in the diff to notice (A-11).
 - Refuse against the **result**, not the input. A guard written against one
   input channel is bypassed by every other channel that reaches the same state
   — and the config file, not the environment, is what the server reads (A-8).
