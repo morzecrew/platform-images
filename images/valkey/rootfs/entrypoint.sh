@@ -109,19 +109,12 @@ off | rdb | aof) ;;
 *) envconf_die "VALKEY_PERSISTENCE must be off, rdb or aof, got '${persistence}'" ;;
 esac
 
-if [ "${persistence}" != "off" ]; then
-	# Refusal 2 first: without it the image's own default supplies the policy
-	# that refusal 1 then rejects, and the operator is told off for something
-	# they did not set.
-	if [ -z "${policy_set}" ]; then
-		envconf_die "VALKEY_PERSISTENCE=${persistence} requires VALKEY_MAXMEMORY_POLICY to be set explicitly. This image defaults to allkeys-lru, which evicts data a durable store is meant to keep. A durable configuration almost certainly wants noeviction."
-	fi
-	case "${policy}" in
-	allkeys-*)
-		envconf_die "VALKEY_PERSISTENCE=${persistence} and VALKEY_MAXMEMORY_POLICY=${policy} contradict each other: the first says keep my data, the second deletes it under memory pressure, and the loss is silent. Either set VALKEY_MAXMEMORY_POLICY=noeviction to keep the data, or set VALKEY_PERSISTENCE=off if this is a cache."
-		;;
-	esac
-fi
+# Both §5.3 refusals are evaluated in section 8, against the assembled
+# configuration. Checking them here would only see the curated channel, and
+# `VALKEY_CONF__maxmemory-policy` is an allowlisted spelling of the same knob --
+# so a genuinely safe durable setup expressed through the passthrough channel
+# was being refused for not setting the curated one. The two channels are
+# documented as equivalent; the refusals have to agree.
 
 emit maxmemory "${maxmemory}" "${maxmemory_source}" "${maxmemory_origin}"
 if [ -n "${policy_set}" ]; then
@@ -226,6 +219,19 @@ if [ -d "${FRAGMENT_DIR}" ]; then
 			case "${line}" in
 			'#'* | '') continue ;;
 			esac
+			# Strip leading blanks first. `cat` above has already written
+			# the line into the config, so a key extracted as empty means the
+			# directive applies with no summary row -- applied but invisible,
+			# which is worse than either.
+			while :; do
+				case "${line}" in
+				' '* | '	'*) line=${line#?} ;;
+				*) break ;;
+				esac
+			done
+			case "${line}" in
+			'#'* | '') continue ;;
+			esac
 			frag_key=${line%%[ 	]*}
 			[ -n "${frag_key}" ] || continue
 			frag_val=${line#"${frag_key}"}
@@ -254,11 +260,16 @@ curated_if_set VALKEY_APPENDFSYNC appendfsync
 # RFC 0001 decision 9: a typo'd curated name is warned about, not ignored.
 # Every VALKEY_* the image reads is listed here; adding a curated variable
 # without adding it here makes the image warn about its own knob.
+#
+# VALKEY_VERSION is last and is not ours: the upstream image sets it, and §5.1
+# says upstream names are never intercepted. Without it this warns on every
+# start about a variable no operator set.
 envconf_warn_unknown "${PREFIX}" "\
 VALKEY_MAXMEMORY VALKEY_MAXMEMORY_PERCENT VALKEY_MAXMEMORY_POLICY \
 VALKEY_PERSISTENCE VALKEY_APPENDFSYNC VALKEY_PASSWORD \
 VALKEY_DATABASES VALKEY_LOGLEVEL VALKEY_TCP_KEEPALIVE \
-VALKEY_RENAME_DANGEROUS"
+VALKEY_RENAME_DANGEROUS \
+VALKEY_VERSION"
 
 envconf_load_allowlist "${ALLOWLIST}"
 envconf_load_denylist "${DENYLIST}"
@@ -303,10 +314,29 @@ case "${eff_save}" in
 *) durable=yes ;;
 esac
 
+# Was the policy chosen by an operator, through either channel, or is it just
+# this image's default? Only the second case is refused below.
+# Counted from the assembled file rather than per channel. The image emits
+# exactly one `maxmemory-policy` line of its own, so a second occurrence means
+# something else set it -- a fragment, or the passthrough channel. Checking the
+# channels individually is what made a fragment-set policy look absent.
+policy_explicit=no
+if [ -n "${policy_set}" ]; then
+	policy_explicit=yes
+elif [ "$(awk '$1 == "maxmemory-policy"' "${CONF_TMP}" | wc -l)" -gt 1 ]; then
+	policy_explicit=yes
+fi
+
 if [ "${durable}" = "yes" ]; then
+	# Refusal 2 first: otherwise the image's own default supplies the policy
+	# that refusal 1 then rejects, and the operator is told off for something
+	# they did not set.
+	if [ "${policy_explicit}" = "no" ]; then
+		envconf_die "persistence is enabled (appendonly=${eff_appendonly}, save=${eff_save}) but no eviction policy was set explicitly. This image defaults to allkeys-lru, which evicts data a durable store is meant to keep, so a durable configuration has to name its policy -- almost certainly VALKEY_MAXMEMORY_POLICY=noeviction (or VALKEY_CONF__maxmemory-policy=noeviction)."
+	fi
 	case "${eff_policy}" in
 	allkeys-*)
-		envconf_die "the assembled configuration enables persistence (appendonly=${eff_appendonly}, save=${eff_save}) while maxmemory-policy=${eff_policy} evicts, which loses that data silently. If a fragment in ${FRAGMENT_DIR} sets one of these, it is included in the effective config and subject to the same refusal as the environment. Set maxmemory-policy=noeviction, or turn persistence off."
+		envconf_die "persistence and eviction contradict each other: the assembled configuration enables persistence (appendonly=${eff_appendonly}, save=${eff_save}) while maxmemory-policy=${eff_policy} deletes data under memory pressure, and the loss is silent. Either set the policy to noeviction to keep the data, or turn persistence off if this is a cache. A fragment in ${FRAGMENT_DIR} counts here too."
 		;;
 	esac
 fi

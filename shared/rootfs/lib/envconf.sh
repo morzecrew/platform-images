@@ -242,7 +242,14 @@ envconf_collect() {
 # The image's own control variables are excluded -- a warning that fires on
 # <PREFIX>_CONF_STRICT itself teaches operators to ignore all of them.
 #
-#   envconf_warn_unknown <prefix> <curated_var_names>
+# $2 is every <prefix>_* name that is legitimately present: this image's
+# curated variables **and** any its base image defines. The second half is not
+# optional -- RFC 0001 §5.1 says upstream names are never intercepted, and
+# `valkey/valkey` sets `VALKEY_VERSION`, so omitting them makes this warn on
+# every start about a variable nobody set. A warning that always fires is the
+# thing the ignore list exists to prevent.
+#
+#   envconf_warn_unknown <prefix> <known_var_names>
 envconf_warn_unknown() {
 	local prefix="$1"
 	local curated=" ${2:-} "

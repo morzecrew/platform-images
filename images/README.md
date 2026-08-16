@@ -35,7 +35,12 @@ contract. It is normative: image READMEs link here rather than restating it.
 > - **`valkey`** implements all of it, through the shared helper at
 >   [`shared/rootfs/lib/envconf.sh`](../shared/rootfs/lib/envconf.sh): two
 >   channels, allowlist and denylist, collision refusal, value safety,
->   `_FILE` secrets, and the startup summary.
+>   `_FILE` secrets, and the startup summary. **One deliberate exception:**
+>   redaction matches `KEY`/`KEYS` as a whole segment rather than as the
+>   substring this section's rule states, because the substring form hides
+>   `notify-keyspace-events` — a real allowlisted directive. The amendment is
+>   proposed and not yet accepted (EXECUTION-LOG D-018), so the rule below is
+>   still the normative one and this is the gap.
 > - **`postgres`** implements the two channels and the allowlist with its own
 >   code, predating the helper. It emits no summary and has no denylist file.
 >   RFC 0001 P4 retrofits it, deliberately last, because it is the only step

@@ -370,8 +370,8 @@ come away knowing the image evicts by default.
 | 6 | `LOCKED` | The two §5.3 combinations are refused at startup, not documented and permitted. A durable store under `allkeys-lru` loses data silently, and silence is the failure this repo's images are supposed to remove. |
 | 7 | `ASSUMED` | `maxmemory` derives from cgroup v2 `memory.max` at 75%, with a warned fallback. Depart on the percentage; do not depart on "warn when falling back". |
 | 8 | `ASSUMED` | `CONFIG` stays enabled by default while `FLUSHALL`/`FLUSHDB`/`KEYS` are renamed (§5.4). Depart if no consumer's client library probes `CONFIG GET`. |
-| 9 | `OPEN` | Alpine or Debian-slim base. Alpine keeps RFC 0001's POSIX-`sh` helper trivially satisfiable; if a consumer hits a musl-related issue, Debian-slim plus a shell is the fallback. |
-| 10 | `OPEN` | The conservative fixed fallback value for `maxmemory` when no cgroup limit is readable. Pick it against a real host, and prefer embarrassingly small — an evicting cache is recoverable, an OOM-killed host is not. |
+| 9 | ~~`OPEN`~~ **Decided by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-020.** **Alpine** (`valkey/valkey:9.0-alpine`). It is what makes RFC 0001 decision 7's POSIX-`sh` requirement testable rather than aspirational: the helper is exercised on busybox `ash` on every PR. Original text: | Alpine or Debian-slim base. Alpine keeps RFC 0001's POSIX-`sh` helper trivially satisfiable; if a consumer hits a musl-related issue, Debian-slim plus a shell is the fallback. |
+| 10 | ~~`OPEN`~~ **Decided by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-020.** **268435456 (256 MiB)**, with a warning naming the reason; plus values above 1 PiB treated as unlimited, since some runtimes report a very large number in place of `max` and the percentage arithmetic on it overflows to a negative `maxmemory`. Original text: | The conservative fixed fallback value for `maxmemory` when no cgroup limit is readable. Pick it against a real host, and prefer embarrassingly small — an evicting cache is recoverable, an OOM-killed host is not. |
 
 ## 12. Phasing
 

@@ -849,8 +849,9 @@ were invisible while `postgres` was the only consumer.
 
 ## Self-audit findings — wave 3, 2026-08-16
 
-Found by the adversarial pass over the finished branch. All four are in the
-`valkey` image; none is in the helper, which the mutation pass covered instead.
+Found by the adversarial pass over the finished branch. They span both halves
+of the wave: A-7 and A-8 are in the `valkey` entrypoint, A-9 in its README,
+A-10 in the helper's test suite and A-11 in the helper itself.
 
 | # | Where | Finding | Class | Status |
 |---|---|---|---|---|

@@ -15,8 +15,14 @@ HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 HELPER="${HERE}/../rootfs/lib/envconf.sh"
 TMP=$(mktemp -d)
 VERBOSE="${1:-}"
-PASS=0
-FAIL=0
+
+# Counters live in files, not shell variables, because most cases are invoked
+# as `out=$(run …)` and a command substitution is a subshell: a `FAIL++` there
+# is discarded when it exits. The suite printed "failed 0" and exited 0 with
+# cases visibly failing on stderr, which is the worst possible failure mode for
+# a test runner. Every subshell shares ${TMP}.
+: >"${TMP}/.pass"
+: >"${TMP}/.fail"
 
 cleanup() { rm -rf "${TMP}"; }
 trap cleanup EXIT
@@ -46,14 +52,14 @@ EOF
 # then compares -- which is invisible without -v and breaks every capturing
 # assertion with it.
 ok() {
-	PASS=$((PASS + 1))
+	echo x >>"${TMP}/.pass"
 	if [ "${VERBOSE}" = "-v" ]; then
 		echo "  ok   $1" >&2
 	fi
 }
 
 bad() {
-	FAIL=$((FAIL + 1))
+	echo x >>"${TMP}/.fail"
 	echo "  FAIL $1" >&2
 	[ -n "${2:-}" ] && echo "       $2" >&2 || true
 }
@@ -248,6 +254,13 @@ out=$(VALKEY_CONF_STRICT=fail VALKEY_CONF_ALLOWLIST=/x VALKEY_CONF__loglevel=a \
 	'envconf_warn_unknown VALKEY "VALKEY_MAXMEMORY"')
 expect_equals "  ...silent" "${out}" ""
 
+# A name the base image defines is not the operator's doing, and §5.1 says
+# upstream names are never intercepted -- so the caller lists them too and they
+# must not warn. Left out, this fires on every start of the real image.
+out=$(VALKEY_VERSION=9.0.5 run "an upstream-defined name does not warn" 0 \
+	'envconf_warn_unknown VALKEY "VALKEY_MAXMEMORY VALKEY_VERSION"')
+expect_equals "  ...silent" "${out}" ""
+
 # Not fatal: a real container's environment carries unrelated variables, and a
 # fail-closed rule here would refuse to start over a sibling service's config.
 run "an unknown name warns but does not abort" 0 \
@@ -409,6 +422,9 @@ out=$(run "summary prints the precedence line" 0 \
 expect_contains "  ...precedence" "${out}" "baked < mounted < env"
 
 # --- result ---------------------------------------------------------------
+
+PASS=$(wc -l <"${TMP}/.pass" | tr -d ' ')
+FAIL=$(wc -l <"${TMP}/.fail" | tr -d ' ')
 
 echo
 echo "passed ${PASS}, failed ${FAIL}"

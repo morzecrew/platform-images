@@ -25,11 +25,15 @@ start() {
 
 wait_ready() {
 	local name="$1"
-	local i
+	local i reply
+	# NOAUTH counts as ready: the server is up and answering, it just wants a
+	# password. Treating it as not-ready made every password case print a
+	# tolerated "never became ready" and dump logs, which buries real failures.
 	for i in $(seq 1 40); do
-		if "${ENGINE}" exec "${name}" valkey-cli PING 2>/dev/null | grep -q PONG; then
-			return 0
-		fi
+		reply="$("${ENGINE}" exec "${name}" valkey-cli PING 2>&1 || true)"
+		case "${reply}" in
+		*PONG* | *NOAUTH*) return 0 ;;
+		esac
 		sleep 0.5
 	done
 	echo "FAIL: ${name} never became ready"
@@ -151,7 +155,7 @@ printf 'from-file' >"${WORK}/pw"
 chmod 0644 "${WORK}/pw"
 start "${CTR}" -v "${WORK}/pw:/run/pw:ro,Z" \
 	-e VALKEY_PASSWORD=from-env -e VALKEY_PASSWORD_FILE=/run/pw
-wait_ready "${CTR}" || true
+wait_ready "${CTR}"
 if "${ENGINE}" exec "${CTR}" valkey-cli -a from-file PING 2>/dev/null | grep -q PONG; then
 	echo "_FILE beats the plain variable"
 else
@@ -263,8 +267,15 @@ echo "precedence: env beats mounted"
 # otherwise decision 6 would hold only for the environment channel.
 mkdir -p "${WORK}/bypass"
 printf 'appendonly yes\n' >"${WORK}/bypass/60-persist.conf"
+# The fragment sets appendonly with no policy anywhere, so the missing-policy
+# refusal fires first -- the right order, and why the needle is that message.
+expect_refusal "a fragment enabling persistence with no explicit policy" \
+	"no eviction policy was set explicitly" -v "${WORK}/bypass:/etc/valkey/conf.d:ro,Z"
+
+# With a policy that evicts, the other refusal fires on the same path.
+printf 'appendonly yes\nmaxmemory-policy allkeys-lru\n' >"${WORK}/bypass/60-persist.conf"
 expect_refusal "a fragment enabling persistence under an evicting policy" \
-	"loses that data silently" -v "${WORK}/bypass:/etc/valkey/conf.d:ro,Z"
+	"contradict each other" -v "${WORK}/bypass:/etc/valkey/conf.d:ro,Z"
 
 # --- 12. protected-mode, which is the behaviour most likely to surprise ----
 
@@ -290,7 +301,7 @@ esac
 # ...and with a password it works, which is what the README tells people to do.
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 start "${CTR}" -e VALKEY_PASSWORD=smoke-pw
-wait_ready "${CTR}" || true
+wait_ready "${CTR}"
 peer="$("${ENGINE}" exec "${CTR}" sh -c \
 	'valkey-cli -h "$(hostname -i)" -a smoke-pw --no-auth-warning PING 2>&1 | head -1' || true)"
 case "${peer}" in
@@ -319,7 +330,7 @@ esac
 # valkey exit with "wrong number of arguments" when they diverged.
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 start "${CTR}" -e "VALKEY_PASSWORD=two words"
-wait_ready "${CTR}" || true
+wait_ready "${CTR}"
 if "${ENGINE}" exec "${CTR}" valkey-cli -a "two words" --no-auth-warning PING 2>/dev/null | grep -q PONG; then
 	echo "curated value with a space: quoted and in force"
 else
@@ -355,6 +366,40 @@ rows="$("${ENGINE}" logs "${CTR}" 2>&1 | grep -c 'loglevel = ' || true)"
 case "$("${ENGINE}" logs "${CTR}" 2>&1 | grep 'loglevel = ')" in
 *"source=env"*"debug"*) echo "summary: overridden key shown once, attributed to the winner" ;;
 *) echo "FAIL: the single loglevel row is not the winning one"; exit 1 ;;
+esac
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# --- 16. the two channels are equivalent for the refusals -----------------
+
+# maxmemory-policy is allowlisted, so it has a passthrough spelling. A durable
+# setup expressed that way is safe and must start; the refusals evaluate the
+# assembled config, not just the curated channel.
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+start "${CTR}" -e VALKEY_PERSISTENCE=aof -e "VALKEY_CONF__maxmemory-policy=noeviction"
+wait_ready "${CTR}"
+[ "$(cfg "${CTR}" maxmemory-policy)" = "noeviction" ] ||
+	{ echo "FAIL: a safe durable config set through the passthrough channel did not apply"; exit 1; }
+echo "channels equivalent: durable config via passthrough starts"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# ...and the refusals still fire when the policy really is missing or evicting.
+expect_refusal "persistence with an evicting policy set via passthrough" \
+	"contradict each other" \
+	-e VALKEY_PERSISTENCE=aof -e "VALKEY_CONF__maxmemory-policy=allkeys-lru"
+
+# --- 17. an indented fragment directive is still attributed ---------------
+
+mkdir -p "${WORK}/indented"
+printf '  maxmemory-samples 9\n' >"${WORK}/indented/50-indented.conf"
+start "${CTR}" -v "${WORK}/indented:/etc/valkey/conf.d:ro,Z"
+wait_ready "${CTR}"
+[ "$(cfg "${CTR}" maxmemory-samples)" = "9" ] ||
+	{ echo "FAIL: an indented fragment directive did not apply"; exit 1; }
+# It applies either way -- the bug was that it applied *without* a summary row,
+# which is the combination an operator cannot diagnose.
+case "$("${ENGINE}" logs "${CTR}" 2>&1)" in
+*"source=mounted"*"maxmemory-samples = 9"*) echo "indented fragment: applied and attributed" ;;
+*) echo "FAIL: an indented fragment applied without a summary row"; exit 1 ;;
 esac
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
