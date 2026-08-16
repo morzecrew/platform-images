@@ -42,6 +42,19 @@ jobs:
       #
       # Per target rather than one invocation: `--set "*.output=...dest="`
       # cannot give distinct destinations to several targets at once.
+      #
+      # `type=oci`, not `type=docker`: every target inherits `_attested`, and
+      # attestations make the result a manifest list, which the docker exporter
+      # refuses outright ("does not support exporting manifest lists"). Exporting
+      # OCI keeps CI on the same artifact shape publish produces -- dropping
+      # attestations here would mean the smoke stage tests something the registry
+      # never sees. Podman resolves the runnable manifest and ignores the
+      # attestation one on load.
+      #
+      # --allow: the tarball lands outside the bake context, which buildx treats
+      # as a privileged filesystem write and refuses without an explicit grant.
+      # Scoped to the one directory rather than BUILDX_BAKE_ENTITLEMENTS_FS=0,
+      # which would switch the check off wholesale.
       - name: Build and load images into Podman
         run: |
           set -euo pipefail
@@ -50,7 +63,8 @@ jobs:
           echo "targets: ${targets}"
           for target in ${targets}; do
             echo "::group::build ${target}"
-            docker buildx bake --set "${target}.output=type=docker,dest=/tmp/img-${target}.tar" "${target}"
+            docker buildx bake --allow=fs.write=/tmp \
+              --set "${target}.output=type=oci,dest=/tmp/img-${target}.tar" "${target}"
             podman load -i "/tmp/img-${target}.tar"
             rm -f "/tmp/img-${target}.tar"
             echo "::endgroup::"
