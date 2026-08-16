@@ -152,16 +152,21 @@ somebody else's CVE feed, and adding one is nine edits, not one:
 | 6 | Images table row in the [root README](../README.md) |
 | 7 | A `DESCRIPTIONS` entry in [`docker-bake.hcl`](../docker-bake.hcl) |
 | 8 | Env-config allowlist and README section — see [Environment configuration](#environment-configuration) |
-| 9 | `smoke.sh` — *once RFC 0002 P3 ships* |
+| 9 | `images/<name>/smoke.sh` — run against the built image by [`bake.yaml`](../.github/workflows/bake.yaml) |
 
-**Items 4, 5 and 7 fail silently.** A missing `default` entry means the image is
+**Items 4 and 5 fail silently.** A missing `default` entry means the image is
 never built by `just bake`; a missing `PACKAGES` entry means its untagged
-versions accumulate in GHCR forever; a missing `DESCRIPTIONS` entry publishes an
-empty `org.opencontainers.image.description` rather than raising. None of the
-three produces a red check.
+versions accumulate in GHCR forever. Neither produces a red check.
 
-Item 9 has no mechanism yet — it is listed so the cost is visible, not because
-there is something to fill in today.
+Item 7 used to be the third of those. A missing `DESCRIPTIONS` entry now
+**fails the build** rather than publishing an empty
+`org.opencontainers.image.description` — see RFC 0002 decision 16.
+
+Item 9 is a script taking one argument, the image reference, exiting non-zero on
+failure. It runs under rootless Podman, so it asserts what rootless is what
+breaks: UID mapping, volume ownership, port binds. `bake.yaml` discovers it by
+path, so an image without one is silently unsmoked — that much is still on the
+author to remember.
 
 **Why two routes.** Route 1 counts duplicated Dockerfiles, which is the right
 evidence for a *packaging* image — somebody had to write a build, twice. It is
