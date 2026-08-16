@@ -21,6 +21,110 @@ just push postgres 18   # push an already-built local tag
 
 `just` is a thin wrapper around `docker buildx bake -f docker-bake.hcl` (`just push` uses `docker push` separately).
 
+## Environment configuration
+
+Every image that takes runtime configuration from the environment follows this
+contract. It is normative: image READMEs link here rather than restating it.
+
+> **Status.** This is the contract, not a description of what ships today.
+> `postgres` implements the two channels and the allowlist; **no image emits the
+> startup summary yet**, and the shared helper that would enforce the collision,
+> value-safety and redaction rules is not written. Where an image's behaviour and
+> this section disagree today, this section is the target and the image is the
+> gap. Each image's own README states what it actually does.
+
+### Two channels
+
+| Channel | Form | Meaning |
+|---|---|---|
+| **Curated** | `<PREFIX>_<NAME>` | A setting the image owns and documents in its own README. May be composed — one variable driving several upstream settings. |
+| **Passthrough** | `<PREFIX>_CONF__<key>` | One upstream setting, verbatim. `<key>` is normalised (lowercase, `-` → `_`) and must appear in that image's allowlist. |
+| **Upstream** | whatever upstream defined | Never intercepted, never redefined. |
+
+`<PREFIX>` is one token per image, declared in its README — `PG`, `CADDY`,
+`VALKEY`, `CH`. The double underscore is what keeps the passthrough channel
+unambiguous, and it already ships in `postgres` as `PG_CONF__*`.
+
+**A curated name and a passthrough key may not target the same setting.** Each
+image declares which upstream key(s) each curated name writes; if a passthrough
+key targets a setting a curated variable also wrote, **startup aborts naming
+both**. Picking a winner would mean an operator who set both silently gets the
+other one.
+
+### Allowlist, never denylist
+
+The passthrough channel is policed by an allowlist file in the image — one key
+per line, `#` comments ignored. A key that is not on it **aborts startup** by
+default (`<PREFIX>_CONF_STRICT=fail`); `ignore` downgrades that to a warning and
+a skip. A missing allowlist file always aborts: that is a build defect, not a
+runtime condition.
+
+An allowlist rather than a denylist because every upstream release adds settings,
+and a denylist permits them all by silence. The cost is real and accepted: a new
+upstream setting needs an allowlist edit before operators can use it.
+
+**The allowlist is a guard rail against typos and drift, not a security
+boundary.** `<PREFIX>_CONF_ALLOWLIST` and `<PREFIX>_CONF_STRICT` are themselves
+environment variables, so anyone who can set the container's environment can
+widen it.
+
+An unrecognised `<PREFIX>_*` name that is neither curated nor `_CONF__` **warns
+but does not abort** — a real container's environment is full of unrelated
+variables. The image's own control variables (`<PREFIX>_CONF_STRICT`,
+`<PREFIX>_CONF_ALLOWLIST`, and any `<NAME>_FILE`) are excluded from that warning,
+because a warning that fires on the mechanism's own knobs trains operators to
+ignore all of them.
+
+### Precedence
+
+**Baked default → mounted config file → environment.** One order, in every
+image, printed at startup.
+
+### Secrets
+
+`<NAME>_FILE` takes precedence over `<NAME>` for every secret. An unreadable
+`<NAME>_FILE` **aborts** rather than falling back to the plain variable —
+silently starting with the wrong credential is worse than not starting.
+
+Note the limit of what this buys: a secret supplied through the plain variable is
+still visible in `docker inspect` output and crash dumps. The `_FILE` form is
+what avoids that, and an image README says so where it matters.
+
+### Startup summary
+
+Every image prints its effective non-default settings to **stderr** before
+exec'ing the server — diagnostic output about configuration, not application
+logging, and `docker logs` / `podman logs` capture both streams anyway:
+
+```text
+[envconf] postgres: effective non-default settings
+[envconf]   source=baked      shared_preload_libraries = pg_cron,pg_stat_statements
+[envconf]   source=mounted    work_mem = 32MB          (/etc/postgresql/conf.d/50-tuning.conf)
+[envconf]   source=env        max_connections = 200    (PG_CONF__max_connections)
+[envconf]   source=env        <redacted>               (PG_CONF__log_line_prefix)
+[envconf] precedence: baked < mounted < env
+```
+
+Values are redacted for keys the allowlist marks `!secret` and for anything
+matching `*PASSWORD*`, `*TOKEN*`, `*SECRET*`, `*KEY*`, `*HEADERS*`.
+
+**`source=` attribution is required only of images that generate a config file**
+from layers they can enumerate. An image whose defaults are Dockerfile `ENV`
+prints `source=env-or-default`, because the process environment cannot
+distinguish a baked default from an operator-supplied value. The effective value
+and the redaction are required of every image; inventing attribution an image
+cannot compute would be printing a guess.
+
+### No templating
+
+No image in this repo renders its configuration through a templating engine.
+Each uses its own native expansion — Caddy's `{$VAR}`, a generated conf file, or
+the upstream server's own env support. A candidate image that cannot be
+configured without `envsubst` is re-examined before it is accepted.
+
+See [RFC 0001](../rfcs/0001-shared-env-config-contract.md) for the reasoning and
+the rejected alternatives.
+
 ## Which images belong here
 
 > **Admission, route 1 — duplication.** An image lands here when the same
@@ -47,17 +151,22 @@ somebody else's CVE feed, and adding one is nine edits, not one:
 | 5 | `PACKAGES` in [`cleanup-images.yaml`](../.github/workflows/cleanup-images.yaml) |
 | 6 | Images table row in the [root README](../README.md) |
 | 7 | A `DESCRIPTIONS` entry in [`docker-bake.hcl`](../docker-bake.hcl) |
-| 8 | Env-config allowlist and README section — *once RFC 0001 ships* |
-| 9 | `smoke.sh` — *once RFC 0002 P3 ships* |
+| 8 | Env-config allowlist and README section — see [Environment configuration](#environment-configuration) |
+| 9 | `images/<name>/smoke.sh` — run against the built image by [`bake.yaml`](../.github/workflows/bake.yaml) |
 
-**Items 4, 5 and 7 fail silently.** A missing `default` entry means the image is
+**Items 4 and 5 fail silently.** A missing `default` entry means the image is
 never built by `just bake`; a missing `PACKAGES` entry means its untagged
-versions accumulate in GHCR forever; a missing `DESCRIPTIONS` entry publishes an
-empty `org.opencontainers.image.description` rather than raising. None of the
-three produces a red check.
+versions accumulate in GHCR forever. Neither produces a red check.
 
-Items 8 and 9 have no mechanism yet — they are listed so the cost is visible, not
-because there is something to fill in today.
+Item 7 used to be the third of those. A missing `DESCRIPTIONS` entry now
+**fails the build** rather than publishing an empty
+`org.opencontainers.image.description` — see RFC 0002 decision 16.
+
+Item 9 is a script taking one argument, the image reference, exiting non-zero on
+failure. It runs under rootless Podman, so it asserts what rootless is what
+breaks: UID mapping, volume ownership, port binds. `bake.yaml` discovers it by
+path, so an image without one is silently unsmoked — that much is still on the
+author to remember.
 
 **Why two routes.** Route 1 counts duplicated Dockerfiles, which is the right
 evidence for a *packaging* image — somebody had to write a build, twice. It is

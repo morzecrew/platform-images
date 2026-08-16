@@ -165,14 +165,21 @@ cheaper of the two, since it needs no new manifest row.
 ### 5.1 The manifest
 
 One file, `images/postgres/rootfs/extensions.manifest`, read by a build script.
-Colon-separated: logical name, apt package template, preload library (empty if
-none), snippet file (empty if none).
+Colon-separated: logical name, apt package template, ~~preload library (empty if
+none), snippet file (empty if none)~~ — **column set superseded by row 14**
+(added by execution 2026-08-16, see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-001).
+The SQL name is carried explicitly, because §5.2's control-file check and §5.4's
+label mapping both need it and neither can derive it from the preload library:
 
 ```text
-# name : apt package (%M = PG major) : preload lib : conf snippet
-cron     : postgresql-%M-cron            : pg_cron   : cron.conf
-pgroonga : postgresql-%M-pgdg-pgroonga   :           :
+# name : apt package (%M = PG major) : sql name : preload lib : conf snippet
+cron     : postgresql-%M-cron            : pg_cron  : pg_cron : cron.conf
+pgroonga : postgresql-%M-pgdg-pgroonga   : pgroonga :         :
 ```
+
+`cron` is the row that makes the fourth column look redundant — its preload and
+its SQL name are both `pg_cron`. `pgroonga` is the row that shows it is not:
+its control file is `pgroonga.control` and it has no preload at all.
 
 **The manifest ships with exactly the two extensions the image installs today.**
 Every example below uses only those two. An unadmitted extension must not appear
@@ -293,9 +300,13 @@ the layer cache makes that cheap on push builds and not cheap under RFC 0002's
 `--no-cache` weekly rebuild. Two or three variants is the point at which that
 stays acceptable.
 
-`inherits` carries the args map wholesale, so a variant that overrides
-`PG_EXTENSIONS` must restate `POSTGRES_IMAGE_TAG` if HCL's map merge does not
-apply — verified per buildx version at implementation time (decision 6).
+`inherits` **merges** the args map per key, with the child's value winning, so a
+variant overriding `PG_EXTENSIONS` declares only that and keeps the parent's
+`POSTGRES_IMAGE_TAG` (decision 6, measured on buildx 0.35). The repository pins
+`docker/setup-buildx-action` by digest but not the buildx binary it installs, so
+this is a measured behaviour of the version in use rather than a guarantee; a
+variant that silently lost its base-image pin would show up as a build against
+the wrong Postgres major, not as a merge error.
 
 ### 5.4 What the label says
 
@@ -423,8 +434,11 @@ Two consequences worth stating rather than discovering:
   with pg_cron absent) are accepted as placeholders or refused at startup. §5.2
   moves them regardless, so the answer changes nothing here — but it determines
   how loud the failure is if someone reintroduces one.
-- Whether `inherits` merges or replaces the `args` map in the pinned buildx
-  version (§5.3, decision 6).
+- ~~Whether `inherits` merges or replaces the `args` map in the pinned buildx
+  version (§5.3, decision 6).~~ **Answered by measurement 2026-08-12:** it
+  merges per key. Left open in a narrower form — the buildx *binary* is not
+  pinned, only the action that installs it, so the answer is measured rather
+  than guaranteed.
 
 ## 11. Decisions
 
@@ -435,14 +449,15 @@ Two consequences worth stating rather than discovering:
 | 3 | `LOCKED` | Variants are tag suffixes on the single `postgres` registry name, not new registry names. Consequence: no new `PACKAGES` entry, no new README row — and variants share one package's version history in GHCR. |
 | 4 | `LOCKED` | An unknown name in `PG_EXTENSIONS` fails the build. Silently building a smaller image is the failure this cannot have. |
 | 5 | `ASSUMED` | A four-column colon-separated manifest is sufficient. Depart — with a new column, not a second mechanism — if an extension needs a source build (§8). |
-| 6 | `OPEN` | Whether bake `inherits` merges or replaces `args`, and therefore whether each variant restates `POSTGRES_IMAGE_TAG`. Verify against the pinned buildx and write the answer into the bake file as a comment. |
-| 7 | `OPEN` | The ceiling on shipped variants. Two or three is the stated intent; the enforcement is review, and RFC 0003's admission rule does not cover tag variants. Decide whether it should. |
+| 6 | ~~`OPEN`~~ **Answered by measurement 2026-08-12** | `inherits` **merges** `args` per key, with the child's value winning. Verified on buildx 0.35: a child declaring only `OVERRIDE_ME` kept the parent's `KEEP_ME` and added its own. So a variant does **not** restate `POSTGRES_IMAGE_TAG`; it declares only what it changes. |
+| 7 | ~~`OPEN`~~ **Locked 2026-08-12** | **Three variants including the default**, enforced by review rather than mechanism. Measured demand is exactly two beyond the default — pgvector (§3.1) and cron-without-pgroonga (§3.1). Each variant costs a full `--no-cache` slot in RFC 0002's weekly rebuild, so a fourth request is the prompt to ask whether the answer is no, not to extend the matrix. |
 | 8 | `ASSUMED` | Extension packages stay unpinned in this RFC, as they are today. Pinning is a separate change so that §6's equivalence test means something. |
 | 9 | `LOCKED` | The build-time availability gate is a control-file and library check on the filesystem, not a SQL query. `pg_available_extensions` needs a running server; the image never runs `initdb`, so a SQL gate would mean standing up a throwaway cluster inside the `RUN` layer. |
 | 10 | `LOCKED` | `io.morze.postgres.extensions` is the canonicalized `PG_EXTENSIONS` selection, not a catalog read-back. Neither `pg_available_extensions` (everything installable) nor `pg_extension` (what one database created) describes the build selection. Consequence: `pg_stat_statements` sits outside the label and the README must say so. |
 | 11 | `LOCKED` | `pg_stat_statements.max` and `.track` move out of the base config along with the preload line and the `cron.*` block. They sit after `include_dir` ([postgresql.conf:890-891](../images/postgres/rootfs/postgresql.conf#L890-L891)), so leaving them would let the base file override the generated extension config — making this RFC's precedence claim false exactly where it generates settings. |
 | 12 | `LOCKED` | Preload order is preserved (`pg_cron,pg_stat_statements`), and equivalence is asserted on effective server state rather than on file contents. Load order is observable, and a refactor claiming "nothing changed" must not reorder it silently. |
 | 13 | `LOCKED` | The manifest ships only extensions the image actually installs; unadmitted ones are not rows and do not appear in executable examples. Decision 4 makes manifest membership the definition of a valid input, so a speculative row advertises a build that fails. |
+| 14 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-001.** Supersedes the column set in row 5, under the departure row 5 pre-authorised ("a new column, not a second mechanism"). The manifest is **five** columns: `name : package : sql_name : preload : snippet`. The SQL name is explicit because it is not derivable from the preload library — `pgroonga` has a control file and no preload, `cron` has both and they differ from its logical name — and §5.2's control-file gate and §5.4's label mapping each require it. Consequence: adding an extension means filling five fields, and a row with an empty SQL name fails the build rather than skipping the availability check. |
 
 ## 12. Phasing
 

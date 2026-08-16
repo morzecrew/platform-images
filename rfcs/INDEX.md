@@ -25,6 +25,9 @@ number in the filename in sync.
 | [0008](0008-javascript-builder-and-distroless-runtime-pair.md) | JavaScript builder and distroless runtime pair | ❌ Superseded | Mirroring `uv-builder`/`python-distroless` for JS: which package manager the builder is named for, and one bake variable coupling builder and runtime majors so they cannot drift. |
 | [0009](0009-javascript-static-asset-builder.md) | JavaScript static-asset builder | 📝 Draft | Five projects each wrote their own Node build stage and diverged; one builder image emitting static assets to a known path, with the published `caddy` image as the runtime. |
 
+Departures found while executing these designs are recorded in
+[EXECUTION-LOG.md](EXECUTION-LOG.md), which is not an RFC and carries no number.
+
 ## Status legend
 
 - 📝 **Draft** — proposed, not started

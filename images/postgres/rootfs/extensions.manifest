@@ -1,0 +1,18 @@
+# Extensions selectable through the PG_EXTENSIONS build arg.
+#
+# Columns, colon-separated:
+#   1 name      logical name; what PG_EXTENSIONS and the image label use
+#   2 package   apt package; %M is replaced by the Postgres major version
+#   3 sql_name  extension name as the server knows it; drives the control-file
+#               check. NOT derivable from the others: pgroonga has no preload
+#               library but does have pgroonga.control.
+#   4 preload   library for shared_preload_libraries, empty if none
+#   5 snippet   file under rootfs/conf.d/ copied in when selected, empty if none
+#
+# Only extensions this image actually installs appear here. An unadmitted
+# extension must not be a row: manifest membership is what makes a PG_EXTENSIONS
+# value valid, so a speculative row advertises a build that fails.
+#
+# name     : package                     : sql_name : preload : snippet
+cron       : postgresql-%M-cron          : pg_cron  : pg_cron : cron.conf
+pgroonga   : postgresql-%M-pgdg-pgroonga : pgroonga :         :

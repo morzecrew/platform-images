@@ -34,6 +34,38 @@ Tags follow bake defaults. The image name carries what is inside; bake variables
 | [uv-builder](./images/uv-builder) | uv-based Python build stage: sync, wheel, slim venv (`build-uv-app`). |
 | [python-distroless](./images/python-distroless) | Distroless Python runtime with libmagic and CA bundle for small final images. |
 
+## Consuming these images
+
+Every image publishes **two tags**:
+
+| Tag | Behaviour | Use it when |
+|---|---|---|
+| `:<version>` | **Mutable.** Repointed on every rebuild, including the weekly one. | You want base-image CVE fixes without editing anything. |
+| `:<version>-<yyyymmdd>-<run>` | **Immutable.** Written once, never repointed. | You need the bytes to stay put. |
+
+**Neither is a substitute for the digest.** `@sha256:…` is the only truly
+immutable reference; the dated tag is the ergonomic approximation of one.
+
+**On the mutable tag, the bytes behind `:18.6` change even when nothing in this
+repo changed.** That is deliberate: a Debian security fix inside an unchanged
+upstream tag reaches you no other way. It is also exactly why the dated tag
+exists — pin it if a moving base is not acceptable to you.
+
+### Attestations
+
+Images carry max-mode [SLSA provenance](https://slsa.dev/) and an SBOM:
+
+```bash
+docker buildx imagetools inspect ghcr.io/morzecrew/postgres:18.6
+```
+
+These are **unsigned**. They record what the build did and are evidence, not
+proof — anyone with push access to this repository could produce them. Signing
+is a separate decision with its own identity policy and is not in place yet.
+
+Build arguments are recorded in max-mode provenance, so never pass a secret as
+one.
+
 ## License
 
 [MIT](./LICENSE) © Morze Technologies

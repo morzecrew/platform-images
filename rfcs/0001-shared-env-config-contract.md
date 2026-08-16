@@ -420,8 +420,8 @@ RFC 0002 §on rootless CI covers running these under rootless Podman.
 | 5 | `LOCKED` | No templating engine anywhere in the repo. Each image uses its own native env expansion. A candidate that cannot be configured without `envsubst` is re-examined before it is accepted. |
 | 6 | `ASSUMED` | The shared helper is distributed by a `docker-bake.hcl` named context (`contexts = { shared = "./shared" }`), not by moving build contexts to the repo root and not by copying. Depart if a target turns out to need the file at a stage buildx named contexts cannot reach. |
 | 7 | `ASSUMED` | The helper is POSIX `sh`, so it runs on Alpine-based images without adding `bash`. Depart if the sh rewrite of the postgres logic proves unreadable enough to be a hazard in its own right — the alternative is `bash` in the caddy image, ~2 MB. |
-| 8 | `OPEN` | Summary to stdout or stderr, and its exact line format. Settled by whichever keeps `caddy adapt` and Postgres startup logs readable in `docker logs`; log the choice and use it in all images. |
-| 9 | `OPEN` | Whether unrecognized curated-channel `<PREFIX>_*` names warn or are silent. Warning risks noise from unrelated environment variables sharing a prefix; silence risks a typo'd curated knob. Decide with a real container's environment in front of you. |
+| 8 | ~~`OPEN`~~ **Locked 2026-08-12** | **stderr.** The summary is diagnostic output about configuration, not application logging; `docker logs` and `podman logs` capture both streams, so nothing is lost operationally while stdout stays clean for anyone shipping structured logs. Precedent in the repo: [entrypoint.sh:60-67](../images/postgres/rootfs/entrypoint.sh#L60-L67) already writes `die` and `warn` to `>&2`. |
+| 9 | ~~`OPEN`~~ **Locked 2026-08-12** | **Warn, with a known-ignore list.** A typo'd curated knob that silently does nothing is the failure this contract exists to prevent, and one log line is cheaper than that. The noise objection is answered by the list rather than by silence: the image's own control variables (`<PREFIX>_CONF_STRICT`, `<PREFIX>_CONF_ALLOWLIST`, and any `<NAME>_FILE`) are excluded, because a warning that fires on `PG_CONF_STRICT_MODE` itself trains operators to ignore all of them. |
 | 10 | `ASSUMED` | `postgres` keeps `PG_CONF_STRICT_MODE` and `PG_CONF_ALLOWLIST_PATH` as published; new images use `<PREFIX>_CONF_STRICT` and `<PREFIX>_CONF_ALLOWLIST`. Accepting one inconsistent pair beats breaking a shipped surface. |
 | 11 | `LOCKED` | A curated variable and a passthrough key targeting the same upstream setting abort startup naming both, rather than one silently winning (§5.1). Consequence: each image must declare the upstream key(s) behind every curated name — work its README was going to do anyway. |
 | 12 | `LOCKED` | The collect→render wire format is NUL-delimited, and values containing a newline are refused (§5.2). A `key<TAB>value` stream splits a tab-bearing value into two malformed records, and no config format in scope can represent an embedded newline. |
@@ -430,8 +430,15 @@ RFC 0002 §on rootless CI covers running these under rootless Podman.
 ## 12. Phasing
 
 - **P1 — the contract, written.** The "Environment configuration" section in
-  [images/README.md](../images/README.md), plus decisions 1–5. No code. This is
-  the part RFCs 0004–0008 are blocked on, and it is a day's work at most.
+  [images/README.md](../images/README.md), plus decisions 1–5. No code, a day's
+  work at most.
+
+  **Correction 2026-08-12:** this phase previously claimed RFCs 0004–0008 were
+  blocked on it. Two are not. RFC 0004 changes build-time extension selection and
+  its own scope says it does not touch the `PG_CONF__*` runtime surface; RFC 0009
+  is a builder with no runtime configuration at all. What P1 actually blocks is
+  the *env surface* of RFCs 0005, 0006 and 0007. Read literally, the old wording
+  serialized two independent tracks behind a docs task.
 - **P2 — `shared/rootfs/lib/envconf.sh` + named-context wiring**, exercised by
   exactly one consumer, plus the §6 tests. The first consumer should be a new
   image (RFC 0005 or 0006) rather than `postgres`, so the helper is proven before

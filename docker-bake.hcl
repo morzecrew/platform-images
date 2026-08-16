@@ -8,6 +8,12 @@ variable "BUILD_DATE" {
   default = ""
 }
 
+# <yyyymmdd>-<run_id>.<run_attempt>, set by publish CI. Empty locally, which
+# suppresses the dated tag entirely -- see tag() below.
+variable "BUILD_STAMP" {
+  default = ""
+}
+
 # One line per image. Shown on the GHCR package page, so it lives here rather
 # than only in the root README. Keys are quoted: bare hyphenated keys parse as
 # subtraction.
@@ -28,9 +34,27 @@ variable "DESCRIPTIONS" {
   }
 }
 
+# Two tag forms, both published:
+#
+#   :<version>                      mutable, repointed on every rebuild. Track
+#                                   this to get CVE fixes without action.
+#   :<version>-<BUILD_STAMP>        written once, never repointed. Pin this, or
+#                                   pin the digest.
+#
+# BUILD_STAMP is empty for local builds, which emit the mutable tag alone -- a
+# developer's `just bake postgres` should not mint dated tags. CI sets it to
+# <yyyymmdd>-<run_id>.<run_attempt>. The attempt is not decoration: re-running a
+# workflow reuses both run_id and run_number, so either alone would let a second
+# attempt repoint a tag this file calls immutable.
+#
+# Neither tag is a substitute for the digest, which is the only true immutable
+# reference. See RFC 0002.
 function "tag" {
   params = [name, version]
-  result = ["ghcr.io/morzecrew/${name}:${version}"]
+  result = compact([
+    "ghcr.io/morzecrew/${name}:${version}",
+    BUILD_STAMP == "" ? "" : "ghcr.io/morzecrew/${name}:${version}-${BUILD_STAMP}",
+  ])
 }
 
 # MIT covers the Dockerfiles and config here; bundled upstream software keeps
@@ -122,14 +146,27 @@ variable "POSTGRES_VERSION" {
   default = "18.6"
 }
 
+# Extension set for the default target. Variants override PG_EXTENSIONS and
+# their own label; `inherits` merges args per key, so a variant declares only
+# what it changes (verified on buildx 0.35 -- RFC 0004 decision 6).
+#
+# Ceiling is three variants including this one (decision 7): each costs a full
+# --no-cache slot in the weekly rebuild.
+variable "POSTGRES_EXTENSIONS" {
+  default = "cron pgroonga"
+}
+
 target "postgres" {
   inherits   = ["_attested"]
   context    = "./images/postgres"
   dockerfile = "Dockerfile"
   tags       = tag("postgres", POSTGRES_VERSION)
-  labels     = label("postgres", POSTGRES_VERSION)
+  labels = merge(label("postgres", POSTGRES_VERSION), {
+    "io.morze.postgres.extensions" = POSTGRES_EXTENSIONS
+  })
   args = {
     POSTGRES_IMAGE_TAG = POSTGRES_VERSION
+    PG_EXTENSIONS      = POSTGRES_EXTENSIONS
   }
 }
 

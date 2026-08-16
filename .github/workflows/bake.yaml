@@ -7,10 +7,10 @@ on:
       - docker-bake.hcl
       - images/**
       - justfile
-      - .github/workflows/bake.yml
+      - .github/workflows/bake.yaml
       - "!images/**/README.md"
       - "!README.md"
-  
+
   workflow_dispatch:
 
 permissions:
@@ -23,17 +23,78 @@ concurrency:
 jobs:
   bake:
     runs-on: ubuntu-latest
-    name: Bake Images (build only)
-    
+    name: Bake and smoke
+
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # This job builds and runs code from the PR head. A checkout-managed
+          # token left in .git/config would be readable by all of it, and
+          # nothing here pushes.
+          persist-credentials: false
 
       - name: Install just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      - name: Bake images
-        run: just bake
+      # One job, one build. A separate smoke job would have to build again --
+      # images do not cross job boundaries without an artifact upload -- so the
+      # thing smoke-tested would not be the thing the build step verified, and
+      # CI would pay for every image twice.
+      #
+      # Per target rather than one invocation: `--set "*.output=...dest="`
+      # cannot give distinct destinations to several targets at once.
+      #
+      # `type=oci`, not `type=docker`: every target inherits `_attested`, and
+      # attestations make the result a manifest list, which the docker exporter
+      # refuses outright ("does not support exporting manifest lists"). Exporting
+      # OCI keeps CI on the same artifact shape publish produces -- dropping
+      # attestations here would mean the smoke stage tests something the registry
+      # never sees. Podman resolves the runnable manifest and ignores the
+      # attestation one on load.
+      #
+      # --allow: the tarball lands outside the bake context, which buildx treats
+      # as a privileged filesystem write and refuses without an explicit grant.
+      # Scoped to the one directory rather than BUILDX_BAKE_ENTITLEMENTS_FS=0,
+      # which would switch the check off wholesale.
+      - name: Build and load images into Podman
+        run: |
+          set -euo pipefail
+          targets=$(docker buildx bake --print 2>/dev/null \
+            | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')
+          echo "targets: ${targets}"
+          for target in ${targets}; do
+            echo "::group::build ${target}"
+            docker buildx bake --allow=fs.write=/tmp \
+              --set "${target}.output=type=oci,dest=/tmp/img-${target}.tar" "${target}"
+            podman load -i "/tmp/img-${target}.tar"
+            rm -f "/tmp/img-${target}.tar"
+            echo "::endgroup::"
+          done
+          podman images
+
+      # Rootless rather than Docker: rootless is where UID mapping, volume
+      # ownership and sub-1024 port binds actually fail, and those are the
+      # assumptions Docker hides until a customer's air-gapped install finds
+      # them. Podman is present on ubuntu-latest without setup.
+      - name: Smoke test each image
+        run: |
+          set -euo pipefail
+          failed=0
+          for script in images/*/smoke.sh; do
+            name="$(basename "$(dirname "${script}")")"
+            ref="$(docker buildx bake --print "${name}" 2>/dev/null \
+              | python3 -c "import json,sys; print(json.load(sys.stdin)['target']['${name}']['tags'][0])")"
+            echo "::group::smoke ${name} (${ref})"
+            if bash "${script}" "${ref}"; then
+              echo "ok: ${name}"
+            else
+              echo "::error title=Smoke failed::${name} (${ref})"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "${failed}"
