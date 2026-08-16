@@ -5,11 +5,14 @@
   (its decision 9) that this image meets on drift rather than duplication. The
   gate is open and the design is unbuilt; what remains is §10's questions and a
   decision on scheduling.
-- **Gate:** Answer RFC 0004's question first. If Postgres with pgmq covers the
-  queue, and Postgres or the application covers the cache, **this image should
-  not exist** — and [images/README.md](../images/README.md) should say so. An
-  explicit refusal is worth more than a silently absent image, because it stops
-  the question being re-asked every six months.
+- **Gate:** ~~Answer RFC 0004's question first: if Postgres with pgmq covers the
+  queue and Postgres or the application covers the cache, this image should not
+  exist.~~ **Answered and opened 2026-08-12.** pgmq is in zero repositories, so
+  the queue half of the question was moot; the cache half measured 14 projects
+  across four pinned images (§3.1), and RFC 0003's second admission route admits
+  it on that drift (§3.2). The gate as written is kept struck through rather than
+  deleted, because the reasoning it encodes — that an explicit refusal beats a
+  silently absent image — is why the question was worth asking.
 - **Scope:** A single-node Valkey image whose value is its defaults: a finite
   `maxmemory` with an eviction policy, persistence off behind one explicit
   switch, secrets from files, and an allowlist-generated `valkey.conf` sharing
