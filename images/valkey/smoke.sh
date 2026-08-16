@@ -53,11 +53,20 @@ expect_refusal() {
 	shift 2
 	local name="${CTR}-r$$"
 	local out rc
+	# Bounded, because a lost refusal does not exit non-zero -- it starts a
+	# server that runs forever. Unbounded, this assertion hangs until CI kills
+	# the job, which reads as an infrastructure problem rather than as the
+	# data-loss regression it is.
 	set +e
-	out=$("${ENGINE}" run --rm "$@" "${IMAGE}" 2>&1)
+	out=$(timeout 60 "${ENGINE}" run --rm --name "${name}" "$@" "${IMAGE}" 2>&1)
 	rc=$?
 	set -e
 	"${ENGINE}" rm -f "${name}" >/dev/null 2>&1 || true
+	if [ "${rc}" -eq 124 ]; then
+		echo "FAIL: ${label} started and kept running, but it must refuse"
+		echo "${out}" | tail -5
+		exit 1
+	fi
 	if [ "${rc}" -eq 0 ]; then
 		echo "FAIL: ${label} started, but it must refuse"
 		echo "${out}" | tail -5

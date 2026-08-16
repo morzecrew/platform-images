@@ -130,10 +130,17 @@ echo "legacy: honoured, attributed, and flagged"
 
 # --- 5. two spellings, two values, one refusal -----------------------------
 
+# Bounded, because the failure mode of a lost refusal is not a non-zero exit --
+# it is a server that starts and runs forever. Without the timeout this
+# assertion hangs until the CI job is killed, which reads as an infrastructure
+# problem rather than as the regression it is.
 set +e
-out=$("${ENGINE}" run --rm -e EDGE_ADDRESS=:8082 -e CADDY_EDGE_ADDRESS=:8083 "${IMAGE}" 2>&1)
+out=$(timeout 30 "${ENGINE}" run --rm --name "${CTR}-refuse" \
+	-e EDGE_ADDRESS=:8082 -e CADDY_EDGE_ADDRESS=:8083 "${IMAGE}" 2>&1)
 rc=$?
 set -e
+"${ENGINE}" rm -f "${CTR}-refuse" >/dev/null 2>&1 || true
+[ "${rc}" -ne 124 ] || { echo "FAIL: a conflicting pair of spellings started and kept running"; exit 1; }
 [ "${rc}" -ne 0 ] || { echo "FAIL: a conflicting pair of spellings started"; exit 1; }
 expect_in "refusal names both variables" "${out}" "CADDY_EDGE_ADDRESS=:8083 and EDGE_ADDRESS=:8082"
 echo "refused: one setting spelled two ways with two values"
