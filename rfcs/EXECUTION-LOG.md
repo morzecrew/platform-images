@@ -667,3 +667,237 @@ and still stands.**
 Nothing in this wave was written into an RFC. Every entry above touches a
 `LOCKED` row or proposes a new one, and none of them is pre-authorised the way
 RFC 0004 row 5 pre-authorised D-001 — so they wait.
+
+---
+
+# Wave 3 · Shared env-config helper and the valkey image
+
+Branch `feat/wave-3-shared-envconf-valkey`. RFC 0001 P2, RFC 0006 P1, P2 and P3.
+
+**Drift count: 1** — D-018. The rest are `spec-gap` or `discovery`; the
+reasoning for that split is under D-018, because it is the one that could
+plausibly have been graded either way and grading it generously would have made
+the number meaningless.
+
+These four phases shipped as one unit because none of them is separately
+verifiable. RFC 0001 P2 requires the helper be "exercised by exactly one
+consumer" and that the consumer be a *new* image; RFC 0006 P2 requires the
+allowlist mechanism be shared rather than copied, "and if it cannot be shared,
+stop and fix RFC 0001". The helper alone is untested and the image alone is the
+fork both documents forbid.
+
+**This wave answers RFC 0006's open question 3** — *is RFC 0001's helper
+genuinely shareable, or Postgres-specific in ways only a second consumer
+reveals?* It is shareable, but not in the shape RFC 0001 described: three of
+the entries below (D-014, D-015, D-018) are places where the contract as
+written could not be implemented against a second config format, and all three
+were invisible while `postgres` was the only consumer.
+
+## D-014 — The source map is quads, not triples
+
+- **Touches:** RFC 0001 §5.2 — the shape was settled with the author before
+  execution (readiness gate, see D-021)
+- **Settled as:** `key\0source\0origin\0` triples on stdin
+- **Built:** `key\0value\0source\0origin\0` quads
+- **Because:** the summary prints the effective *value* — that is most of its
+  output and the reason anyone reads it — and the helper cannot obtain it. It
+  has a prefix and `environ`; the effective value of a baked or mounted setting
+  is in neither. A triple would have forced every image to pass its values
+  through a second channel alongside the map, which is the same data in two
+  places.
+- **Class:** `spec-gap`. §5.2 named the argument and never its shape, and the
+  triple was proposed from the same gap rather than from the code.
+- **Consequence:** one more field per record for every future image.
+- **Proposed row (RFC 0001):** `ASSUMED` — `envconf_summary` reads NUL
+  delimited `key, value, source, origin` quads.
+
+## D-015 — The allowlist is the authority on spelling
+
+- **Touches:** RFC 0001 §5.1 — unlisted
+- **RFC said:** "`<key>` is normalized (lowercase, `-`→`_`) and must be in that
+  image's allowlist"
+- **Built:** normalization decides whether a variable *matches* an entry; what
+  is written to the config file is the entry's own spelling
+- **Because:** §5.1 specifies matching and is silent on emitting, and for
+  `postgres` the two coincide — postgresql.conf uses underscores, so the
+  normalized form is also the correct output. valkey.conf uses dashes, so
+  emitting the normalized key produces `maxmemory_policy`, which the server
+  ignores silently. The obvious fix, mapping `_`→`-` on the way out, is **not a
+  safe inverse**: valkey also has `server_cpulist`, `bio_cpulist`,
+  `bgsave_cpulist` and `aof_rewrite_cpulist`. There is no rule that recovers
+  the spelling, so the allowlist has to carry it.
+- **Class:** `spec-gap`. Knowable at design time and pitched at the wrong
+  altitude: the contract described a transformation without saying which
+  direction it applied in.
+- **Consequence:** allowlist files must use exact upstream spelling, which is
+  now stated in `images/README.md` and in each allowlist's header. The postgres
+  retrofit (P4) is unaffected — its spellings already coincide.
+- **Proposed row (RFC 0001):** `LOCKED` — the allowlist carries the canonical
+  upstream spelling and is the authority on it. Normalization is used only for
+  matching, never for output, because it is lossy and its inverse is not
+  computable.
+
+## D-016 — Values are read through `awk ENVIRON`, never `eval`
+
+- **Touches:** nothing in any RFC — an implementation hazard
+- **Built:** `value=$(awk -v n="$name" 'BEGIN { printf "%s", ENVIRON[n] }'; printf X)`
+- **Instead of:** `eval "value=\${${name}}"`
+- **Because:** environment variable names may contain characters that shell
+  parameter expansion claims for itself.
+  `${VALKEY_CONF__notify-keyspace-events}` does not mean "the value of that
+  variable" — it means "the value of `VALKEY_CONF__notify`, or the literal
+  string `keyspace-events` if unset". So the lookup returns a **plausible wrong
+  value** rather than failing. Dashed keys are not exotic here: §5.1 normalizes
+  `-`→`_` precisely because operators write them.
+- **Class:** `discovery`. Found by the image's smoke test, which asserted
+  `notify-keyspace-events=KEA` reached the server and got
+  `notify-keyspace-events keyspace-events` — a config the server then rejected.
+  Nothing short of running it would have surfaced this.
+- **Consequence:** one `awk` per passthrough variable at startup. Both suites
+  now pin it: `shared/test/run.sh` covers the dashed name directly, and the
+  smoke test covers it end to end.
+
+## D-017 — Two additions to the contract's function list
+
+- **Touches:** RFC 0001 §5.2, which lists five functions
+- **Built:** six, and one gained a parameter
+  - `envconf_load_denylist <path>` — §5.4 says the postgres denylist "moves
+    into `rootfs/denylist.conf` alongside the allowlist", so a loader for it is
+    required and was not listed
+  - `envconf_collect <prefix> [curated_keys]` — decision 11's collision check
+    needs the passthrough keys and the curated keys in one place, and the
+    passthrough keys are already here
+- **Because:** the alternative was a seventh function taking both sets, which
+  is the same check with an extra hop.
+- **Class:** `spec-gap`.
+- **Consequence:** the collision check counts only curated variables the
+  operator actually **set**, not every key the image writes. Counting defaults
+  would make the passthrough spelling of any defaulted knob permanently
+  unusable — `VALKEY_CONF__maxmemory_policy` would always collide with the
+  image's own `allkeys-lru` default.
+
+## D-018 — The `*KEY*` redaction pattern is narrowed to whole segments
+
+- **Touches:** RFC 0001 §5.2
+- **RFC said:** redact anything matching `*PASSWORD*`, `*TOKEN*`, `*SECRET*`,
+  `*KEY*`, `*HEADERS*`
+- **Built:** the first, second, third and fifth as substrings; `KEY`/`KEYS`
+  only as a whole segment
+- **Because:** `*KEY*` as a substring redacts `notify-keyspace-events`, which
+  is an allowlisted valkey directive whose value an operator specifically needs
+  to read. Over-redaction is not the safe direction it looks like: it hides
+  settings the summary exists to reveal, and a summary that redacts obviously
+  non-secret things teaches people to skim past the redactions that matter.
+- **Class:** `drift`, and this is the one grading choice in this wave worth
+  showing. The test is "could this have been known before code existed, and did
+  the design cover it" — the design covered it, named the exact pattern, and
+  the code does something else. That it is a *correction* of the RFC does not
+  make it a `spec-gap`; every drift feels like a correction to whoever writes
+  it, which is why the class is defined by what the document said rather than
+  by how right the change looks.
+- **Consequence:** a variable named `SIGNING_KEYS` still redacts; one named
+  `keyspace` does not. Both suites pin both directions.
+- **Proposed row (RFC 0001):** `ASSUMED` — the redaction heuristic matches
+  `KEY`/`KEYS` as a delimited segment, not a substring.
+
+## D-019 — Only `valkeyconf` is implemented; the other two refuse
+
+- **Touches:** RFC 0001 §5.2, which declares `pgconf | keyvalue | valkeyconf`
+- **Built:** `valkeyconf`; the other two abort naming themselves
+- **Because:** this wave has exactly one consumer, and a renderer with no
+  consumer is a renderer with no test. `pgconf` lands with P4's postgres
+  retrofit, where a real `postgresql.conf` can verify it.
+- **Class:** departure from the execution plan, agreed with the author before
+  execution.
+- **Consequence:** they fail loudly rather than emitting nothing, so a future
+  image that reaches for one gets a message rather than an empty config file.
+
+## D-020 — RFC 0006's two `OPEN` decisions, decided
+
+- **Touches:** RFC 0006 decisions 9 and 10 (both `OPEN`)
+- **Decision 9 — base image:** Alpine (`valkey/valkey:9.0-alpine`), as §5.1
+  assumes. It is what makes RFC 0001 decision 7's POSIX-`sh` helper testable
+  rather than aspirational; the whole helper is exercised on busybox `ash` on
+  every PR.
+- **Decision 10 — fallback `maxmemory`:** **268435456 (256 MiB)**, with a
+  warning naming the reason. The row asked for "embarrassingly small": small
+  enough that nobody mistakes it for a tuned value, large enough to start and
+  serve. The fallback is reached on cgroup v1, in an unconstrained container,
+  and where `memory.max` reads `max`.
+- **Class:** `OPEN` rows decided by the executor, as that grade instructs.
+- **Also decided, and not in any row:** values above 1 PiB are treated as
+  unlimited and take the warned fallback, because some runtimes report a very
+  large number in place of `max`, and the percentage arithmetic on it overflows
+  64-bit to a negative `maxmemory` the server rejects at startup.
+
+## D-021 — The readiness gate was answered before execution, not during
+
+- **Touches:** the execution plan
+- **Wave 2 reported** the valkey track as not ready: three load-bearing
+  decisions the RFCs do not settle, which is `flag-dont-flip`'s threshold.
+- **Settled with the author before any code:** the source-map shape (NUL
+  delimited, later corrected by D-014), a dedicated `shared/` test harness, and
+  `VALKEY_RENAME_DANGEROUS` as an explicit list of commands to rename.
+- **Consequence, and the reason this entry exists:** two of the three answers
+  were changed by execution — the source map gained a field (D-014) and the
+  helper's spelling rule was rewritten (D-015). The gate was still worth
+  running. Settling them made the *questions* explicit, so both changes are
+  visible as amendments to a recorded answer rather than as choices nobody
+  knew were being made.
+
+## Rules distilled
+
+- A contract that describes a transformation must say which **direction** it
+  applies in. `-`→`_` for matching and `-`→`_` for output are different rules
+  that happen to coincide for one config format, which is exactly how the
+  ambiguity survived a whole RFC (D-015).
+- Before normalizing a key, ask whether the original spelling is recoverable.
+  If it is not, the lossy form cannot be the one you store (D-015).
+- Never use `eval "v=\${$name}"` on a name you did not construct. Shell
+  parameter syntax claims `-`, `:`, `#`, `%` and `?`, so the expansion silently
+  returns something plausible instead of failing (D-016).
+- A redaction heuristic is a claim about a namespace. `*KEY*` is sound for
+  environment variables and wrong for config directives, where `keyspace` and
+  `keepalive` are ordinary words (D-018).
+- The second implementation of an interface is what tests the interface. Three
+  entries here are contract defects that were invisible while `postgres` was
+  the only consumer, and none of them needed a *third* (D-014, D-015, D-018).
+- Answering a readiness gate is worth doing even when the answers turn out
+  wrong. A recorded wrong answer becomes a visible amendment; an unrecorded
+  assumption becomes a silent design (D-021).
+
+## Carried into the next unit
+
+- **RFC 0001 P3** (`caddy` startup summary) and **P4** (`postgres` retrofit).
+  P4 now has a helper proven against a second config format, and D-015 says its
+  spellings coincide so the retrofit does not inherit that problem.
+- **`pgconf` and `keyvalue` renderers** ship with their first consumers (D-019).
+- **RFC 0004 P2** still carries wave 1's R-7 — a `POSTGRES_EXTENSIONS` override
+  publishes onto the default tags.
+- **RFC 0002 §6's first-publish verification** is still not discharged; it needs
+  a real GHCR push, which wave 2's gate now performs on merge.
+- `postgres` still has its own bash implementation of the two channels, so the
+  contract is implemented twice in this repo until P4. `images/README.md` says
+  so rather than leaving a reader to assume the helper is universal.
+
+## Reconciliation — 2026-08-16 (wave 3)
+
+| RFC | Row | Outcome | Grade | Decision | From |
+|---|---|---|---|---|---|
+| 0001 | — | **Pending author** | — | `envconf_summary` reads key/value/source/origin quads | D-014 |
+| 0001 | — | **Pending author** | — | The allowlist carries canonical spelling and is the authority on it | D-015 |
+| 0001 | — | **Pending author** | — | Redaction matches `KEY`/`KEYS` as a segment, not a substring | D-018 |
+| 0006 | 9 | **Decided by executor** | `OPEN` | Alpine base | D-020 |
+| 0006 | 10 | **Decided by executor** | `OPEN` | 256 MiB warned fallback | D-020 |
+
+Decisions 9 and 10 are recorded as decided rather than pending: `OPEN` delegates
+them to execution, so no author acceptance is outstanding. The three RFC 0001
+rows are the author's, and **D-015 is the one to look at** — it proposes a
+`LOCKED` row constraining every future image's allowlist file.
+
+Still pending from earlier waves: D-003, D-004, D-005 (as corrected), D-006,
+D-008, D-010, D-011, D-012, and row 17 from D-009 which remains unratified.
+Nothing from those waves has been accepted into an RFC except row 14 (D-001).
+**Nine proposed rows are now outstanding across three waves**, which is the
+failure mode `flag-dont-flip` calls "the log with no proposals accepted" and is
+worth a deliberate pass rather than another entry.

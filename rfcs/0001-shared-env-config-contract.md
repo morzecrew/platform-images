@@ -1,6 +1,16 @@
 # RFC 0001 — Shared env-config contract
 
-- **Status:** 📝 Draft — foundation for every image RFC that follows
+- **Status:** 🚧 In progress — **P1 shipped 2026-08-16** (the contract in
+  [images/README.md](../images/README.md)); **P2 shipped 2026-08-16** — the
+  helper is [shared/rootfs/lib/envconf.sh](../shared/rootfs/lib/envconf.sh),
+  distributed by a bake named context and exercised by the new `valkey` image,
+  with its own suite at `shared/test/run.sh`. Execution found three defects in
+  the contract as written, all invisible while `postgres` was the only
+  consumer: the source map needs the effective value (EXECUTION-LOG D-014),
+  §5.1's normalization is lossy and must not be used for output (D-015), and
+  §5.2's `*KEY*` redaction pattern hides legitimate directives (D-018).
+  **P3 (`caddy` summary) and P4 (`postgres` retrofit) not started** — until P4,
+  the contract is implemented twice in this repo.
 - **Scope:** One written contract for how every image in this repo takes runtime
   configuration from the environment: variable naming, allowlist semantics,
   precedence, failure mode, and a startup summary. Covers a shared entrypoint
