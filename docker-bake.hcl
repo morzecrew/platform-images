@@ -31,6 +31,7 @@ variable "DESCRIPTIONS" {
     "postgres"          = "PostgreSQL with pg_cron and pgroonga, allowlist-based config overrides via env."
     "uv-builder"        = "uv-based Python build stage: sync, wheel, slim venv via build-uv-app."
     "python-distroless" = "Distroless Python runtime with libmagic and CA bundle."
+    "valkey"            = "Valkey with a finite maxmemory, one persistence switch, file-first secrets, and env-generated config."
   }
 }
 
@@ -195,6 +196,33 @@ target "uv-builder" {
 
 # ....................... #
 
+# renovate: datasource=docker depName=valkey/valkey extractVersion=^(?<version>.+)-alpine$
+variable "VALKEY_VERSION" {
+  default = "9.0"
+}
+
+target "valkey" {
+  inherits   = ["_attested"]
+  context    = "./images/valkey"
+  dockerfile = "Dockerfile"
+  tags       = tag("valkey", VALKEY_VERSION)
+  labels     = label("valkey", VALKEY_VERSION)
+
+  # The shared env-config helper reaches this build as a named context rather
+  # than a copy under images/valkey/ (RFC 0001 decision 6). Every image that
+  # sources envconf.sh declares this line; an image that forgets it fails to
+  # build rather than shipping a stale copy.
+  contexts = {
+    shared = "./shared"
+  }
+
+  args = {
+    VALKEY_VERSION = VALKEY_VERSION
+  }
+}
+
+# ....................... #
+
 # renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
 #
 # Coupled to BUILDER_PYTHON_VERSION: uv-builder produces /opt/venv and
@@ -239,5 +267,5 @@ target "python-distroless" {
 # ....................... #
 
 group "default" {
-  targets = ["flyway", "caddy", "postgres", "uv-builder", "python-distroless"]
+  targets = ["flyway", "caddy", "postgres", "uv-builder", "python-distroless", "valkey"]
 }

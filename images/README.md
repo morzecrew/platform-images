@@ -30,24 +30,46 @@ and, on the default Buildx driver, silently publishes without attestations.
 Every image that takes runtime configuration from the environment follows this
 contract. It is normative: image READMEs link here rather than restating it.
 
-> **Status.** This is the contract, not a description of what ships today.
-> `postgres` implements the two channels and the allowlist; **no image emits the
-> startup summary yet**, and the shared helper that would enforce the collision,
-> value-safety and redaction rules is not written. Where an image's behaviour and
-> this section disagree today, this section is the target and the image is the
-> gap. Each image's own README states what it actually does.
+> **Status.** Partially shipped, and which part depends on the image.
+>
+> - **`valkey`** implements all of it, through the shared helper at
+>   [`shared/rootfs/lib/envconf.sh`](../shared/rootfs/lib/envconf.sh): two
+>   channels, allowlist and denylist, collision refusal, value safety,
+>   `_FILE` secrets, and the startup summary. **One deliberate exception:**
+>   redaction matches `KEY`/`KEYS` as a whole segment rather than as the
+>   substring this section's rule states, because the substring form hides
+>   `notify-keyspace-events` — a real allowlisted directive. The amendment is
+>   proposed and not yet accepted (EXECUTION-LOG D-018), so the rule below is
+>   still the normative one and this is the gap.
+> - **`postgres`** implements the two channels and the allowlist with its own
+>   code, predating the helper. It emits no summary and has no denylist file.
+>   RFC 0001 P4 retrofits it, deliberately last, because it is the only step
+>   that can regress a running deployment.
+> - **`caddy`** has no passthrough channel and emits no summary yet (RFC 0001 P3).
+>
+> Where an image's behaviour and this section disagree, this section is the
+> target and the image is the gap. Each image's own README states what it
+> actually does.
 
 ### Two channels
 
 | Channel | Form | Meaning |
 |---|---|---|
 | **Curated** | `<PREFIX>_<NAME>` | A setting the image owns and documents in its own README. May be composed — one variable driving several upstream settings. |
-| **Passthrough** | `<PREFIX>_CONF__<key>` | One upstream setting, verbatim. `<key>` is normalised (lowercase, `-` → `_`) and must appear in that image's allowlist. |
+| **Passthrough** | `<PREFIX>_CONF__<key>` | One upstream setting, verbatim. `<key>` is normalised (lowercase, `-` → `_`) for *matching* and must appear in that image's allowlist. |
 | **Upstream** | whatever upstream defined | Never intercepted, never redefined. |
 
 `<PREFIX>` is one token per image, declared in its README — `PG`, `CADDY`,
 `VALKEY`, `CH`. The double underscore is what keeps the passthrough channel
 unambiguous, and it already ships in `postgres` as `PG_CONF__*`.
+
+**The allowlist is the authority on spelling.** Normalisation decides whether a
+variable *matches* an entry; what gets written into the config file is the
+entry's own spelling. The inverse mapping is not safe to compute — valkey has
+both `maxmemory-policy` and `server_cpulist`, so `_` → `-` would corrupt the
+second — which is why the allowlist file carries the exact upstream spelling and
+`VALKEY_CONF__MAXMEMORY_POLICY`, `VALKEY_CONF__maxmemory-policy` and
+`VALKEY_CONF__maxmemory_policy` all render as `maxmemory-policy`.
 
 **A curated name and a passthrough key may not target the same setting.** Each
 image declares which upstream key(s) each curated name writes; if a passthrough
@@ -171,6 +193,18 @@ failure. It runs under rootless Podman, so it asserts what rootless is what
 breaks: UID mapping, volume ownership, port binds. `bake.yaml` discovers it by
 path, so an image without one is silently unsmoked — that much is still on the
 author to remember.
+
+### Admissions on record
+
+| Image | Route | Evidence | Decided |
+|---|---|---|---|
+| `valkey` | 2 (drift) | 14 projects running a cache/queue on four distinct upstream references — `redis:7-alpine` (floating), `redis:7.2.3-alpine`, `redis:8.0.3-alpine`, `valkey/valkey:9.0` — with one migration to Valkey already begun and no shared image to land on. See [RFC 0006](../rfcs/0006-valkey-image.md) §3.1. | 2026-08-12, **admitted** |
+| OpenTelemetry Collector | — | One repository uses it. Route 1 needs two hand-rolled Dockerfiles and route 2 needs two projects that have diverged; one project satisfies neither. See [RFC 0005](../rfcs/0005-opentelemetry-collector-image.md). | 2026-08-12, **refused** |
+| ClickHouse | — | Two compose services, but the deployed instances are managed (Yandex MDB), so the image would be curating config for something we do not run. See [RFC 0007](../rfcs/0007-clickhouse-image.md). | 2026-08-12, **refused** |
+
+A refusal is recorded rather than left implicit, because the next person to want
+one of these will otherwise re-derive the case from scratch — and because the
+evidence has a shelf life. A second OTel consumer changes that row.
 
 **Why two routes.** Route 1 counts duplicated Dockerfiles, which is the right
 evidence for a *packaging* image — somebody had to write a build, twice. It is

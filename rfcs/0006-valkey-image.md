@@ -1,11 +1,15 @@
 # RFC 0006 — Valkey image
 
-- **Status:** 📝 Draft — **admitted 2026-08-12.** Demand measured (§3.1: 14
-  projects, four distinct upstream references, three pinned and one floating),
-  and RFC 0003 gained a second admission route
-  (its decision 9) that this image meets on drift rather than duplication. The
-  gate is open and the design is unbuilt; what remains is §10's questions and a
-  decision on scheduling.
+- **Status:** 🚧 In progress — **P1, P2 and P3 shipped 2026-08-16.** Admitted
+  2026-08-12 on demand measured in §3.1 (14 projects, four distinct upstream
+  references, three pinned and one floating) via RFC 0003's second admission
+  route; the decision and its reasoning are recorded in
+  [images/README.md](../images/README.md). The image is
+  [images/valkey](../images/valkey), and it is the first consumer of RFC 0001's
+  shared helper — which answers §10 question 3: the helper **is** shareable,
+  but three defects in the contract only became visible with a second consumer
+  (EXECUTION-LOG D-014, D-015, D-018). Decisions 9 and 10 are decided (D-020):
+  Alpine, and a 256 MiB warned fallback.
 - **Gate:** ~~Answer RFC 0004's question first: if Postgres with pgmq covers the
   queue and Postgres or the application covers the cache, this image should not
   exist.~~ **Answered and opened 2026-08-12.** pgmq is in zero repositories, so
@@ -366,8 +370,8 @@ come away knowing the image evicts by default.
 | 6 | `LOCKED` | The two §5.3 combinations are refused at startup, not documented and permitted. A durable store under `allkeys-lru` loses data silently, and silence is the failure this repo's images are supposed to remove. |
 | 7 | `ASSUMED` | `maxmemory` derives from cgroup v2 `memory.max` at 75%, with a warned fallback. Depart on the percentage; do not depart on "warn when falling back". |
 | 8 | `ASSUMED` | `CONFIG` stays enabled by default while `FLUSHALL`/`FLUSHDB`/`KEYS` are renamed (§5.4). Depart if no consumer's client library probes `CONFIG GET`. |
-| 9 | `OPEN` | Alpine or Debian-slim base. Alpine keeps RFC 0001's POSIX-`sh` helper trivially satisfiable; if a consumer hits a musl-related issue, Debian-slim plus a shell is the fallback. |
-| 10 | `OPEN` | The conservative fixed fallback value for `maxmemory` when no cgroup limit is readable. Pick it against a real host, and prefer embarrassingly small — an evicting cache is recoverable, an OOM-killed host is not. |
+| 9 | ~~`OPEN`~~ **Decided by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-020.** **Alpine** (`valkey/valkey:9.0-alpine`). It is what makes RFC 0001 decision 7's POSIX-`sh` requirement testable rather than aspirational: the helper is exercised on busybox `ash` on every PR. Original text: | Alpine or Debian-slim base. Alpine keeps RFC 0001's POSIX-`sh` helper trivially satisfiable; if a consumer hits a musl-related issue, Debian-slim plus a shell is the fallback. |
+| 10 | ~~`OPEN`~~ **Decided by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-020.** **268435456 (256 MiB)**, with a warning naming the reason; plus values above 1 PiB treated as unlimited, since some runtimes report a very large number in place of `max` and the percentage arithmetic on it overflows to a negative `maxmemory`. Original text: | The conservative fixed fallback value for `maxmemory` when no cgroup limit is readable. Pick it against a real host, and prefer embarrassingly small — an evicting cache is recoverable, an OOM-killed host is not. |
 
 ## 12. Phasing
 
