@@ -15,11 +15,15 @@ Build from the **repository root**:
 ```bash
 just bake               # all images
 just bake flyway        # one target
-just publish            # build + push (requires gh auth)
 just push postgres 18   # push an already-built local tag
 ```
 
 `just` is a thin wrapper around `docker buildx bake -f docker-bake.hcl` (`just push` uses `docker push` separately).
+
+**Publishing happens in CI**, not from a shell — see
+[Consuming these images](../README.md#consuming-these-images). `just publish`
+refuses unless `I_KNOW_THIS_IS_UNGATED=1`, because it bypasses the smoke gate
+and, on the default Buildx driver, silently publishes without attestations.
 
 ## Environment configuration
 

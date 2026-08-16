@@ -15,10 +15,21 @@ From the **repo root**. Requires [just](https://github.com/casey/just) and [Dock
 ```bash
 just bake                 # all images (default group)
 just bake postgres        # single image
-just publish              # build + push everything (uses gh auth)
-just push postgres 18.4
+just push postgres 18.4   # push an already-built local tag
 just push uv-builder 3.14
 ```
+
+**Publishing is CI's job, not a local command.** A merge to `main` that touches
+`docker-bake.hcl` or `images/**` publishes, as does the weekly rebuild and a
+manual run of [publish.yaml](.github/workflows/publish.yaml). Each of those
+builds the image, pushes it by digest with no tag attached, smoke-tests that
+exact digest, and only then moves the tags.
+
+`just publish` still exists and **refuses by default**, because both of its
+failure modes are silent: it skips that smoke gate, and on the default Buildx
+driver it publishes no attestations while reporting success. Set
+`I_KNOW_THIS_IS_UNGATED=1` if you genuinely mean to bypass both. `just push`
+moves an already-built tag and is unaffected.
 
 Pushing uses `gh auth token` for registry login to `ghcr.io`.
 
