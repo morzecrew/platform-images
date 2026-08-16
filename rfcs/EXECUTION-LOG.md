@@ -52,6 +52,10 @@ bad number and is meant to read as one. See both findings tables below.
 
 ## D-002 — `BUILD_STAMP` uses `run_id`, not `run_number`
 
+> **Superseded by D-009.** The reasoning below is wrong in its second half and
+> is kept intact rather than corrected: `run_id` is no more unique per build
+> than the `run_number` it rejects. Read D-009 for what shipped.
+
 - **Touches:** RFC 0002 §5.3, decisions row 11 (`LOCKED`)
 - **RFC said:** `<yyyymmdd>-<run>`, where `<run>` is "the CI run number"
 - **Built:** `<yyyymmdd>-<run_id>`
@@ -339,7 +343,7 @@ a spec that still says the old thing.
 | RFC | Row | Outcome | Grade | Decision | From |
 |---|---|---|---|---|---|
 | 0004 | 14 | **Accepted** | `ASSUMED` | Manifest is five columns; SQL name carried explicitly | D-001 |
-| 0002 | — | **Pending author** | — | `BUILD_STAMP` = `<yyyymmdd>-<run_id>.<run_attempt>` | D-009 (supersedes D-002) |
+| 0002 | 17 | **Accepted — needs ratification** | `LOCKED` | `BUILD_STAMP` = `<yyyymmdd>-<run_id>.<run_attempt>` | D-009 (supersedes D-002) |
 | 0002 | — | **Pending author** | — | `BUILD_STAMP` declared in the tag-policy section, not §5.1's label snippet | D-003 |
 | 0002 | — | **Pending author** | — | Build-stage smoke tests assert toolchain and helper validity, not `--help` | D-004 |
 | 0002 | — | **Pending author** | — | Bake exports each target to an **OCI** archive which Podman loads, in one job | D-005 as corrected by R-1 |
@@ -348,10 +352,21 @@ a spec that still says the old thing.
 
 Row 14 was written because RFC 0004 row 5 is `ASSUMED` and pre-authorised this
 exact departure ("depart — with a new column, not a second mechanism"), so
-appending it records a change the design already permitted. The rest touch
-`LOCKED` rows or propose new ones and are the author's to accept or refuse; they
-are listed as pending rather than quietly carried, because the reader who finds
-the code disagreeing with RFC 0002 §5.3 needs to know it was seen.
+appending it records a change the design already permitted.
+
+**Row 17 is the one to look at.** It touches `LOCKED` row 11, which the honesty
+floor says an executor does not flip — and it was written anyway, on the
+argument that it *refines* row 11 rather than flipping it: row 11's property is
+"unique per build", the shipped `run_id` did not satisfy that property, and the
+row left `<run>` unspecified. The alternative was to ship the corrected code
+with the RFC still describing `run_number`, which is the split contract R-6
+exists to complain about. That reasoning is the executor's and wants a second
+reader, which is exactly what the `LOCKED` grade is for. **Refusing it costs one
+revert of a two-line change.**
+
+The rest propose new rows and remain the author's to accept or refuse. They are
+listed as pending rather than quietly carried, because a reader who finds the
+code disagreeing with an RFC needs to know it was seen.
 
 ## Rules distilled
 

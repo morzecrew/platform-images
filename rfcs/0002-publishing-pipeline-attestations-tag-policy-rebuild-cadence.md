@@ -233,8 +233,14 @@ function "tag" {
 repointed by the second build on the same date, which contradicts "written once"
 outright — an immutable tag that silently moves is worse than no immutable tag,
 because consumers pinned it precisely to avoid that. So the stamp is
-`<yyyymmdd>-<run>`, where `<run>` is the CI run number: monotonic, unique, and
-already available. Not a git short SHA — two rebuilds of an unchanged tree
+`<yyyymmdd>-<run>`, where ~~`<run>` is the CI run number: monotonic, unique, and
+already available~~ — **corrected by execution 2026-08-16, see
+[EXECUTION-LOG.md](EXECUTION-LOG.md) D-009.** `<run>` is
+`<run_id>.<run_attempt>`. `github.run_number` is not unique per build and
+neither is `github.run_id`: **neither changes when a run is re-run**, and a
+re-run rebuilds against moved upstream state, so either alone would repoint the
+tag this section calls immutable. Only `run_attempt` increments. Not a git short
+SHA — two rebuilds of an unchanged tree
 produce different images (that is the whole point of §5.4), so the SHA would
 collide exactly when the date-based stamp must not.
 
@@ -414,6 +420,7 @@ The smoke stage of §5.5 is itself most of this RFC's verification. Beyond it:
 | 14 | ~~`ASSUMED`~~ | ~~**Set by execution.** `.description` comes from a `DESCRIPTIONS` map, and a target with no entry gets an **empty** description, not an error.~~ **Superseded by row 16** — an empty label was a silent failure the rest of this RFC exists to remove. |
 | 15 | `ASSUMED` | **Set by execution.** The shared attestation target is named `_attested`, not §5.2's `_common` — it carries only attestations, and a name that says so survives the next thing someone wants to share across targets. |
 | 16 | `LOCKED` | **Set by review.** `DESCRIPTIONS` is indexed directly (`DESCRIPTIONS[name]`), not via `lookup()` with a default, so a target with no entry **fails the build**. Bake evaluates every target on every invocation, so the failure is immediate and local rather than surfacing as a blank GHCR page after a push. Consequence: adding an image is a nine-item checklist and removing one has to drop the row too, both in [images/README.md](../images/README.md). Keys stay quoted — bare hyphenated keys parse as subtraction in HCL. |
+| 17 | `LOCKED` | **Found by review 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-009.** Fixes the stamp format row 11 left as `<run>`: `BUILD_STAMP` is `<yyyymmdd>-<run_id>.<run_attempt>`. This **refines** row 11 rather than superseding it — row 11's property (unique per build) is unchanged, and the shipped `run_id` did not satisfy it. Both `github.run_number` and bare `github.run_id` are rejected: neither changes when a run is re-run, and a re-run rebuilds against moved upstream state, so either would repoint the tag decision 1 calls immutable. Consequence: every stamp carries a `.N` even though the first attempt is always `.1`, because a conditional suffix would make the format depend on history. |
 
 ## 12. Phasing
 
