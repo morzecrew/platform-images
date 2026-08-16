@@ -144,7 +144,7 @@ somebody else's CVE feed, and adding one is nine edits, not one:
 | 5 | `PACKAGES` in [`cleanup-images.yaml`](../.github/workflows/cleanup-images.yaml) |
 | 6 | Images table row in the [root README](../README.md) |
 | 7 | A `DESCRIPTIONS` entry in [`docker-bake.hcl`](../docker-bake.hcl) |
-| 8 | Env-config allowlist and README section — *once RFC 0001 ships* |
+| 8 | Env-config allowlist and README section — see [Environment configuration](#environment-configuration) |
 | 9 | `smoke.sh` — *once RFC 0002 P3 ships* |
 
 **Items 4, 5 and 7 fail silently.** A missing `default` entry means the image is
@@ -153,8 +153,8 @@ versions accumulate in GHCR forever; a missing `DESCRIPTIONS` entry publishes an
 empty `org.opencontainers.image.description` rather than raising. None of the
 three produces a red check.
 
-Items 8 and 9 have no mechanism yet — they are listed so the cost is visible, not
-because there is something to fill in today.
+Item 9 has no mechanism yet — it is listed so the cost is visible, not because
+there is something to fill in today.
 
 **Why two routes.** Route 1 counts duplicated Dockerfiles, which is the right
 evidence for a *packaging* image — somebody had to write a build, twice. It is
