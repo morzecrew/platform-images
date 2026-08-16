@@ -1132,3 +1132,115 @@ across three waves is the failure mode the practice is named against.
 
 ## Self-audit findings — wave 4, 2026-08-16
 
+Found by the adversarial pass over the finished branch, after the entries above
+were written.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-12 | `images/caddy/smoke.sh`, `images/valkey/smoke.sh` | **A refusal that stops refusing hangs the job instead of failing it.** Both scripts assert a refusal with `run --rm … "${IMAGE}"` and check for a non-zero exit — but an image that no longer refuses *starts a server*, so the command never returns. Measured: `timeout` reports 124 against a non-refusing image, and unbounded it runs until CI kills the job, which reads as an infrastructure problem rather than as the data-loss regression it is. Both now bounded, with 124 reported as its own failure. The valkey helper also passed `--name` to `rm -f` for a container it had never named. | — | Fixed |
+| A-13 | `entrypoint.sh` | The source map survived into the running container. `trap … EXIT` does not fire across `exec`, so `/tmp/tmp.XXXX` — a file describing the configuration — sat there for the life of the process. Removed after the summary consumes it. | — | Fixed |
+| A-14 | `entrypoint.sh` | `env_present()` was written, never called. Dead code in the file that decides what an operator's variables mean. Removed. | — | Fixed |
+| A-15 | `images/caddy/README.md` | "everything beginning with `CADDY_` is checked against the table above" — false. `CADDY_CONF__*`, `CADDY_CONF_STRICT`, `CADDY_CONF_ALLOWLIST`, any `*_FILE` and upstream's `CADDY_VERSION` are all exempt by decision 9's ignore list. The sentence was selling the migration on a guarantee one paragraph wider than the one that exists. | — | Fixed |
+
+**None of the four is `drift`,** and saying so is worth more than the count:
+no decision row governs test bounding, temp-file lifetime, dead code or that
+sentence. The wave's drift count stays 0 — not because the audit found
+nothing, but because what it found is not the thing that number measures.
+
+**A-12 is the one that mattered**, and it was found by accident: an experiment
+meant to sabotage the *image* revealed the *test* could not fail. It is also
+the second time this wave that a check turned out to be shaped so a regression
+would show up as something other than a failing assertion — the first was the
+reason `smoke.sh` compares three copies of the defaults rather than trusting
+them. A test that hangs is worse than a test that fails, because the hang gets
+attributed to the runner.
+
+Verification actually performed, rather than claimed:
+
+- Helper suite: **102 passed / 0 failed** under `bash`, **99 / 0** under busybox
+  `ash` in an Alpine container (the shell the images actually run). The gap is
+  two capability skips plus one case that cannot run as root.
+- `images/caddy/smoke.sh`: full pass against the built image, including the
+  three-way defaults check and the summary ordering assertion.
+- `images/valkey/smoke.sh`: full pass, re-run because A-12 changed its helper.
+- Sabotage, each verified red and reverted: the header override removed from
+  the helper (2 assertions fail); a README default changed (1); an entrypoint
+  default changed (1); the deprecation warning removed (1); a non-refusing
+  image fed to the collision case (reported as "started and kept running",
+  which is the branch A-12 added).
+- Runtime states: root and `--user caddy` both start and serve; an emptied
+  variable; a `/docker-entrypoint.d` hook is still sourced before resolution.
+
+## Rules distilled
+
+- A refusal test must be **bounded**. The failure mode of a lost refusal is not
+  a non-zero exit, it is a process that keeps running, and an unbounded
+  assertion turns that into a hung job attributed to the runner (A-12).
+- When two sections of one document disagree, the executor's job is to notice,
+  not to choose. D-022's conflict was one `LOCKED` row against one non-goal,
+  four hundred words apart, and either half read alone looked settled.
+- A default duplicated across a Dockerfile, an entrypoint and a README is fine
+  if a test compares all three, and a lie waiting to happen otherwise. Ask
+  which copies exist before deciding whether duplication is the problem (D-026).
+- `trap … EXIT` does not fire across `exec`. Any entrypoint that hands off to a
+  server leaks whatever it meant to clean up (A-13).
+- A digest is immutable, not durable. It survives a repointed tag and not a
+  garbage collector, and this repo runs one weekly (D-029).
+- Precision you are entitled to is not always precision you may print. A
+  `LOCKED` row that mandates a weaker label outranks an executor's correct
+  observation that a stronger one is available (D-024).
+
+## Carried into the next unit
+
+- **RFC 0001 P4** (`postgres` retrofit) is the last phase of RFC 0001 and the
+  only one that can regress a running deployment. It needs the `pgconf`
+  renderer (D-019), the denylist moved to a file (§5.4), and §6's tests green
+  before it lands.
+- **`postgres@sha256:9934cb32…` is deleted by the next cleanup run** unless it
+  is tagged. That digest is RFC 0004 §6's pre-refactor reference (D-029). A
+  registry write is the author's call; nothing in this wave made one.
+- **RFC 0002 §6's wording** needs the correction D-029 describes: "zero
+  deletions" is true only of images published under the tag policy.
+- **The alias deprecation has no end date.** Decision 20 keeps nine unprefixed
+  names working; nothing schedules their removal, and the next wave that
+  touches `caddy` should either set that date or record that there is none.
+- ~~RFC 0002 §6's first-publish verification~~ — discharged, D-028.
+- ~~Nine proposed rows outstanding across three waves~~ — drafted as rows for
+  ratification; see the reconciliation table below.
+- **`keyvalue` renderer** still ships with RFC 0005, `pgconf` with P4 (D-019).
+
+## Reconciliation — 2026-08-16 (wave 4)
+
+Every outstanding proposal from waves 1–3 is written into its RFC's decision
+table as a row citing the entry it came from. **They are proposals until this
+branch merges** — the author ratifies by accepting the PR, or strikes any row
+and the refusal is recorded here in the next pass.
+
+| RFC | Row | Outcome | Grade | Decision | From |
+|---|---|---|---|---|---|
+| 0002 | 17 | **Awaiting explicit ratification** | `LOCKED` | `BUILD_STAMP` is `<yyyymmdd>-<run_id>.<run_attempt>` | D-009 |
+| 0002 | 18 | **Proposed** | `ASSUMED` | Build-stage images are smoked for toolchain presence, not a `--help` | D-004 |
+| 0002 | 19 | **Proposed** | `ASSUMED` | CI exports `type=oci` and loads into Podman; the docker exporter cannot | D-005 (as corrected) |
+| 0002 | 20 | **Proposed** | `LOCKED` | The gate is push-by-digest → pull → smoke → `imagetools create` | D-008, D-010 |
+| 0002 | 21 | **Proposed** | `ASSUMED` | One concurrency group for every workflow that mutates GHCR | D-011 |
+| 0002 | 22 | **Proposed** | `ASSUMED` | Publishing paths that bypass the gate refuse by default | D-012 |
+| 0004 | 15 | **Proposed** | `ASSUMED` | The equivalence reference is a digest — and a digest is not durable here | D-006, D-029 |
+| 0001 | 14 | **Proposed** | `ASSUMED` | The summary reads NUL-delimited quads | D-014 |
+| 0001 | 15 | **Proposed** | `LOCKED` | The allowlist is the authority on canonical spelling | D-015 |
+| 0001 | 16 | **Proposed** | `ASSUMED` | Redaction matches `KEY`/`KEYS` as a segment | D-018 |
+| 0001 | 17 | **Proposed** | `ASSUMED` | Six functions, and `envconf_summary` takes a header and footer | D-017, D-023 |
+| 0001 | 18 | **Proposed** | `ASSUMED` | Header and footer are the image's claims, not the helper's | D-023 |
+| 0001 | 19 | **Proposed** | `ASSUMED` | A renderer ships with its first consumer; the rest abort | D-019 |
+| 0001 | 20 | **Decided by the author** | `LOCKED` | `caddy`'s curated names are `CADDY_*`, old names kept as warning aliases | D-022 |
+| 0001 | 21 | **Proposed** | `ASSUMED` | Two spellings of one curated name collide and refuse | D-025 |
+| 0001 | 22 | **Proposed** | `ASSUMED` | `caddy` has no passthrough channel; §10's question struck through | D-027 |
+
+**Sixteen rows, of which fifteen were owed from earlier waves or this one and
+one is a ratification.** D-003, D-016, D-024 and D-026 propose no row on
+purpose: the first is a cosmetic mismatch between a phase and a snippet, and
+the other three are implementation shapes with no decision to record. D-013,
+D-021 and D-029 touch the plan or a test list rather than a decision table.
+
+The row to read first is **RFC 0001 row 15** (`LOCKED`), which constrains every
+future image's allowlist file, and **row 20**, which is the one decision in this
+table the author made rather than the executor proposing.
