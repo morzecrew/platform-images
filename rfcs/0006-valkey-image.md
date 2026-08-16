@@ -1,7 +1,8 @@
 # RFC 0006 — Valkey image
 
 - **Status:** 📝 Draft — **admitted 2026-08-12.** Demand measured (§3.1: 14
-  projects, four pinned images), and RFC 0003 gained a second admission route
+  projects, four distinct upstream references, three pinned and one floating),
+  and RFC 0003 gained a second admission route
   (its decision 9) that this image meets on drift rather than duplication. The
   gate is open and the design is unbuilt; what remains is §10's questions and a
   decision on scheduling.
@@ -83,10 +84,12 @@ Swept every Morze repository for a Redis or Valkey **service** in a compose file
 `morze-erp-backend`, `morze-erp-infrastructure`, `samolet-ai-mvp`,
 `test-livekit`.
 
-Across them, **four distinct pinned upstream images** are in use:
+Across them, **four distinct upstream image references** are in use:
 `redis:7-alpine` (floating minor), `redis:7.2.3-alpine`, `redis:8.0.3-alpine`,
 and `valkey/valkey:9.0` — somebody has already migrated to Valkey without a
-shared image to land on.
+shared image to land on. Three are pinned and one floats, which is itself part
+of the divergence: the projects on `redis:7-alpine` are not on a version anyone
+chose, and cannot say which one they are running.
 
 That drift is what this repo exists to remove, and **the cache requirement is not
 hypothetical**: it is in more projects than any image currently published here.
@@ -115,7 +118,8 @@ duplicated Dockerfile.
 > **Settled 2026-08-12.** RFC 0003 decision 9 adds a second admission route: two
 > or more projects running the same upstream image whose pinned versions or
 > configuration have diverged. This image meets it — fourteen projects, four
-> distinct pinned images, and a Valkey migration already begun in one of them.
+> distinct upstream references (three pinned, one floating), and a Valkey
+> migration already begun in one of them.
 > **The gate is open.** Note what did not happen: decision 1 was not widened, so
 > route 1 still means what it meant, and RFC 0005 is still refused because zero
 > projects cannot diverge.
