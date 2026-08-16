@@ -374,6 +374,36 @@ out=$(run "summary does NOT redact tcp-keepalive" 0 \
 	'printf "tcp-keepalive\000300\000env\000X\000" | envconf_summary VALKEY')
 expect_contains "  ...value shown" "${out}" "tcp-keepalive = 300"
 
+# One row per key, attributed to the layer that won -- the header says
+# "effective settings", so a losing row is a false statement.
+out=$(run "summary collapses an overridden key to one row" 0 \
+	'printf "loglevel\000notice\000mounted\000/etc/f.conf\000loglevel\000debug\000env\000VALKEY_CONF__loglevel\000" | envconf_summary VALKEY')
+expect_contains "  ...winner shown" "${out}" "loglevel = debug"
+case "${out}" in
+*notice*) bad "  ...the overridden value must not appear" "${out}" ;;
+*) ok "  ...the overridden value does not appear" ;;
+esac
+# `source=mounted`, not bare "mounted" -- the precedence footer names every
+# layer, so the loose match was matching its own explanation.
+case "${out}" in
+*"source=mounted"*) bad "  ...the losing source must not appear" "${out}" ;;
+*) ok "  ...the losing source does not appear" ;;
+esac
+
+# Distinct keys are all kept; the collapse is per key, not a last-wins filter.
+out=$(run "summary keeps distinct keys" 0 \
+	'printf "a\0001\000baked\000x\000b\0002\000env\000y\000" | envconf_summary VALKEY')
+expect_contains "  ...first" "${out}" "a = 1"
+expect_contains "  ...second" "${out}" "b = 2"
+
+# The quoter is shared with the curated path; both must agree.
+out=$(run "quoter wraps a value with spaces" 0 'envconf_quote_valkeyconf "two words"')
+expect_equals "  ...quoted" "${out}" '"two words"'
+out=$(run "quoter leaves a plain value bare" 0 'envconf_quote_valkeyconf simple')
+expect_equals "  ...bare" "${out}" "simple"
+out=$(run "quoter escapes an embedded quote" 0 'envconf_quote_valkeyconf "a\"b"')
+expect_equals "  ...escaped" "${out}" '"a\"b"'
+
 out=$(run "summary prints the precedence line" 0 \
 	'printf "" | envconf_summary VALKEY')
 expect_contains "  ...precedence" "${out}" "baked < mounted < env"

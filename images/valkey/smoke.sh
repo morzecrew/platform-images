@@ -312,4 +312,50 @@ case "$("${ENGINE}" logs "${CTR}" 2>&1)" in
 esac
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
+# --- 14. values needing quoting reach the server intact -------------------
+
+# A curated value is written by the entrypoint, not by envconf_render, so it
+# only stays safe while both use the same quoter. A password with a space made
+# valkey exit with "wrong number of arguments" when they diverged.
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+start "${CTR}" -e "VALKEY_PASSWORD=two words"
+wait_ready "${CTR}" || true
+if "${ENGINE}" exec "${CTR}" valkey-cli -a "two words" --no-auth-warning PING 2>/dev/null | grep -q PONG; then
+	echo "curated value with a space: quoted and in force"
+else
+	echo "FAIL: a password containing a space did not survive into valkey.conf"
+	"${ENGINE}" logs "${CTR}" 2>&1 | tail -5
+	exit 1
+fi
+
+# Valkey splits a quoted argument back into tokens, so a multi-argument
+# directive survives the same quoting.
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+start "${CTR}" -e "VALKEY_CONF__client-output-buffer-limit=normal 0 0 0"
+wait_ready "${CTR}"
+case "$(cfg "${CTR}" client-output-buffer-limit)" in
+"normal 0 0 0"*) echo "multi-argument passthrough: applied" ;;
+*) echo "FAIL: client-output-buffer-limit did not apply: $(cfg "${CTR}" client-output-buffer-limit)"; exit 1 ;;
+esac
+
+# --- 15. the summary reports the layer that won, once ---------------------
+
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+mkdir -p "${WORK}/override"
+printf 'loglevel notice\n' >"${WORK}/override/50-log.conf"
+start "${CTR}" -v "${WORK}/override:/etc/valkey/conf.d:ro,Z" -e VALKEY_CONF__loglevel=debug
+wait_ready "${CTR}"
+[ "$(cfg "${CTR}" loglevel)" = "debug" ] || { echo "FAIL: env did not win"; exit 1; }
+rows="$("${ENGINE}" logs "${CTR}" 2>&1 | grep -c 'loglevel = ' || true)"
+[ "${rows}" = "1" ] || {
+	echo "FAIL: summary shows ${rows} rows for loglevel; an overridden key must appear once"
+	"${ENGINE}" logs "${CTR}" 2>&1 | grep 'loglevel'
+	exit 1
+}
+case "$("${ENGINE}" logs "${CTR}" 2>&1 | grep 'loglevel = ')" in
+*"source=env"*"debug"*) echo "summary: overridden key shown once, attributed to the winner" ;;
+*) echo "FAIL: the single loglevel row is not the winning one"; exit 1 ;;
+esac
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
 echo "PASS: valkey"

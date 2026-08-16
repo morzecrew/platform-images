@@ -38,7 +38,11 @@ trap cleanup EXIT
 #
 #   emit <key> <value> <source> <origin>
 emit() {
-	printf '%s %s\n' "$1" "$2" >>"${CONF_TMP}"
+	# Quoted for the config file, raw for the summary. The quoter is the same
+	# one envconf_render uses for passthrough values -- writing curated values
+	# with a bare `printf '%s %s'` is what let a password containing a space
+	# reach valkey.conf as two arguments and stop the server from starting.
+	printf '%s %s\n' "$1" "$(envconf_quote_valkeyconf "$2")" >>"${CONF_TMP}"
 	printf '%s\0%s\0%s\0%s\0' "$1" "$2" "$3" "${4:-}" >>"${SRCMAP}"
 }
 
@@ -129,15 +133,15 @@ fi
 case "${persistence}" in
 off)
 	emit appendonly no baked "VALKEY_PERSISTENCE=off"
-	emit save '""' baked "VALKEY_PERSISTENCE=off"
+	emit save "" baked "VALKEY_PERSISTENCE=off"
 	;;
 rdb)
 	emit appendonly no env VALKEY_PERSISTENCE
-	emit save '"900 1 300 10 60 10000"' env VALKEY_PERSISTENCE
+	emit save "900 1 300 10 60 10000" env VALKEY_PERSISTENCE
 	;;
 aof)
 	emit appendonly yes env VALKEY_PERSISTENCE
-	emit save '""' env VALKEY_PERSISTENCE
+	emit save "" env VALKEY_PERSISTENCE
 	emit appendfsync "${VALKEY_APPENDFSYNC:-everysec}" \
 		"$([ -n "${VALKEY_APPENDFSYNC:-}" ] && echo env || echo baked)" \
 		"${VALKEY_APPENDFSYNC:+VALKEY_APPENDFSYNC}"

@@ -16,6 +16,7 @@
 #   envconf_load_denylist  <path>
 #   envconf_collect        <prefix> [curated_keys]
 #   envconf_warn_unknown   <prefix> <curated_var_names>
+#   envconf_quote_valkeyconf <value>
 #   envconf_render         <fmt> [infile]
 #   envconf_summary        <prefix> [infile]
 #   envconf_secret         <name>
@@ -295,18 +296,32 @@ envconf_render() {
 # valkey.conf is `directive argument` per line. An argument containing
 # whitespace, a quote or a backslash goes in double quotes with those escaped;
 # anything else is emitted bare, which keeps the common file readable.
+#
+# Exported rather than inlined into the renderer because images write curated
+# settings directly, without going through envconf_render. Two copies of this
+# logic is how `requirepass two words` reached valkey.conf unquoted and made
+# the server refuse to start with "wrong number of arguments".
+#
+# Valkey's parser splits a quoted argument back into tokens, so a multi-argument
+# directive such as `client-output-buffer-limit "normal 0 0 0"` is read as four
+# arguments, not one.
+envconf_quote_valkeyconf() {
+	local value="$1"
+	case "${value}" in
+	'' | *[[:space:]]* | *'"'* | *'\'*)
+		value=$(printf '%s' "${value}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+		printf '"%s"' "${value}"
+		;;
+	*)
+		printf '%s' "${value}"
+		;;
+	esac
+}
+
 _envconf_render_valkeyconf() {
 	local key value
 	tr '\0' '\n' | while IFS= read -r key && IFS= read -r value; do
-		case "${value}" in
-		'' | *[[:space:]]* | *'"'* | *'\'*)
-			value=$(printf '%s' "${value}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
-			printf '%s "%s"\n' "${key}" "${value}"
-			;;
-		*)
-			printf '%s %s\n' "${key}" "${value}"
-			;;
-		esac
+		printf '%s %s\n' "${key}" "$(envconf_quote_valkeyconf "${value}")"
 	done
 }
 
@@ -366,9 +381,36 @@ envconf_summary() {
 	echo "[envconf] precedence: baked < mounted < env" >&2
 }
 
+# Collapse to one row per key, keeping the *last* value and source, in order of
+# first appearance.
+#
+# The header says "effective settings", so a key set by a mounted fragment and
+# then overridden by the environment must appear once, attributed to the
+# environment. Printing both rows states two different values for one directive
+# and marks the losing one as effective, which is the opposite of what this
+# output is for.
+_envconf_effective() {
+	awk '
+		{ n = (NR - 1) % 4 }
+		n == 0 { k = $0; next }
+		n == 1 { v = $0; next }
+		n == 2 { s = $0; next }
+		{
+			if (!(k in seen)) { seen[k] = 1; order[++count] = k }
+			val[k] = v; src[k] = s; org[k] = $0
+		}
+		END {
+			for (i = 1; i <= count; i++) {
+				k = order[i]
+				print k; print val[k]; print src[k]; print org[k]
+			}
+		}
+	'
+}
+
 _envconf_summary_body() {
 	local key value source origin shown
-	tr '\0' '\n' |
+	tr '\0' '\n' | _envconf_effective |
 		while IFS= read -r key && IFS= read -r value &&
 			IFS= read -r source && IFS= read -r origin; do
 			# The key stays visible and only the value is hidden. RFC 0001's
