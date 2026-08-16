@@ -26,6 +26,13 @@ just push postgres 18   # push an already-built local tag
 Every image that takes runtime configuration from the environment follows this
 contract. It is normative: image READMEs link here rather than restating it.
 
+> **Status.** This is the contract, not a description of what ships today.
+> `postgres` implements the two channels and the allowlist; **no image emits the
+> startup summary yet**, and the shared helper that would enforce the collision,
+> value-safety and redaction rules is not written. Where an image's behaviour and
+> this section disagree today, this section is the target and the image is the
+> gap. Each image's own README states what it actually does.
+
 ### Two channels
 
 | Channel | Form | Meaning |

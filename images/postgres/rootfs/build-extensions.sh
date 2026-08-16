@@ -60,6 +60,16 @@ for name in "${manifest_names[@]}"; do
 	done
 done
 
+# The image label is set from PG_EXTENSIONS as given, so the given string has
+# to already be the canonical one -- otherwise two builds of the same set carry
+# different labels and the label stops describing the build (RFC 0004 dec. 10).
+# Rather than canonicalising silently, refuse and name the correct spelling.
+canonical="${selected[*]}"
+requested="$(echo ${PG_EXTENSIONS} | xargs || true)"
+if [[ "${requested}" != "${canonical}" ]]; then
+	die "PG_EXTENSIONS must be in manifest order. Got '${requested}', expected '${canonical}'."
+fi
+
 echo "Selected extensions: ${selected[*]:-<none>}"
 
 # -------------------------
@@ -69,7 +79,7 @@ apt-get update
 
 # pgroonga needs its own apt source first. One extension needing a repository is
 # a special case; a manifest column for it would be a schema built for one row.
-for name in "${selected[@]:-}"; do
+for name in "${selected[@]}"; do
 	[[ "${name}" == "pgroonga" ]] || continue
 	apt-get install -y --no-install-recommends ca-certificates wget gnupg lsb-release
 	codename="$(lsb_release --codename --short)"
@@ -81,7 +91,7 @@ for name in "${selected[@]:-}"; do
 done
 
 packages=()
-for name in "${selected[@]:-}"; do
+for name in "${selected[@]}"; do
 	packages+=("${M_PACKAGE[${name}]//%M/${PG_MAJOR}}")
 done
 
@@ -101,7 +111,7 @@ mkdir -p "${CONF_D}"
 # The order is not cosmetic: it reproduces the pre-refactor line exactly, and
 # extensions initialise in list order.
 preloads=()
-for name in "${selected[@]:-}"; do
+for name in "${selected[@]}"; do
 	[[ -n "${M_PRELOAD[${name}]}" ]] && preloads+=("${M_PRELOAD[${name}]}")
 done
 preloads+=("pg_stat_statements")
@@ -122,7 +132,7 @@ preload_csv="$(
 # because that file is included *before* conf.d and would override this.
 cp "${SNIPPET_SRC}/pg_stat_statements.conf" "${CONF_D}/11-pg_stat_statements.conf"
 
-for name in "${selected[@]:-}"; do
+for name in "${selected[@]}"; do
 	snippet="${M_SNIPPET[${name}]}"
 	[[ -z "${snippet}" ]] && continue
 	[[ -f "${SNIPPET_SRC}/${snippet}" ]] || die "snippet missing for ${name}: ${snippet}"
@@ -142,7 +152,7 @@ chmod 0644 "${CONF_D}"/*.conf
 ext_dir="/usr/share/postgresql/${PG_MAJOR}/extension"
 pkglibdir="$(pg_config --pkglibdir)"
 
-for name in "${selected[@]:-}"; do
+for name in "${selected[@]}"; do
 	control="${ext_dir}/${M_SQLNAME[${name}]}.control"
 	[[ -f "${control}" ]] || die "control file missing for ${name}: ${control}"
 
