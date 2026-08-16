@@ -23,7 +23,8 @@ Execution does not write them into a decision table itself.
 Branch `feat/wave-1-publishing-contract-extensions`. RFC 0001 P1, RFC 0002 P2 and
 P3, RFC 0004 P1. **RFC 0002 P4 was descoped before execution** — see D-007.
 
-**Drift count: 0.**
+**Drift count: 2** — A-1 and A-2, both against this wave, both found by the
+self-audit rather than during execution. See the findings table below.
 
 ## D-001 — Extension manifest carries a fifth column
 
@@ -164,6 +165,28 @@ P3, RFC 0004 P1. **RFC 0002 P4 was descoped before execution** — see D-007.
 `--set *.output=type=oci,dest=…` as the build-once mechanism. Not built, pending
 D-007's spike — the sketch is what needs verifying, not what needs implementing.
 
+## Self-audit findings — 2026-08-16
+
+Departures the executor did not notice, found by the adversarial pass over the
+finished branch. Filed here rather than separately so the two kinds are counted
+together.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-1 | `build-extensions.sh` | `"${arr[@]:-}"` expands an **empty** array to one empty string under `set -u`, so `PG_EXTENSIONS=""` indexed a missing map key and failed the build. RFC 0004 §8 states the machinery supports that value. Five expansions affected. | `drift` | Fixed |
+| A-2 | `docker-bake.hcl` | The extensions label was the bake variable verbatim, so `POSTGRES_EXTENSIONS="pgroonga cron"` labelled an image whose actual selection is `cron pgroonga`. Decision 10 is `LOCKED` on the label being the **canonicalized** selection. | `drift` | Fixed |
+| A-3 | `images/README.md` | The env-config section documented a startup summary, collision refusal and redaction that **no image emits** — P1 is the contract, P2–P4 are the implementation. A reader would have taken it for a description of today. | `spec-gap` | Fixed |
+
+**A-1 and A-2 are `drift`, and that makes the wave's drift count 2, not 0.** Both
+were covered by the design — §8 names the empty case, decision 10 names
+canonicalization — and both were built otherwise anyway. The group heading above
+records the count as it stood before this pass; this is the correction.
+
+A-2's fix is worth naming because it chose between two shapes: canonicalize the
+input silently, or refuse it and name the correct spelling. Refusing keeps the
+label equal to the argument **by construction**, so the guarantee cannot drift
+again the next time something reads one and not the other.
+
 ## Rules distilled
 
 - A decision row that names both a property and an implementation is two claims,
@@ -178,6 +201,14 @@ D-007's spike — the sketch is what needs verifying, not what needs implementin
 - Where an RFC names a comparison but not its reference point, the reference is
   usually only obtainable before the change lands. Capture the result in the log,
   not just the method (D-006).
+- `"${arr[@]:-}"` is not a safe-empty idiom — it is the opposite, injecting a
+  phantom element. Bash ≥4.4 expands an empty array to nothing on its own, so
+  the guard is what breaks it (A-1).
+- When a value is computed in one place and *labelled* in another, the two drift
+  unless one is derived from the other or the mismatch is refused. Prefer
+  refusing: it holds even when the next reader touches only one side (A-2).
+- A written contract is not a description of behaviour. A doc that states the
+  target without saying which images meet it reads as a status report (A-3).
 
 ## Carried into the next unit
 
