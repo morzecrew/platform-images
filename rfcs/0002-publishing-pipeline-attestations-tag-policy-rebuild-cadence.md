@@ -284,6 +284,13 @@ every publishing run is one job that builds to a local OCI layout
 against **that** artifact, and pushes it only if the script passes. The digest
 tested is the digest published, and the gate is a gate rather than a coincidence.
 
+**The mechanism above is superseded by decision 20 (2026-08-16); the property
+it exists for is not.** The local OCI layout cannot publish the artifact it
+tested without a second push step that re-derives it, so the built gate is
+**push-by-digest → pull that digest → smoke → `imagetools create`**. "The digest
+tested is the digest published" is unchanged and is now literally true: the
+smoke stage pulls the object the registry already holds.
+
 Consequence to state plainly in the README: **on the mutable tag, the bytes
 behind `:18.4` change weekly even when nothing in this repo changed.** That is
 the intended behaviour and it is exactly why §5.3's dated tag exists.
@@ -304,6 +311,11 @@ per-image `images/<name>/smoke.sh`:
 - Build-stage images (`uv-builder`, `flyway`) run their entrypoint helper with
   `--help`-equivalent instead; `python-distroless` runs `python -c` importing
   `magic`, which is the one claim its README makes that a build cannot verify.
+
+  **Superseded by decision 18 (2026-08-16)** for `uv-builder`: `build-uv-app`
+  has no `--help` and no argument parsing, so the `--help`-equivalent
+  invocation would be a build. The smoke test asserts toolchain presence and
+  helper validity instead. `flyway` and `python-distroless` are unaffected.
 
 Rootless rather than Docker because rootless is where UID mapping, volume
 ownership and sub-1024 port binds actually fail. `caddy` already listens on

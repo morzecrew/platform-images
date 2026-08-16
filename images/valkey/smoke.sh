@@ -53,16 +53,19 @@ expect_refusal() {
 	shift 2
 	local name="${CTR}-r$$"
 	local out rc
-	# Bounded, because a lost refusal does not exit non-zero -- it starts a
-	# server that runs forever. Unbounded, this assertion hangs until CI kills
-	# the job, which reads as an infrastructure problem rather than as the
-	# data-loss regression it is.
+	# Bounded twice, because a lost refusal does not exit non-zero -- it starts
+	# a server that runs forever. Unbounded, this assertion hangs until CI
+	# kills the job, which reads as an infrastructure problem rather than as
+	# the data-loss regression it is. `--kill-after` bounds the bound: plain
+	# `timeout` sends SIGTERM and then waits for a process that may not take
+	# it. The kill path exits 137 rather than 124, and both mean the same
+	# thing here.
 	set +e
-	out=$(timeout 60 "${ENGINE}" run --rm --name "${name}" "$@" "${IMAGE}" 2>&1)
+	out=$(timeout --kill-after=10 60 "${ENGINE}" run --rm --name "${name}" "$@" "${IMAGE}" 2>&1)
 	rc=$?
 	set -e
 	"${ENGINE}" rm -f "${name}" >/dev/null 2>&1 || true
-	if [ "${rc}" -eq 124 ]; then
+	if [ "${rc}" -eq 124 ] || [ "${rc}" -eq 137 ]; then
 		echo "FAIL: ${label} started and kept running, but it must refuse"
 		echo "${out}" | tail -5
 		exit 1

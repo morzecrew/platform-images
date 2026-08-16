@@ -40,16 +40,28 @@ UPSTREAM_NAMES="CADDY_VERSION"
 SRCMAP=$(mktemp)
 trap 'rm -f "${SRCMAP}"' EXIT
 
-# Read a variable without eval. `eval "v=\${$name}"` is safe only for names you
-# constructed; awk's ENVIRON is safe for all of them, and this file has one
-# habit rather than two (EXECUTION-LOG D-016).
-env_value() {
+# Read a variable, whether or not it was exported.
+#
+# `awk ENVIRON` sees only the environment, and `/docker-entrypoint.d/*.sh` are
+# **sourced** — a hook writing the natural `EDGE_ADDRESS=:8081` sets a shell
+# variable, which ENVIRON cannot see, so the alias resolution below silently
+# ignored it. Reading the shell scope covers both cases, since an exported
+# variable is also a shell variable.
+#
+# EXECUTION-LOG D-016 forbids `eval` on a name you did not construct, because
+# shell parameter syntax claims `-`, `:`, `#`, `%` and `?` and returns
+# something plausible instead of failing. Every name here comes from the
+# literal table above; the guard is what keeps that true if someone later adds
+# a row with a character that is not identifier-safe.
+var_value() {
 	local v
-	v=$(
-		awk -v n="$1" 'BEGIN { printf "%s", ENVIRON[n] }'
-		printf X
-	)
-	printf '%s' "${v%X}"
+	case "$1" in
+	'' | *[!A-Za-z0-9_]* | [0-9]*)
+		envconf_die "internal: '$1' is not a shell identifier and cannot be read safely"
+		;;
+	esac
+	eval "v=\${$1-}"
+	printf '%s' "${v}"
 }
 
 # Anything an operator drops in runs before resolution, so a hook setting a
@@ -68,8 +80,15 @@ while IFS='|' read -r canon legacy default; do
 	[ -n "${canon}" ] || continue
 	known="${known} ${canon}"
 
-	canon_value=$(env_value "${canon}")
-	legacy_value=$(env_value "${legacy}")
+	canon_value=$(var_value "${canon}")
+	legacy_value=$(var_value "${legacy}")
+
+	# Caddy substitutes these into the Caddyfile itself, so a newline is not a
+	# corrupt record -- it is a second directive. Measured before this check
+	# existed: a newline in CADDY_EDGE_ADDRESS added a whole server block to
+	# the running configuration, invisible in the file on disk.
+	envconf_refuse_newline "${canon}" "${canon_value}"
+	envconf_refuse_newline "${legacy}" "${legacy_value}"
 
 	if [ -n "${legacy_value}" ]; then
 		# Both spellings set to different values: one of them would be
@@ -116,7 +135,12 @@ EOF
 # legacy name cannot be -- `EDGE_ADRESS` is indistinguishable from an unrelated
 # variable in the operator's environment, which is the concrete failure RFC 0001
 # §2 opens with and the reason to migrate.
-envconf_warn_unknown CADDY "${known} ${UPSTREAM_NAMES}"
+#
+# The remediation sentence is this image's, not the helper's default: the
+# default points at the passthrough channel, and pointing at a channel the next
+# check rejects is worse than saying nothing.
+envconf_warn_unknown CADDY "${known} ${UPSTREAM_NAMES}" \
+	"this image has no passthrough channel -- Caddy is configured by fragments under CADDY_CONFIG_DIR and CADDY_SERVERS_DIR"
 
 # This image has no passthrough channel (RFC 0001 §5.4: the summary only). The
 # helper skips `<PREFIX>_CONF__*` because for every other image those are the

@@ -6,7 +6,12 @@ IMAGE="${1:?usage: smoke.sh <image-ref>}"
 ENGINE="${ENGINE:-podman}"
 CTR="smoke-caddy-$$"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-cleanup() { "${ENGINE}" rm -f "${CTR}" >/dev/null 2>&1 || true; }
+WORK="$(mktemp -d)"
+REFUSE_OUT="${WORK}/refuse.out"
+cleanup() {
+	"${ENGINE}" rm -f "${CTR}" "${CTR}-refuse" >/dev/null 2>&1 || true
+	rm -rf "${WORK}"
+}
 trap cleanup EXIT
 
 start() {
@@ -130,20 +135,68 @@ echo "legacy: honoured, attributed, and flagged"
 
 # --- 5. two spellings, two values, one refusal -----------------------------
 
-# Bounded, because the failure mode of a lost refusal is not a non-zero exit --
-# it is a server that starts and runs forever. Without the timeout this
-# assertion hangs until the CI job is killed, which reads as an infrastructure
-# problem rather than as the regression it is.
-set +e
-out=$(timeout 30 "${ENGINE}" run --rm --name "${CTR}-refuse" \
-	-e EDGE_ADDRESS=:8082 -e CADDY_EDGE_ADDRESS=:8083 "${IMAGE}" 2>&1)
-rc=$?
-set -e
-"${ENGINE}" rm -f "${CTR}-refuse" >/dev/null 2>&1 || true
-[ "${rc}" -ne 124 ] || { echo "FAIL: a conflicting pair of spellings started and kept running"; exit 1; }
-[ "${rc}" -ne 0 ] || { echo "FAIL: a conflicting pair of spellings started"; exit 1; }
-expect_in "refusal names both variables" "${out}" "CADDY_EDGE_ADDRESS=:8083 and EDGE_ADDRESS=:8082"
+# Leaves the container's output in ${REFUSE_OUT} rather than printing it, so
+# every caller runs in the main shell. A `$( )`-captured helper would put its
+# `exit 1` inside a subshell, where it ends the substitution and not the
+# script -- the failure mode that let wave 3's test suite report "failed 0".
+refuse() {
+	# refuse <label> [engine args...]
+	local label="$1"
+	shift
+	local rc
+	# Bounded twice. The failure mode of a lost refusal is not a non-zero exit,
+	# it is a server that starts and runs forever, so the outer bound turns a
+	# hung job into a failing assertion. `--kill-after` bounds the bound: plain
+	# `timeout` sends SIGTERM and then waits, so an engine that does not exit
+	# on it hangs exactly as before. That second path exits 137, not 124, and
+	# both mean the same thing here.
+	set +e
+	timeout --kill-after=10 30 "${ENGINE}" run --rm --name "${CTR}-refuse" \
+		"$@" "${IMAGE}" >"${REFUSE_OUT}" 2>&1
+	rc=$?
+	set -e
+	"${ENGINE}" rm -f "${CTR}-refuse" >/dev/null 2>&1 || true
+	case "${rc}" in
+	124 | 137)
+		echo "FAIL: ${label} started and kept running"
+		exit 1
+		;;
+	0)
+		echo "FAIL: ${label} started"
+		tail -5 "${REFUSE_OUT}"
+		exit 1
+		;;
+	esac
+}
+
+refuse "a conflicting pair of spellings" -e EDGE_ADDRESS=:8082 -e CADDY_EDGE_ADDRESS=:8083
+expect_in "refusal names both variables" "$(cat "${REFUSE_OUT}")" \
+	"CADDY_EDGE_ADDRESS=:8083 and EDGE_ADDRESS=:8082"
 echo "refused: one setting spelled two ways with two values"
+
+# The pair the image *cannot* tell apart: a canonical value equal to the baked
+# default is indistinguishable from unset, so this must not refuse. It takes
+# the alias and says which value it started with (README, decision 21).
+start 18081:8081 -e CADDY_EDGE_ADDRESS=:8080 -e EDGE_ADDRESS=:8081
+wait_health "http://127.0.0.1:18081/__platform_healthz"
+logs="$(logs_of)"
+expect_in "ambiguous pair names the winning value" "${logs}" \
+	"Starting with CADDY_EDGE_ADDRESS=:8081"
+expect_in "ambiguous pair is attributed to the alias" "${logs}" "(EDGE_ADDRESS)"
+echo "ambiguous: alias wins, and the warning says so"
+
+# --- 5a. a newline in a value is refused, not substituted -------------------
+
+# Caddy expands {$VAR} itself, so a newline is a second directive rather than a
+# corrupt record: before this refusal existed, the value below added a whole
+# server block on :8099 to the running config.
+refuse "a newline-bearing value" -e "CADDY_EDGE_ADDRESS=:8080 {
+	respond \"injected\" 200
+}
+:8099"
+expect_in "newline refusal names the variable" "$(cat "${REFUSE_OUT}")" \
+	"CADDY_EDGE_ADDRESS contains a newline"
+echo "refused: a value containing a newline"
 
 # --- 6. a typo is not silence (RFC 0001 decision 9) ------------------------
 
@@ -151,6 +204,13 @@ start 18080:8080 -e CADDY_EDGE_ADRESS=:9999 -e CADDY_CONF__loglevel=debug
 wait_health "http://127.0.0.1:18080/__platform_healthz"
 logs="$(logs_of)"
 expect_in "typo warned" "${logs}" "CADDY_EDGE_ADRESS is set but this image does not use it"
+# The helper's default remediation points at the passthrough channel. This
+# image rejects that channel two lines later, so advertising it would send an
+# operator straight at the thing the next warning refuses.
+expect_in "typo warning offers the right remedy" "${logs}" \
+	"this image has no passthrough channel -- Caddy is configured by fragments"
+expect_not_in "typo warning does not advertise the channel" "${logs}" \
+	"use CADDY_CONF__<directive> for a passthrough setting"
 # The image has no passthrough channel; the helper skips CADDY_CONF__* because
 # for every other image that prefix *is* the channel.
 expect_in "passthrough attempt warned" "${logs}" "no CADDY_CONF__ passthrough channel"
@@ -166,6 +226,22 @@ wait_health "http://127.0.0.1:18080/__platform_healthz"
 logs="$(logs_of)"
 expect_in "empty falls back" "${logs}" "source=baked        CADDY_SERVERS_DIR = /etc/caddy/servers.d"
 echo "empty: treated as unset, as Caddy's own {\$VAR:default} does"
+
+# --- 7a. a hook's plain assignment reaches the alias resolution -------------
+
+# The hooks are *sourced*, so `EDGE_ADDRESS=:8081` in one is a shell variable,
+# not an environment variable. Reading only `environ` ignored it silently and
+# started on the baked default while the entrypoint's comment claimed hooks
+# participated. The unexported form is the one that regresses; the exported
+# form works either way.
+mkdir -p "${WORK}/hooks"
+printf '#!/bin/sh\nEDGE_ADDRESS=:8081\n' >"${WORK}/hooks/10-legacy.sh"
+start 18081:8081 -v "${WORK}/hooks:/docker-entrypoint.d:ro,Z"
+wait_health "http://127.0.0.1:18081/__platform_healthz"
+logs="$(logs_of)"
+expect_in "hook assignment is honoured" "${logs}" "CADDY_EDGE_ADDRESS = :8081"
+expect_in "hook assignment is attributed" "${logs}" "(EDGE_ADDRESS)"
+echo "hook: an unexported assignment still configures the server"
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
 # --- 8. the three copies of the defaults agree -----------------------------

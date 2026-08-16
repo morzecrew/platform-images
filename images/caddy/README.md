@@ -61,7 +61,7 @@ This image published `EDGE_ADDRESS`, `CONFIG_DIR` and the rest before the `CADDY
 WARN: EDGE_ADDRESS is deprecated; use CADDY_EDGE_ADDRESS. Starting with CADDY_EDGE_ADDRESS=:8081.
 ```
 
-Setting **both** spellings to different values aborts startup naming both, rather than picking one silently.
+Setting **both** spellings to different values aborts startup naming both, rather than picking one silently — with one exception the image cannot detect. Because the canonical names are baked as `ENV`, a canonical value that happens to equal the image default is indistinguishable from one nobody set, so `CADDY_EDGE_ADDRESS=:8080` (the default) together with `EDGE_ADDRESS=:8081` does **not** abort: the alias wins, and the warning names the value it started with so the choice is visible even though it could not be refused. Any other combination of two different values refuses.
 
 Migrating buys more than tidiness: a misspelled `CADDY_EDGE_ADRESS` is reported at startup, because a `CADDY_*` name that is not in the table above and not one of the contract's own control names (`CADDY_CONF__*`, `CADDY_CONF_STRICT`, `CADDY_CONF_ALLOWLIST`, any `*_FILE`) or upstream's `CADDY_VERSION` has nothing it could be. A misspelled `EDGE_ADRESS` cannot be — it is indistinguishable from any other variable in the container's environment — so it silently leaves the setting at its default, which is the failure this contract exists to prevent.
 

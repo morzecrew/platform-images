@@ -15,8 +15,9 @@
 #   envconf_load_allowlist <path>
 #   envconf_load_denylist  <path>
 #   envconf_collect        <prefix> [curated_keys]
-#   envconf_warn_unknown   <prefix> <curated_var_names>
+#   envconf_warn_unknown   <prefix> <curated_var_names> [remediation]
 #   envconf_quote_valkeyconf <value>
+#   envconf_refuse_newline <label> <value>
 #   envconf_render         <fmt> [infile]
 #   envconf_summary        <prefix> [infile] [header] [footer]
 #   envconf_secret         <name>
@@ -249,10 +250,16 @@ envconf_collect() {
 # every start about a variable nobody set. A warning that always fires is the
 # thing the ignore list exists to prevent.
 #
-#   envconf_warn_unknown <prefix> <known_var_names>
+# $3 replaces the remediation sentence. The default points at the passthrough
+# channel, which is right for every image that has one and actively misleading
+# for an image that does not -- `caddy` warns about `CADDY_CONF__*` two lines
+# later, so the default would advertise the channel and then reject it.
+#
+#   envconf_warn_unknown <prefix> <known_var_names> [remediation]
 envconf_warn_unknown() {
 	local prefix="$1"
 	local curated=" ${2:-} "
+	local hint="${3:-or use ${1}_CONF__<directive> for a passthrough setting}"
 	local names name
 
 	[ -n "${prefix}" ] || envconf_die "envconf_warn_unknown: no prefix given"
@@ -271,7 +278,7 @@ envconf_warn_unknown() {
 		*_FILE) continue ;;
 		esac
 		_envconf_in_set "${curated}" "${name}" && continue
-		envconf_warn "${name} is set but this image does not use it. Check the spelling against images/<name>/README.md, or use ${prefix}_CONF__<directive> for a passthrough setting."
+		envconf_warn "${name} is set but this image does not use it. Check the spelling against images/<name>/README.md, ${hint}."
 	done
 }
 
@@ -454,6 +461,20 @@ _envconf_summary_body() {
 # (RFC 0001 decision 4).
 #
 # Prints the value on stdout and nothing else, so it is safe to capture.
+# Refuse a newline-bearing value, for images that do not go through
+# envconf_collect. Decision 12's rule is about what a config format can carry,
+# and `caddy` reaches the same hazard by a different road: its values are
+# substituted into the Caddyfile by Caddy itself, where a newline is not a
+# corrupt record but a second directive. Verified: a newline in
+# CADDY_EDGE_ADDRESS adds a whole server block to the running config.
+#
+#   envconf_refuse_newline <label> <value>
+envconf_refuse_newline() {
+	if _envconf_has_newline "$2"; then
+		envconf_die "$1 contains a newline or carriage return, which no config format in scope can represent (RFC 0001 decision 12)."
+	fi
+}
+
 envconf_secret() {
 	local name="$1"
 	local file_var file value

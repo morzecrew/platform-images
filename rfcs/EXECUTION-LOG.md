@@ -1244,3 +1244,76 @@ D-021 and D-029 touch the plan or a test list rather than a decision table.
 The row to read first is **RFC 0001 row 15** (`LOCKED`), which constrains every
 future image's allowlist file, and **row 20**, which is the one decision in this
 table the author made rather than the executor proposing.
+
+## D-030 — Hooks are sourced, so their assignments are not in `environ`
+
+- **Touches:** nothing in any RFC — this image's own hook contract
+- **Built first:** every curated variable read through `awk ENVIRON`, per the
+  habit D-016 established
+- **Built now:** read through the shell scope, with a guard that refuses a name
+  that is not a plain identifier before it reaches `eval`
+- **Because:** `/docker-entrypoint.d/*.sh` are **sourced**, so a hook writing
+  the natural `EDGE_ADDRESS=:8081` sets a shell variable, not an environment
+  variable. `ENVIRON` cannot see one, so the alias resolution ignored it and
+  started on the baked default — while the comment directly above the hook loop
+  claimed hook-set legacy names reach the alias handling. Reproduced both ways:
+  unexported is ignored, `export` works.
+- **Class:** ordinary defect, found by review. No decision row governs hooks.
+- **On D-016:** its rule is "never `eval` on a name you did not construct", and
+  every name here comes from the literal table in the same file. The guard is
+  what keeps that true — a future row containing a `-` now aborts with an
+  internal error instead of silently expanding as `${VAR-default}`, which is
+  the exact failure D-016 was written about.
+
+## D-031 — A newline is refused for values Caddy substitutes, not just rendered
+
+- **Touches:** RFC 0001 decision 12 (`LOCKED`)
+- **RFC said:** the collect→render wire format is NUL-delimited and
+  newline-bearing values are refused
+- **Built first:** curated values exported unchecked — this image never calls
+  `envconf_collect`, so nothing refused anything
+- **Built now:** `envconf_refuse_newline` in the helper, applied to both
+  spellings before either is exported or written to the source map
+- **Because:** Caddy expands `{$VAR}` itself, so a newline is not a corrupt
+  record — it is a second directive. Measured before the fix: a newline-bearing
+  `CADDY_EDGE_ADDRESS` added a complete server block and a second listener on
+  `:8099` to the running configuration, invisible in the Caddyfile on disk
+  because substitution happens at adapt time.
+- **Class:** `drift`, and the temptation to call it `spec-gap` is worth naming.
+  Decision 12 attaches its refusal to `envconf_collect`, which this image does
+  not use, so a literal reading exempts it. That reading is wrong for the same
+  reason wave 3's A-8 was: the rule exists so no image lets a newline reach a
+  config parser, and this image let one reach Caddy's. **The wave's drift count
+  is 1.**
+- **Proposed row (RFC 0001):** none needed — decision 12 already says it. What
+  changed is that the helper now offers the check to images that do not collect.
+
+## D-032 — The unknown-name warning's remediation is the image's to write
+
+- **Touches:** RFC 0001 decision 9 (`LOCKED`), §5.2's function list
+- **Built:** `envconf_warn_unknown <prefix> <known> [remediation]`
+- **Because:** the helper's sentence ends "or use `<PREFIX>_CONF__<directive>`
+  for a passthrough setting", and `caddy` warns against exactly that two lines
+  later. A typo'd variable was answered with advice the next check rejects.
+- **Class:** ordinary defect, found by review.
+- **Proposed row (RFC 0001):** folded into decision 17's function list.
+
+## Review findings — PR #31, 2026-08-16
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| R-11 | `entrypoint.sh` | A hook's plain `EDGE_ADDRESS=:8081` was silently ignored — sourced hooks set shell variables and `awk ENVIRON` sees only exported ones. The comment above the hook loop claimed the opposite. See D-030. | — | Fixed |
+| R-12 | `entrypoint.sh` | A newline in a curated value reached Caddy's substitution and **added a server block** to the running config. Decision 12 (`LOCKED`) refuses newline-bearing values; this image never called the function that enforces it. See D-031. | `drift` | Fixed |
+| R-13 | `README.md`, `smoke.sh` | "Setting both spellings to different values aborts startup" was unconditional, and one combination cannot abort — a canonical value equal to the baked default is indistinguishable from unset. Now documented with its exception and pinned by a smoke case that asserts the alias wins and says so. The reviewer's alternative — drop the baked `ENV` defaults so every state is detectable — was not taken: the `ENV` block is what a derived image overrides and what a bypassed entrypoint reads. | — | Fixed |
+| R-14 | `envconf.sh`, `entrypoint.sh` | The unknown-name warning offered `CADDY_CONF__<directive>` as the remedy on an image whose next warning rejects that channel. See D-032. | — | Fixed |
+| R-15 | both `smoke.sh` | `timeout` sends `SIGTERM` and then waits, so an engine that ignores it hangs the assertion the timeout was added to bound. Both now use `--kill-after`, and **both treat 137 as well as 124** as "started and kept running" — without that, the kill path would have exited 137 and been read as a successful refusal, which is the hole the fix would otherwise have opened. | — | Fixed |
+| R-16 | `rfcs/0002` §5.4, §5.5 | Rows 18 and 20 superseded procedures whose prose still read as normative. Both sections now carry a superseded note pointing at the row, rather than being rewritten — the procedure is the record of what was decided then. | — | Fixed |
+| R-17 | `.github/workflows/cleanup-images.yaml` | Preserve RFC 0004 §6's equivalence digest from cleanup. Real, and **not fixable in this PR**: `dataaxiom/ghcr-cleanup-action` exposes `exclude-tags` and `keep-n-untagged` — nothing that names an untagged digest — so the only durable fix is giving the digest a tag, which is a registry write. Recorded in D-029 and in RFC 0004 row 15. | — | **Open**, needs a registry write |
+
+**Found while fixing R-15: the fix nearly repeated wave 3's G7.** The first
+version of the shared `refuse` helper was called as `out=$(refuse …)`, which
+puts its `exit 1` inside a subshell — where it ends the substitution and not
+the script, exactly as the counter increments did in wave 3. It was rewritten
+to write to a file and run in the main shell before it ever ran. The rule
+distilled from G7 was in this same file and did not prevent the same shape
+being written a second time; what caught it was reading the diff.
