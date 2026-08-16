@@ -7,10 +7,10 @@ on:
       - docker-bake.hcl
       - images/**
       - justfile
-      - .github/workflows/bake.yml
+      - .github/workflows/bake.yaml
       - "!images/**/README.md"
       - "!README.md"
-  
+
   workflow_dispatch:
 
 permissions:
@@ -24,16 +24,72 @@ jobs:
   bake:
     runs-on: ubuntu-latest
     name: Bake Images (build only)
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
       - name: Bake images
         run: just bake
+
+  smoke:
+    runs-on: ubuntu-latest
+    name: Smoke (rootless Podman)
+    needs: bake
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      # Rootless rather than Docker: rootless is where UID mapping, volume
+      # ownership and sub-1024 port binds actually fail, and those are the
+      # assumptions Docker hides until a customer's air-gapped install finds
+      # them. Podman is present on ubuntu-latest without setup.
+      - name: Show Podman version
+        run: podman version
+
+      # buildx leaves images in its own cache, which Podman cannot see. Export
+      # each target to a docker-format tar and load it, so the thing smoke-
+      # tested is the thing that was built. Per-target because `--set
+      # "*.output=...dest="` cannot give distinct destinations to several
+      # targets in one invocation.
+      - name: Build and load images into Podman
+        run: |
+          set -euo pipefail
+          for target in $(docker buildx bake --print 2>/dev/null \
+              | python3 -c 'import json,sys; d=json.load(sys.stdin); print("\n".join(sorted(d["target"])))'); do
+            echo "::group::build ${target}"
+            docker buildx bake --set "${target}.output=type=docker,dest=/tmp/img-${target}.tar" "${target}"
+            podman load -i "/tmp/img-${target}.tar"
+            rm -f "/tmp/img-${target}.tar"
+            echo "::endgroup::"
+          done
+          podman images
+
+      - name: Smoke test each image
+        run: |
+          set -euo pipefail
+          failed=0
+          for script in images/*/smoke.sh; do
+            name="$(basename "$(dirname "${script}")")"
+            ref="$(docker buildx bake --print "${name}" 2>/dev/null \
+              | python3 -c "import json,sys; print(json.load(sys.stdin)['target']['${name}']['tags'][0])")"
+            echo "::group::smoke ${name} (${ref})"
+            if bash "${script}" "${ref}"; then
+              echo "ok: ${name}"
+            else
+              echo "::error title=Smoke failed::${name} (${ref})"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "${failed}"
