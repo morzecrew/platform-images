@@ -942,3 +942,193 @@ Nothing from those waves has been accepted into an RFC except row 14 (D-001).
 **Nine proposed rows are now outstanding across three waves**, which is the
 failure mode `flag-dont-flip` calls "the log with no proposals accepted" and is
 worth a deliberate pass rather than another entry.
+
+---
+
+# Wave 4 · The caddy summary, and the reconciliation backlog
+
+Branch `feat/wave-4-caddy-summary`. RFC 0001 P3, RFC 0002 §6's first-publish
+verification, and a pass over every proposed row from waves 1–3.
+
+**Drift count: 0** — no entry below is a case where a decision row covered it
+and the code did something else. Two of the entries record a conflict *inside*
+RFC 0001 (D-022) and one records an implementation the RFC could not have
+anticipated (D-024); the rest are gaps. The count is written after the
+self-audit and carries its findings, so it is the final figure for this wave
+rather than the pre-audit one.
+
+**RFC 0001 P4 is deliberately not here.** §12 and §9 both say the `postgres`
+retrofit lands as its own PR — it is the only step in this RFC that can regress
+a running deployment, and folding it in would have made this wave the one that
+does. The reconciliation pass is here instead, because eleven unratified rows
+across three waves is the failure mode the practice is named against.
+
+## D-022 — `caddy`'s curated names become `CADDY_*`, with the old names kept
+
+- **Touches:** RFC 0001 decision 1 (`LOCKED`), §4 non-goals, §5.4
+- **RFC said:** two things that cannot both hold. Decision 1: curated names are
+  `<PREFIX>_<NAME>`, and `<PREFIX>` for this image is `CADDY`. §4: renaming
+  existing variables is a **non-goal**, naming `CONFIG_DIR` and `EDGE_ADDRESS`
+  specifically, because "the contract is written to fit them".
+- **Built:** `CADDY_<NAME>` as the canonical spelling, with all nine unprefixed
+  names kept as aliases that warn, are honoured, and are attributed in the
+  summary as `source=env`.
+- **Because:** the conflict is in the document, so the executor does not get to
+  pick — it went to the author at the plan gate, who chose decision 1's rule
+  with the published surface preserved rather than either half alone.
+- **Class:** `spec-gap`. Both statements were written before any code and
+  neither cites the other; nothing about building it revealed the conflict,
+  only reading the two sections next to each other did.
+- **Consequence:** two spellings to maintain, and a deprecation window that
+  nothing yet schedules. The alias table is nine rows in the entrypoint, and
+  dropping it later is a separate decision with its own announcement.
+- **Proposed row (RFC 0001):** `LOCKED` — written as decision 20.
+
+## D-023 — The summary's header and footer belong to the image
+
+- **Touches:** RFC 0001 §5.2, which fixes both strings in its example
+- **RFC said:** `[envconf] postgres: effective non-default settings`, closing
+  with `precedence: baked < mounted < env`
+- **Built:** `envconf_summary <prefix> [infile] [header] [footer]`, and `caddy`
+  passes `effective configuration` over `precedence: image default <
+  environment`
+- **Because:** `caddy` prints *every* variable it reads — decision 13 says it
+  cannot tell a default from a supplied value, so "non-default" is a claim it
+  is not entitled to make — and it has neither a baked config file nor a
+  mounted layer, so the precedence line names layers that do not exist. Both
+  defaults are claims about `postgres`, and the helper had been asserting them
+  on behalf of every image.
+- **Class:** `spec-gap`. §5.2's example and §5.4's description of `caddy` are
+  four hundred words apart in the same document and contradict each other.
+- **Consequence:** an image that overrides neither string still inherits
+  `postgres`-shaped claims, which is the right default and a live trap for the
+  next image that is not `postgres`-shaped.
+- **Proposed row (RFC 0001):** `ASSUMED` — written as decision 18, with the
+  function-list change folded into decision 17.
+
+## D-024 — Three source labels, and the one that was left on the table
+
+- **Touches:** RFC 0001 decision 13 (`LOCKED`)
+- **Built:** `source=env` when a legacy alias supplied the value, `source=baked`
+  when the variable was absent or empty and the image default applied, and
+  `source=env-or-default` for everything else
+- **Because:** decision 13's reasoning is that `environ` cannot distinguish a
+  Dockerfile default from a supplied value. That is true of the canonical
+  names, which the Dockerfile sets — and false of the legacy names, which it
+  deliberately does not, so a value under one is provably the operator's.
+- **Class:** `discovery`. The alias mechanism created a channel with no baked
+  default, and that channel did not exist when decision 13 was written.
+- **Deliberately not applied:** the same reasoning would license `source=env`
+  for a *canonical* value that differs from the entrypoint's copy of the baked
+  default — the image does know that. It is not implemented, because decision
+  13 is `LOCKED` and says those lines print `env-or-default`. The gain is one
+  more precise word on lines an operator can already read; the cost is an
+  executor overruling a `LOCKED` row on their own judgement, which is the exact
+  trade the grade exists to refuse.
+- **Consequence:** the summary is more informative for operators still on the
+  old spelling than for those who migrated, which is backwards as an incentive
+  and correct as a statement of what is known.
+
+## D-025 — Two spellings of one name collide, with one case that cannot
+
+- **Touches:** RFC 0001 decision 11 (`LOCKED`), which covers curated-versus-passthrough
+- **Built:** setting both `EDGE_ADDRESS` and `CADDY_EDGE_ADDRESS` to different
+  values aborts naming both and their values
+- **Because:** decision 11's principle is that an operator who set the same
+  thing twice must not silently get one of them. Nothing about that principle
+  is specific to the passthrough channel.
+- **Class:** `spec-gap`.
+- **Consequence:** one case is undetectable and is documented rather than
+  hidden. A canonical value that happens to equal the image default is
+  indistinguishable from unset (decision 13 again), so `CADDY_EDGE_ADDRESS=:8080`
+  plus `EDGE_ADDRESS=:9000` starts on `:9000`. The warning names the value it
+  started with, so the operator can see the choice that was made even though
+  the code could not refuse it.
+- **Proposed row (RFC 0001):** `ASSUMED` — written as decision 21.
+
+## D-026 — The defaults are duplicated three times, on purpose, and pinned
+
+- **Touches:** nothing in any RFC — an implementation shape
+- **Built:** the nine defaults live in the Dockerfile's `ENV`, in the
+  entrypoint's alias table, and in the README table. `smoke.sh` extracts all
+  three from the built image and the repo and asserts they agree.
+- **Because:** the entrypoint needs its own copy to answer "did you set this or
+  did we", which is the whole source column; the `ENV` copy is what a bypassed
+  entrypoint and a derived image see; the README is what an operator reads.
+  Removing any one of the three costs something real.
+- **Class:** `discovery`.
+- **Consequence:** three copies with a test between them, rather than one copy
+  and a documentation lie. Nothing at runtime can catch them drifting — an
+  operator-supplied value and a baked one are the same string — so the check
+  has to live in the smoke test or nowhere.
+
+## D-027 — `caddy` gets no passthrough channel, and says so
+
+- **Touches:** RFC 0001 §10's first unresolved question
+- **RFC said:** open, "leaning: no channel", to be settled before RFC 0005
+  copies the pattern
+- **Built:** no channel, and a `CADDY_CONF__*` variable is **warned about**
+  rather than ignored
+- **Because:** the leaning is right — Caddy's config is not key-value, so the
+  mapping would be a fiction — and the warning exists because the helper skips
+  `<PREFIX>_CONF__*` for every other image, where that prefix *is* the channel.
+  Without it, an operator copying the `postgres` pattern gets exactly the
+  silence decision 9 exists to prevent.
+- **Class:** `discovery` for the warning; the channel question itself was
+  delegated and is now answered.
+- **Proposed row (RFC 0001):** `ASSUMED` — written as decision 22, and §10's
+  question struck through with a pointer to it.
+
+## D-028 — RFC 0002 §6's first publish, verified against GHCR
+
+- **Touches:** RFC 0002 §6 — carried unfinished since wave 1
+- **Verified** against the two real publishes that ran on merge (runs
+  31964963480 and 31969227420), not against the throwaway local registry wave 2
+  used:
+  - **What was smoked is what is published.** The digests the gate pulled and
+    smoke-tested are the digests the mutable tags resolve to today, for all
+    four images: `caddy@f5e63f05`, `flyway@f6113802`, `postgres@1524c8a9`,
+    `valkey@a21e6e31`.
+  - **Attestations survived the promotion.** `imagetools inspect` returns SLSA
+    provenance with the build arguments and an SPDX SBOM listing both Alpine
+    packages and Go modules.
+  - **Eight labels populated**, with `.revision` = `c643ad2`, the merge commit
+    that produced the image.
+  - **The dated tag and the mutable tag resolve to one digest**:
+    `18.6-20260816-31969227420.1` and `18.6` are the same version.
+  - **A local `just bake postgres` produces one tag and no dated alias.**
+- **Not verified:** divergence of the two tags after the *next* publish, which
+  needs a second run and is now mechanical.
+- **Class:** not a departure — the discharge of a test the RFC asked for.
+
+## D-029 — The cleanup job's dry run is not zero, and one deletion matters
+
+- **Touches:** RFC 0002 §6, RFC 0004 §6 and D-006's addendum
+- **RFC said:** "a `dry_run: true` cleanup run reports **zero deletions**
+  against them"
+- **Measured** (run 31971410999, dry run, nothing deleted): **69 versions would
+  be deleted**, none of them tagged, none of them belonging to any image
+  published under the tag policy. Every current digest and every current
+  attestation manifest is untouched, which is the property §6 was reaching for;
+  the deletions are the pre-tag-policy publishes, whose digests went untagged
+  the moment the mutable tag moved. `valkey`, published only once and only
+  since the policy, reports "nothing to delete".
+- **Because:** the tag policy landed on 2026-08-16. Everything published before
+  it has exactly one tag, and that tag has since moved.
+- **Class:** `spec-gap` — §6's expectation is written as "zero deletions" when
+  the property that matters is "zero deletions *of what the gate published*".
+- **The finding that matters:** one of those 69 is
+  `postgres@sha256:9934cb32…`, the digest **RFC 0004 D-006's addendum names as
+  the immutable pre-refactor reference** for the equivalence check. It is
+  untagged, so the next real cleanup run deletes it — the cron is 04:00 Monday,
+  which is roughly seven hours after this was measured. A digest survives a
+  repointed tag; it does not survive this repo's own garbage collection, and
+  the addendum treated the first property as if it implied the second.
+  RFC 0004's proposed row 15 is written to say so rather than to repeat the
+  claim. Keeping the reference means giving it a tag, which is a registry write
+  and the author's to make.
+- **Proposed row (RFC 0002):** none. §6 is a test list, not a decision table;
+  the correction belongs in §6's wording, which is the author's to amend.
+
+## Self-audit findings — wave 4, 2026-08-16
+
