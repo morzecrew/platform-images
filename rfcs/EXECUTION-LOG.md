@@ -674,10 +674,12 @@ RFC 0004 row 5 pre-authorised D-001 — so they wait.
 
 Branch `feat/wave-3-shared-envconf-valkey`. RFC 0001 P2, RFC 0006 P1, P2 and P3.
 
-**Drift count: 1** — D-018. The rest are `spec-gap` or `discovery`; the
-reasoning for that split is under D-018, because it is the one that could
-plausibly have been graded either way and grading it generously would have made
-the number meaningless.
+**Drift count: 4** — D-018, A-7, A-8, A-9. The count read 1 after execution and
+was corrected by the self-audit; all three additions are places where a
+**`LOCKED`** row or an explicit RFC instruction covered the case and the code
+did something else. The rest of the entries are `spec-gap` or `discovery`; the
+grading argument is under D-018, which is the one that could plausibly have
+gone either way.
 
 These four phases shipped as one unit because none of them is separately
 verifiable. RFC 0001 P2 requires the helper be "exercised by exactly one
@@ -845,6 +847,28 @@ were invisible while `postgres` was the only consumer.
   visible as amendments to a recorded answer rather than as choices nobody
   knew were being made.
 
+## Self-audit findings — wave 3, 2026-08-16
+
+Found by the adversarial pass over the finished branch. All four are in the
+`valkey` image; none is in the helper, which the mutation pass covered instead.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-7 | `entrypoint.sh` | A mounted fragment was summarised as one `(fragment) = included verbatim` line. RFC 0001 decision 13 (`LOCKED`) requires **full per-setting `source=` attribution** from an image that assembles its config from enumerable layers, and this is one. "Which layer won" is unanswerable when a whole file collapses to a single row. Now parsed and attributed per directive. | `drift` | Fixed |
+| A-8 | `entrypoint.sh` | The §5.3 refusals read the *environment*, so a fragment setting `appendonly yes` turned on persistence without passing through `VALKEY_PERSISTENCE` and walked straight past a refusal decision 6 marks `LOCKED`. The refusals now run a second time against the **assembled** config, which covers all three layers uniformly. | `drift` | Fixed |
+| A-9 | `images/valkey/README.md` | The Networking section said reachability "is the business of your network" and that a password *should* be set. In fact `protected-mode` plus no password means the server **refuses every non-loopback connection** — the service is simply unreachable. RFC 0006 §5.4 requires the bind behaviour "stated explicitly in the README rather than inherited silently", and it was inherited silently. | `drift` | Fixed |
+| A-10 | `shared/test/run.sh` | Two surviving mutants. Removing the `_FILE` trailing-newline strip survived, because `$(...)` strips trailing newlines and the assertion could not see the difference. Removing the `sort` in `envconf_collect` survived, because nothing asserted the deterministic ordering the helper claims. | — | Fixed |
+
+**A-8 is the one that mattered.** A-7 and A-9 degrade what a reader is told;
+A-8 was a way to reach the exact silent data loss this image exists to prevent,
+and it existed because the refusals were written against the *input* rather
+than against the *result*. Checking the assembled configuration is strictly
+better and would have covered the environment channel too.
+
+A-10 is worth separating because neither gap was visible from reading the
+tests, and one of them — the trailing-newline case — had an assertion that
+looked precise and could not fail. Mutation is what found both.
+
 ## Rules distilled
 
 - A contract that describes a transformation must say which **direction** it
@@ -862,6 +886,12 @@ were invisible while `postgres` was the only consumer.
 - The second implementation of an interface is what tests the interface. Three
   entries here are contract defects that were invisible while `postgres` was
   the only consumer, and none of them needed a *third* (D-014, D-015, D-018).
+- Refuse against the **result**, not the input. A guard written against one
+  input channel is bypassed by every other channel that reaches the same state
+  — and the config file, not the environment, is what the server reads (A-8).
+- An assertion that cannot fail looks exactly like one that passes. `$(...)`
+  strips trailing newlines, so a test comparing captured output can never see
+  trailing-whitespace behaviour (A-10).
 - Answering a readiness gate is worth doing even when the answers turn out
   wrong. A recorded wrong answer becomes a visible amendment; an unrecorded
   assumption becomes a silent design (D-021).

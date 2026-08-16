@@ -214,4 +214,72 @@ case "$("${ENGINE}" logs "${CTR}" 2>&1)" in
 *) echo "FAIL: notify-keyspace-events was redacted or missing from the summary"; exit 1 ;;
 esac
 
+# --- 11. the mounted layer ------------------------------------------------
+
+mkdir -p "${WORK}/conf.d"
+printf 'maxmemory-samples 9\nloglevel notice\n' >"${WORK}/conf.d/50-tuning.conf"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+start "${CTR}" -v "${WORK}/conf.d:/etc/valkey/conf.d:ro,Z"
+wait_ready "${CTR}"
+[ "$(cfg "${CTR}" maxmemory-samples)" = "9" ] ||
+	{ echo "FAIL: a mounted fragment did not reach the server"; exit 1; }
+echo "mounted fragment: applied"
+
+# Per directive, not one "included verbatim" line: RFC 0001 decision 13
+# requires real attribution from an image that assembles enumerable layers.
+case "$("${ENGINE}" logs "${CTR}" 2>&1)" in
+*"source=mounted"*"maxmemory-samples = 9"*) echo "mounted fragment: attributed per directive" ;;
+*) echo "FAIL: fragment settings are not attributed individually"; exit 1 ;;
+esac
+
+# Env must still beat a mounted fragment (precedence: baked < mounted < env).
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+start "${CTR}" -v "${WORK}/conf.d:/etc/valkey/conf.d:ro,Z" -e VALKEY_CONF__maxmemory_samples=3
+wait_ready "${CTR}"
+[ "$(cfg "${CTR}" maxmemory-samples)" = "3" ] ||
+	{ echo "FAIL: env did not override a mounted fragment"; exit 1; }
+echo "precedence: env beats mounted"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# A fragment can enable persistence without going through VALKEY_PERSISTENCE.
+# The refusal is checked against the assembled config, so this is caught too --
+# otherwise decision 6 would hold only for the environment channel.
+mkdir -p "${WORK}/bypass"
+printf 'appendonly yes\n' >"${WORK}/bypass/60-persist.conf"
+expect_refusal "a fragment enabling persistence under an evicting policy" \
+	"loses that data silently" -v "${WORK}/bypass:/etc/valkey/conf.d:ro,Z"
+
+# --- 12. protected-mode, which is the behaviour most likely to surprise ----
+
+# RFC 0006 §5.4 requires the bind behaviour be stated rather than inherited
+# silently, so it is asserted rather than described: with no password, a
+# connection from anywhere but loopback is refused.
+#
+# The container's own non-loopback address is used rather than a second
+# container on a user-defined network. It exercises the same code path in the
+# server and needs no network to be created, which keeps this from going red
+# for reasons that have nothing to do with the image.
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+start "${CTR}"
+wait_ready "${CTR}"
+
+peer="$("${ENGINE}" exec "${CTR}" sh -c 'valkey-cli -h "$(hostname -i)" PING 2>&1 | head -1' || true)"
+case "${peer}" in
+*DENIED*) echo "protected-mode: an unauthenticated non-loopback peer is denied, as documented" ;;
+*PONG*) echo "FAIL: an unauthenticated peer connected; the README says it cannot"; exit 1 ;;
+*) echo "FAIL: unexpected peer response: ${peer}"; exit 1 ;;
+esac
+
+# ...and with a password it works, which is what the README tells people to do.
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+start "${CTR}" -e VALKEY_PASSWORD=smoke-pw
+wait_ready "${CTR}" || true
+peer="$("${ENGINE}" exec "${CTR}" sh -c \
+	'valkey-cli -h "$(hostname -i)" -a smoke-pw --no-auth-warning PING 2>&1 | head -1' || true)"
+case "${peer}" in
+*PONG*) echo "protected-mode: an authenticated non-loopback peer connects" ;;
+*) echo "FAIL: authenticated peer could not connect: ${peer}"; exit 1 ;;
+esac
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
 echo "PASS: valkey"

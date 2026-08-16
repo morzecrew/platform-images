@@ -72,7 +72,7 @@ silent and total.
 
 **Persistence with an evicting policy.**
 
-```
+```text
 VALKEY_PERSISTENCE=rdb  VALKEY_MAXMEMORY_POLICY=allkeys-lru   ⇒ refused
 ```
 
@@ -82,7 +82,7 @@ this is a cache after all.
 
 **Persistence without an explicit policy.**
 
-```
+```text
 VALKEY_PERSISTENCE=rdb                                        ⇒ refused
 ```
 
@@ -113,10 +113,25 @@ the `FLUSHALL` protection with it. Add `CONFIG` to the list to opt in.
 
 ## Networking
 
-`protected-mode` is on. The server binds all interfaces inside the container,
-which is the normal container arrangement — reachability is the business of
-your network, not of a bind address inside a namespace. Anything reachable
-beyond a trusted network should set a password.
+The server listens on all interfaces inside the container, which is the normal
+container arrangement — reachability is your network's business, not that of a
+bind address inside a namespace.
+
+**`protected-mode` is on, and that has a consequence worth stating outright:
+with no password set, Valkey refuses every connection that is not from
+loopback.** Another container connecting by service name gets
+
+```text
+-DENIED Running in protected mode because protected mode is enabled...
+```
+
+So for anything beyond a single container talking to itself, **set a password**
+— `VALKEY_PASSWORD_FILE` for preference. This is not a hardening suggestion;
+without it the service is simply unreachable from anywhere else.
+
+Turning `protected-mode` off instead is deliberately not offered through the
+curated channel. An unauthenticated Valkey on a reachable network is the shape
+of every Redis compromise story, and the image would rather be inconvenient.
 
 ## Configuration precedence
 

@@ -27,6 +27,7 @@ cat >"${TMP}/allow.conf" <<'EOF'
 # comment, ignored
 maxmemory-policy
 notify-keyspace-events
+timeout
 databases
 loglevel
 
@@ -198,6 +199,13 @@ out=$(VALKEY_CONF__loglevel=debug \
 	'envconf_collect VALKEY "maxmemory_policy" | tr "\0" "|"')
 expect_contains "  ...collected" "${out}" "loglevel|debug|"
 
+# envconf_collect claims sorted output so two runs with the same environment
+# render byte-identically. Nothing asserted it, and removing the sort survived
+# a mutation run.
+out=$(VALKEY_CONF__loglevel=a VALKEY_CONF__databases=1 VALKEY_CONF__timeout=2 \
+	run "collect emits keys in sorted order" 0 'envconf_collect VALKEY | tr "\0" "|"')
+expect_equals "  ...deterministic" "${out}" "databases|1|loglevel|a|timeout|2|"
+
 # --- render ---------------------------------------------------------------
 
 out=$(run "valkeyconf renders bare when it can" 0 \
@@ -246,9 +254,24 @@ out=$(VALKEY_PASSWORD=plain VALKEY_PASSWORD_FILE="${TMP}/secret" \
 	run "_FILE beats the plain variable" 0 'envconf_secret VALKEY_PASSWORD')
 expect_equals "  ...value" "${out}" "from-file"
 
-out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-nl" \
-	run "_FILE strips one trailing newline" 0 'envconf_secret VALKEY_PASSWORD')
-expect_equals "  ...value" "${out}" "with-newline"
+# The X guard matters: `$(...)` strips trailing newlines, so without it this
+# test passes whether or not the helper strips anything -- it was a surviving
+# mutant before the guard was added.
+out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-nl" sh -c '
+	. "$1"
+	v=$(envconf_secret VALKEY_PASSWORD; printf X)
+	printf "[%s]" "${v%X}"
+' _ "${HELPER}")
+expect_equals "_FILE strips exactly one trailing newline" "${out}" "[with-newline]"
+
+printf 'two-newlines\n\n' >"${TMP}/secret-nl2"
+out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-nl2" sh -c '
+	. "$1"
+	v=$(envconf_secret VALKEY_PASSWORD; printf X)
+	printf "[%s]" "${v%X}"
+' _ "${HELPER}")
+expect_equals "  ...only one, the rest is the file's business" "${out}" "[two-newlines
+]"
 
 # Root can read a 000 file, so this case would silently pass as a false green.
 if [ "$(id -u)" = "0" ]; then

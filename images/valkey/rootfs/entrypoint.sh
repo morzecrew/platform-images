@@ -212,8 +212,29 @@ if [ -d "${FRAGMENT_DIR}" ]; then
 		[ -f "${fragment}" ] || continue
 		printf '\n# --- from %s ---\n' "${fragment}" >>"${CONF_TMP}"
 		cat "${fragment}" >>"${CONF_TMP}"
-		printf '%s\0%s\0%s\0%s\0' "(fragment)" "included verbatim" mounted "${fragment}" \
-			>>"${SRCMAP}"
+
+		# Attributed per directive, not as one "included verbatim" line.
+		# RFC 0001 decision 13 requires full source= attribution of images that
+		# generate their config from enumerable layers, and this is one --
+		# "which layer won" is unanswerable if a whole file collapses to a
+		# single summary row.
+		while IFS= read -r line || [ -n "${line}" ]; do
+			case "${line}" in
+			'#'* | '') continue ;;
+			esac
+			frag_key=${line%%[ 	]*}
+			[ -n "${frag_key}" ] || continue
+			frag_val=${line#"${frag_key}"}
+			# Strip the leading run of blanks between directive and argument.
+			while :; do
+				case "${frag_val}" in
+				' '* | '	'*) frag_val=${frag_val#?} ;;
+				*) break ;;
+				esac
+			done
+			printf '%s\0%s\0%s\0%s\0' "${frag_key}" "${frag_val}" mounted "${fragment}" \
+				>>"${SRCMAP}"
+		done <"${fragment}"
 	done
 fi
 
@@ -242,7 +263,43 @@ if [ -s "${PASSTHROUGH}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 8. install, report, hand off
+# 8. re-check the refusals against the assembled config
+# ---------------------------------------------------------------------------
+# The checks in section 2 read the environment. This one reads what was
+# actually assembled, and it is the one that holds: a mounted fragment can set
+# `appendonly yes` directly, which turns on persistence without going through
+# VALKEY_PERSISTENCE and would otherwise walk straight past a refusal decision
+# 6 marks LOCKED. valkey.conf takes the last occurrence of a directive, so the
+# effective value is the last match.
+effective() {
+	awk -v key="$1" '
+		{ sub(/#.*/, "") }
+		$1 == key { $1 = ""; sub(/^[ \t]+/, ""); v = $0 }
+		END { print v }
+	' "${CONF_TMP}"
+}
+
+eff_appendonly=$(effective appendonly)
+eff_save=$(effective save)
+eff_policy=$(effective maxmemory-policy)
+
+durable=no
+[ "${eff_appendonly}" = "yes" ] && durable=yes
+case "${eff_save}" in
+'' | '""' | "''") ;;
+*) durable=yes ;;
+esac
+
+if [ "${durable}" = "yes" ]; then
+	case "${eff_policy}" in
+	allkeys-*)
+		envconf_die "the assembled configuration enables persistence (appendonly=${eff_appendonly}, save=${eff_save}) while maxmemory-policy=${eff_policy} evicts, which loses that data silently. If a fragment in ${FRAGMENT_DIR} sets one of these, it is included in the effective config and subject to the same refusal as the environment. Set maxmemory-policy=noeviction, or turn persistence off."
+		;;
+	esac
+fi
+
+# ---------------------------------------------------------------------------
+# 9. install, report, hand off
 # ---------------------------------------------------------------------------
 mkdir -p "${CONF_DIR}"
 {
