@@ -63,7 +63,7 @@ WARN: EDGE_ADDRESS is deprecated; use CADDY_EDGE_ADDRESS. Starting with CADDY_ED
 
 Setting **both** spellings to different values aborts startup naming both, rather than picking one silently.
 
-Migrating buys more than tidiness: a misspelled `CADDY_EDGE_ADRESS` is reported at startup, because everything beginning with `CADDY_` is checked against the table above. A misspelled `EDGE_ADRESS` cannot be — it is indistinguishable from any other variable in the container's environment — so it silently leaves the setting at its default, which is the failure this contract exists to prevent.
+Migrating buys more than tidiness: a misspelled `CADDY_EDGE_ADRESS` is reported at startup, because a `CADDY_*` name that is not in the table above and not one of the contract's own control names (`CADDY_CONF__*`, `CADDY_CONF_STRICT`, `CADDY_CONF_ALLOWLIST`, any `*_FILE`) or upstream's `CADDY_VERSION` has nothing it could be. A misspelled `EDGE_ADRESS` cannot be — it is indistinguishable from any other variable in the container's environment — so it silently leaves the setting at its default, which is the failure this contract exists to prevent.
 
 #### Startup summary
 

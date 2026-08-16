@@ -52,10 +52,6 @@ env_value() {
 	printf '%s' "${v%X}"
 }
 
-env_present() {
-	awk -v n="$1" 'BEGIN { exit !(n in ENVIRON) }'
-}
-
 # Anything an operator drops in runs before resolution, so a hook setting a
 # legacy name reaches the alias handling below rather than bypassing it.
 if [ -d /docker-entrypoint.d ]; then
@@ -134,6 +130,12 @@ awk 'BEGIN { for (k in ENVIRON) if (index(k, "CADDY_CONF__") == 1) print k }' |
 envconf_summary caddy "${SRCMAP}" \
 	"effective configuration" \
 	"precedence: image default < environment"
+
+# The trap does not fire across `exec`, so without this the source map sits in
+# the running container's /tmp for the life of the process -- a file describing
+# the configuration, left where nothing will ever read it again.
+rm -f "${SRCMAP}"
+trap - EXIT
 
 echo "Validating Caddy config..."
 caddy fmt --overwrite /etc/caddy/Caddyfile
