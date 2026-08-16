@@ -421,6 +421,27 @@ out=$(run "summary prints the precedence line" 0 \
 	'printf "" | envconf_summary VALKEY')
 expect_contains "  ...precedence" "${out}" "baked < mounted < env"
 
+# An image whose layers are not baked/mounted/env says so. Both defaults are
+# claims about the image, and both are false for `caddy`.
+out=$(run "summary takes an alternate header and footer" 0 \
+	'printf "" | envconf_summary caddy "" "effective configuration" "precedence: image default < environment"')
+expect_contains "  ...header" "${out}" "caddy: effective configuration"
+expect_contains "  ...footer" "${out}" "precedence: image default < environment"
+case "${out}" in
+*"non-default"*) bad "  ...must not print the default header" "${out}" ;;
+*) ok "  ...the default header does not appear" ;;
+esac
+case "${out}" in
+*"baked < mounted"*) bad "  ...must not print the default footer" "${out}" ;;
+*) ok "  ...the default footer does not appear" ;;
+esac
+
+# An empty override is not an override: it falls back rather than printing a
+# blank line where the header was.
+out=$(run "an empty header override keeps the default" 0 \
+	'printf "" | envconf_summary VALKEY "" ""')
+expect_contains "  ...default header" "${out}" "effective non-default settings"
+
 # --- result ---------------------------------------------------------------
 
 PASS=$(wc -l <"${TMP}/.pass" | tr -d ' ')

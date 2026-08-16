@@ -18,7 +18,7 @@
 #   envconf_warn_unknown   <prefix> <curated_var_names>
 #   envconf_quote_valkeyconf <value>
 #   envconf_render         <fmt> [infile]
-#   envconf_summary        <prefix> [infile]
+#   envconf_summary        <prefix> [infile] [header] [footer]
 #   envconf_secret         <name>
 
 # Space-padded so `case "$set" in *" $k "*)` is an exact membership test rather
@@ -373,19 +373,29 @@ _envconf_is_secret() {
 # summary prints the effective *value* (that is most of its output), and the
 # helper cannot obtain it. A triple would have forced every image to pass the
 # values through a second channel. See EXECUTION-LOG D-014.
+#
+# The header and footer are overridable because both defaults are claims about
+# the image, not about the helper, and they are false for an image that has no
+# config file: `caddy` prints every variable it reads rather than only the
+# non-default ones (it cannot tell which are default -- RFC 0001 decision 13),
+# and its layers are an ENV default and the environment, not three. Printing
+# "non-default" over a list of defaults, under a precedence line naming layers
+# the image does not have, would be two false sentences per start.
 envconf_summary() {
 	local prefix="$1"
 	local infile="${2:-}"
+	local header="${3:-effective non-default settings}"
+	local footer="${4:-precedence: baked < mounted < env}"
 
 	[ -n "${prefix}" ] || envconf_die "envconf_summary: no prefix given"
 
-	echo "[envconf] ${prefix}: effective non-default settings" >&2
+	echo "[envconf] ${prefix}: ${header}" >&2
 	if [ -n "${infile}" ]; then
 		_envconf_summary_body <"${infile}"
 	else
 		_envconf_summary_body
 	fi
-	echo "[envconf] precedence: baked < mounted < env" >&2
+	echo "[envconf] ${footer}" >&2
 }
 
 # Collapse to one row per key, keeping the *last* value and source, in order of
