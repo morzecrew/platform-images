@@ -8,7 +8,7 @@ on:
       - docker-bake.hcl
       - images/**
       - justfile
-      - .github/workflows/publish.yml
+      - .github/workflows/publish.yaml
       - "!images/**/README.md"
       - "!README.md"
 
@@ -35,12 +35,16 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      # GIT_REVISION / BUILD_DATE default to empty in docker-bake.hcl so local
-      # builds stay cache-stable; CI is what fills them in.
+      # GIT_REVISION / BUILD_DATE / BUILD_STAMP default to empty in
+      # docker-bake.hcl so local builds stay cache-stable; CI fills them in.
+      #
+      # BUILD_STAMP uses run_id, not run_number: a re-run keeps its number, and
+      # reusing a stamp would repoint the tag the tag policy calls immutable.
       - name: Publish images
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GIT_REVISION: ${{ github.sha }}
         run: |
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          BUILD_STAMP="$(date -u +%Y%m%d)-${{ github.run_id }}" \
           just publish

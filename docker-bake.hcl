@@ -8,6 +8,12 @@ variable "BUILD_DATE" {
   default = ""
 }
 
+# <yyyymmdd>-<run_id>, set by publish CI. Empty locally, which suppresses the
+# dated tag entirely -- see tag() below.
+variable "BUILD_STAMP" {
+  default = ""
+}
+
 # One line per image. Shown on the GHCR package page, so it lives here rather
 # than only in the root README. Keys are quoted: bare hyphenated keys parse as
 # subtraction.
@@ -28,9 +34,26 @@ variable "DESCRIPTIONS" {
   }
 }
 
+# Two tag forms, both published:
+#
+#   :<version>                      mutable, repointed on every rebuild. Track
+#                                   this to get CVE fixes without action.
+#   :<version>-<BUILD_STAMP>        written once, never repointed. Pin this, or
+#                                   pin the digest.
+#
+# BUILD_STAMP is empty for local builds, which emit the mutable tag alone -- a
+# developer's `just bake postgres` should not mint dated tags. CI sets it to
+# <yyyymmdd>-<run_id>: run_id and not run_number, because a re-run keeps its
+# number and would repoint a tag this file calls immutable.
+#
+# Neither tag is a substitute for the digest, which is the only true immutable
+# reference. See RFC 0002.
 function "tag" {
   params = [name, version]
-  result = ["ghcr.io/morzecrew/${name}:${version}"]
+  result = compact([
+    "ghcr.io/morzecrew/${name}:${version}",
+    BUILD_STAMP == "" ? "" : "ghcr.io/morzecrew/${name}:${version}-${BUILD_STAMP}",
+  ])
 }
 
 # MIT covers the Dockerfiles and config here; bundled upstream software keeps
