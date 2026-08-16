@@ -32,7 +32,7 @@ concurrency:
 
 env:
   # Targets of docker-bake.hcl; keep in sync when adding an image.
-  PACKAGES: flyway,caddy,postgres,uv-builder,python-distroless
+  PACKAGES: flyway,caddy,postgres,uv-builder,python-distroless,valkey
 
 jobs:
   cleanup:
