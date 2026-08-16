@@ -11,10 +11,19 @@ on:
       - "!images/**/README.md"
       - "!README.md"
 
-  # Mondays 05:00 UTC, an hour after cleanup-images. The offset is load-bearing:
-  # a run that dies between the digest push and the tag promotion leaves an
-  # untagged version behind, and cleanup is what collects it. Rebuilding before
-  # cleanup would leave that orphan sitting for a week instead of an hour.
+  # Mondays 05:00 UTC, an hour AFTER cleanup-images (04:00) -- and the order is
+  # load-bearing, in the opposite direction to the obvious one.
+  #
+  # Between the digest push and the tag promotion below, a healthy build exists
+  # in GHCR as an *untagged* version, which is exactly what cleanup deletes. The
+  # two workflows are in different concurrency groups, so nothing serialises
+  # them; this offset is the only thing keeping cleanup out of that window. If
+  # the rebuild ran first and overran its hour -- five uncached images, easily --
+  # cleanup would delete an image that was moments from being promoted.
+  #
+  # The cost is that a *genuine* orphan, from a run that died mid-flight, waits
+  # until the following Monday to be collected. That is a week of unreferenced
+  # bytes, which is storage rather than a fault, and it is the cheaper mistake.
   schedule:
     - cron: "0 5 * * 1"
 

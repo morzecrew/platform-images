@@ -478,18 +478,28 @@ been deferred only until wave 1 merged.
   cleanup-images"
 - **Built:** the same cron, with the reason recorded
 - **Because:** the offset reads like politeness — stagger the jobs — and is
-  actually the thing that bounds D-010's failure mode. A run that dies between
-  the digest push and the promotion leaves an untagged version, and
-  `cleanup-images.yaml` is what collects it. Rebuilding an hour *after* cleanup
-  means an orphan waits an hour for the next cleanup; rebuilding an hour
-  *before* would mean it waits a week.
+  actually protecting the digest-first gate from `cleanup-images.yaml`. Between
+  the digest push and the promotion, a **healthy** build sits in GHCR as an
+  untagged version, which is precisely what cleanup deletes. The two workflows
+  are in different concurrency groups, so nothing serialises them; the cron
+  offset is the only separation. Running the rebuild *before* cleanup would mean
+  that a rebuild overrunning its hour — five uncached images, easily — has its
+  in-flight digest deleted an instant before promotion.
 - **Class:** `discovery`. Only building the digest-first gate made the ordering
-  load-bearing; before D-010 there were no orphans for cleanup to matter to.
-- **Consequence:** the two crons are now coupled. Moving either one without the
-  other re-opens the week-long orphan window, and neither file said so.
+  load-bearing; before D-010 nothing untagged existed for cleanup to race.
+- **Consequence:** the two crons are coupled and neither file said so. A
+  *genuine* orphan, from a run that died mid-flight, now waits until the
+  following Monday to be collected — a week of unreferenced bytes, which is
+  storage rather than a fault, and the cheaper of the two mistakes.
+- **Corrected during the self-audit.** The first version of this entry, and the
+  workflow comment with it, claimed the offset *minimised* orphan lifetime —
+  "an hour instead of a week". That is exactly inverted: an orphan created at
+  05:00 Monday waits for the next Monday's 04:00 cleanup. The ordering is right
+  and the stated reason was wrong, which is the more dangerous shape, because
+  the next person to tune these crons would have optimised against it.
 - **Proposed row (RFC 0002):** `ASSUMED` — the rebuild cron must stay after the
-  cleanup cron on the same day, because cleanup is what collects the untagged
-  versions a failed publish leaves behind.
+  cleanup cron, because cleanup deletes untagged versions and a gated publish is
+  briefly untagged by construction.
 
 ## D-012 — `just publish` refuses instead of publishing
 
@@ -541,6 +551,7 @@ been deferred only until wave 1 merged.
 | # | Where | Finding | Class | Status |
 |---|---|---|---|---|
 | A-4 | both workflows | `bake --print` ran with `2>/dev/null`. Buildx writes its **errors** to stderr, so a bad target or an HCL error produced a red job stating only that a process exited 1. Verified: `bake --print nosuchtarget` prints `ERROR: failed to find target nosuchtarget` on stderr and nothing on stdout. | — | Fixed |
+| A-6 | `publish.yaml`, D-011 | The cron offset was justified backwards. The comment and the log entry both claimed running after cleanup *minimised* orphan lifetime; an orphan created at 05:00 Monday actually waits for the next Monday's 04:00 cleanup. The ordering is right — it keeps cleanup out of the window where a healthy build is pushed-by-digest and not yet promoted — but the reason given was the opposite of the real one. | — | Fixed |
 | A-5 | both workflows | An `Install just` step that nothing used. Wave 1 replaced the `just bake` / `just publish` calls with direct `docker buildx` invocations and left the action behind; `justfile` also stayed in both `paths:` filters, so editing a file CI no longer reads would trigger a full rebuild and publish. | — | Fixed |
 
 **Neither moves the drift count, and that is worth saying rather than assuming.**
@@ -564,6 +575,10 @@ whole purpose this wave is to make failures loud.
   produce identically. Digest-first does that; build-test-rebuild cannot (D-010).
 - An offset between two schedules is a dependency. If moving one alone breaks
   something, that is a coupling and it belongs in a comment on both (D-011).
+- Writing down *why* an ordering is right is what catches a right ordering
+  held for a wrong reason. D-011 was correct and its stated justification was
+  backwards — a defect invisible until someone acts on the justification
+  rather than the ordering (D-011, corrected in self-audit).
 - Specifying a pipeline does not secure it. Ask what the *other* entrances are —
   the local recipe, the manual dispatch — because a rule enforced in one path
   and absent from another is a rule with a documented bypass (D-012).
