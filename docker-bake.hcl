@@ -122,14 +122,27 @@ variable "POSTGRES_VERSION" {
   default = "18.6"
 }
 
+# Extension set for the default target. Variants override PG_EXTENSIONS and
+# their own label; `inherits` merges args per key, so a variant declares only
+# what it changes (verified on buildx 0.35 -- RFC 0004 decision 6).
+#
+# Ceiling is three variants including this one (decision 7): each costs a full
+# --no-cache slot in the weekly rebuild.
+variable "POSTGRES_EXTENSIONS" {
+  default = "cron pgroonga"
+}
+
 target "postgres" {
   inherits   = ["_attested"]
   context    = "./images/postgres"
   dockerfile = "Dockerfile"
   tags       = tag("postgres", POSTGRES_VERSION)
-  labels     = label("postgres", POSTGRES_VERSION)
+  labels = merge(label("postgres", POSTGRES_VERSION), {
+    "io.morze.postgres.extensions" = POSTGRES_EXTENSIONS
+  })
   args = {
     POSTGRES_IMAGE_TAG = POSTGRES_VERSION
+    PG_EXTENSIONS      = POSTGRES_EXTENSIONS
   }
 }
 
