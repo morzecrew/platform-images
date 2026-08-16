@@ -7,7 +7,6 @@ on:
     paths:
       - docker-bake.hcl
       - images/**
-      - justfile
       - .github/workflows/publish.yaml
       - "!images/**/README.md"
       - "!README.md"
@@ -43,9 +42,6 @@ jobs:
           # Publishing authenticates with the explicit tokens below; the
           # checkout token is never used, and nothing here runs git.
           persist-credentials: false
-
-      - name: Install just
-        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -101,7 +97,7 @@ jobs:
 
           # Captured once, before any --set override, so it still carries the
           # real tag list that promotion needs.
-          plan="$(docker buildx bake --print 2>/dev/null)"
+          plan="$(docker buildx bake --print)"
           targets=$(printf '%s' "${plan}" \
             | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')
           echo "targets: ${targets}"

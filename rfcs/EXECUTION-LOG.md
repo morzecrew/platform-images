@@ -536,6 +536,23 @@ been deferred only until wave 1 merged.
   starts once those three are settled — each is a paragraph, against a
   re-implementation if guessed at.
 
+## Self-audit findings — wave 2, 2026-08-16
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-4 | both workflows | `bake --print` ran with `2>/dev/null`. Buildx writes its **errors** to stderr, so a bad target or an HCL error produced a red job stating only that a process exited 1. Verified: `bake --print nosuchtarget` prints `ERROR: failed to find target nosuchtarget` on stderr and nothing on stdout. | — | Fixed |
+| A-5 | both workflows | An `Install just` step that nothing used. Wave 1 replaced the `just bake` / `just publish` calls with direct `docker buildx` invocations and left the action behind; `justfile` also stayed in both `paths:` filters, so editing a file CI no longer reads would trigger a full rebuild and publish. | — | Fixed |
+
+**Neither moves the drift count, and that is worth saying rather than assuming.**
+`drift` means a decision row covered it and the code said otherwise. No row
+governs stderr handling or which actions a job installs, so counting these as
+drift would inflate the number that is supposed to mean something specific. They
+are ordinary defects, found by the audit, fixed here.
+
+A-4 is the more serious of the two despite looking like housekeeping: it is a
+failure whose only symptom is the absence of a symptom, in the workflow whose
+whole purpose this wave is to make failures loud.
+
 ## Rules distilled
 
 - When two sections of one RFC describe the same gate differently, the one
