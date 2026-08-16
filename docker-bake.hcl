@@ -8,8 +8,8 @@ variable "BUILD_DATE" {
   default = ""
 }
 
-# <yyyymmdd>-<run_id>, set by publish CI. Empty locally, which suppresses the
-# dated tag entirely -- see tag() below.
+# <yyyymmdd>-<run_id>.<run_attempt>, set by publish CI. Empty locally, which
+# suppresses the dated tag entirely -- see tag() below.
 variable "BUILD_STAMP" {
   default = ""
 }
@@ -43,8 +43,9 @@ variable "DESCRIPTIONS" {
 #
 # BUILD_STAMP is empty for local builds, which emit the mutable tag alone -- a
 # developer's `just bake postgres` should not mint dated tags. CI sets it to
-# <yyyymmdd>-<run_id>: run_id and not run_number, because a re-run keeps its
-# number and would repoint a tag this file calls immutable.
+# <yyyymmdd>-<run_id>.<run_attempt>. The attempt is not decoration: re-running a
+# workflow reuses both run_id and run_number, so either alone would let a second
+# attempt repoint a tag this file calls immutable.
 #
 # Neither tag is a substitute for the digest, which is the only true immutable
 # reference. See RFC 0002.

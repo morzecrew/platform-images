@@ -43,13 +43,17 @@ jobs:
       # GIT_REVISION / BUILD_DATE / BUILD_STAMP default to empty in
       # docker-bake.hcl so local builds stay cache-stable; CI fills them in.
       #
-      # BUILD_STAMP uses run_id, not run_number: a re-run keeps its number, and
-      # reusing a stamp would repoint the tag the tag policy calls immutable.
+      # BUILD_STAMP must be unique per *build*, not per run (RFC 0002 row 11).
+      # Neither run_id nor run_number changes when a run is re-run -- only
+      # run_attempt does -- and a re-run rebuilds from a moved apt/base state,
+      # so without it a second attempt repoints a tag the policy calls
+      # immutable. run_number is rejected outright: it is stable across re-runs
+      # and also resets when a workflow is renamed.
       - name: Publish images
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GIT_REVISION: ${{ github.sha }}
         run: |
           BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-          BUILD_STAMP="$(date -u +%Y%m%d)-${{ github.run_id }}" \
+          BUILD_STAMP="$(date -u +%Y%m%d)-${{ github.run_id }}.${{ github.run_attempt }}" \
           just publish
