@@ -156,10 +156,47 @@ self-audit rather than during execution. See the findings table below.
 - **Consequence:** the weekly rebuild does not exist yet, so base-image CVE
   fixes still reach consumers only when something unrelated triggers a publish.
   That is the status quo, not a regression.
-- **Next:** spike it — build one image to an OCI layout, push to a throwaway
-  GHCR tag, `imagetools inspect` for the provenance and SBOM manifests. The
-  spike also discharges §6's outstanding first-publish verification, which has
-  been unproven since wave 0.
+- **Next:** ~~spike it~~ **Spiked 2026-08-16 — see D-008. Decisions 2 and 10 are
+  compatible; P4 is unblocked.**
+
+## D-008 — Spike result: attestations survive build → push → promote
+
+- **Touches:** RFC 0002 §5.4, decisions rows 2 and 10 (both `LOCKED`)
+- **The question:** D-007 stopped P4 because row 10 requires pushing the exact
+  artifact that was smoke-tested while row 2 requires provenance and SBOM on
+  every published target, and whether both survive a build-then-push was unknown.
+- **Answer: they do.** Verified end to end against a throwaway local registry —
+  no GHCR tag was created.
+
+| Step | Result |
+|---|---|
+| Build to OCI layout (`type=oci,dest=`) | Index carries an `attestation-manifest` alongside the platform manifest |
+| Its contents | SPDX SBOM (472 packages) **and** SLSA v1 provenance |
+| `mode=max` actually applied? | Yes — `buildDefinition.internalParameters.buildConfig` present |
+| Push to a registry (`type=registry`) | Attestation manifest present on the pushed tag |
+| `imagetools create` to a second tag | **Identical digests** — the promotion re-points a tag at the same index, it does not rebuild |
+| Digest-only push (`push-by-digest=true`, tags cleared) | Succeeds, adds no tag, attestations intact; promoting that digest to a tag keeps them |
+
+- **Class:** `discovery`. Only running it settled it, which is what made D-007
+  `irreducible` rather than a gap someone should have closed on paper.
+- **Consequence:** P4's shape is now determined rather than guessed. Build once
+  with `push-by-digest=true` so **nothing is tagged until the smoke passes**,
+  smoke-test that digest, then `imagetools create` the final tags onto it. The
+  digest tested is the digest published, literally — not a rebuild that happens
+  to be equivalent.
+- **Two things the spike turned up that P4 must handle:**
+  1. **The `docker` driver cannot do this at all.** Attestations and OCI/registry
+     export need a `docker-container` builder. CI already gets one from
+     `docker/setup-buildx-action`, but a local `just publish` on the default
+     builder produces **no attestations** — silently. Worth stating wherever
+     `just publish` is documented.
+  2. `--set "<t>.output=…"` does not override the target's `tags`. Pushing by
+     digest needs `--set "<t>.tags="` as well, or bake refuses with "can't push
+     tagged ref by digest".
+- **Proposed row (RFC 0002):** `LOCKED` — P4 builds with `push-by-digest=true`,
+  smoke-tests the resulting digest, and promotes with `imagetools create`.
+  Attestations survive all three steps (verified). A local build on the default
+  `docker` driver produces none, so publishing is CI-only.
 
 **Deliberately not applied:** RFC 0002 §5.4 sketches
 `--set *.output=type=oci,dest=…` as the build-once mechanism. Not built, pending
@@ -212,8 +249,9 @@ again the next time something reads one and not the other.
 
 ## Carried into the next unit
 
-- **RFC 0002 P4**, blocked on D-007's spike. It carries the outstanding §6
-  verification with it.
+- ~~**RFC 0002 P4**, blocked on D-007's spike.~~ **Unblocked** by D-008. Still
+  carries §6's first-publish verification, which only a real GHCR push can
+  discharge — the spike used a local registry deliberately.
 - The equivalence gate in D-006 is spent once this merges; RFC 0004 P2's
   variants have no equivalent reference and will need a different argument.
 - `images/README.md` touchpoint 9 (`smoke.sh`) is now real — a new image without
