@@ -12,9 +12,20 @@ on:
       - "!images/**/README.md"
       - "!README.md"
 
+  # Mondays 05:00 UTC, an hour after cleanup-images. The offset is load-bearing:
+  # a run that dies between the digest push and the tag promotion leaves an
+  # untagged version behind, and cleanup is what collects it. Rebuilding before
+  # cleanup would leave that orphan sitting for a week instead of an hour.
+  schedule:
+    - cron: "0 5 * * 1"
+
+  workflow_dispatch:
+
 permissions:
   contents: read
   packages: write
+  # For the scheduled-rebuild failure issue (RFC 0002 decision 8).
+  issues: write
 
 concurrency:
   group: publish-images
@@ -24,36 +35,166 @@ jobs:
   build-and-publish:
     runs-on: ubuntu-latest
     name: Build and Publish Images
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # Publishing authenticates with the explicit GH_TOKEN below; the
-          # checkout token is never used, and `just publish` runs no git
-          # commands, so persisting it only widens what a build step can read.
+          # Publishing authenticates with the explicit tokens below; the
+          # checkout token is never used, and nothing here runs git.
           persist-credentials: false
 
       - name: Install just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4.0.0
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
+      # Both engines need credentials: buildx pushes the digest, Podman pulls it
+      # back to smoke-test it.
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "${GH_TOKEN}" | docker login ghcr.io -u dummy --password-stdin
+          echo "${GH_TOKEN}" | podman login ghcr.io -u dummy --password-stdin
+
+      # The gate, in three passes over the target list (RFC 0002 §5.4 and
+      # decision 10; EXECUTION-LOG D-008 measured that this shape preserves
+      # attestations end to end).
+      #
+      #   1. build   -- push by digest with tags cleared, so nothing is
+      #                 reachable by name until it has passed
+      #   2. smoke   -- pull that exact digest back and run the image's script
+      #   3. promote -- imagetools create re-points tags at the same index; it
+      #                 does not rebuild, so the digest tested is the digest
+      #                 published, literally rather than by equivalence
+      #
+      # Promotion is its own pass rather than per-target, so one image failing
+      # its smoke test cannot leave earlier images already published.
+      #
       # GIT_REVISION / BUILD_DATE / BUILD_STAMP default to empty in
       # docker-bake.hcl so local builds stay cache-stable; CI fills them in.
       #
-      # BUILD_STAMP must be unique per *build*, not per run (RFC 0002 row 11).
-      # Neither run_id nor run_number changes when a run is re-run -- only
-      # run_attempt does -- and a re-run rebuilds from a moved apt/base state,
-      # so without it a second attempt repoints a tag the policy calls
-      # immutable. run_number is rejected outright: it is stable across re-runs
-      # and also resets when a workflow is renamed.
-      - name: Publish images
+      # BUILD_STAMP must be unique per *build*, not per run (RFC 0002 rows 11
+      # and 17). Neither run_id nor run_number changes when a run is re-run --
+      # only run_attempt does -- and a re-run rebuilds from moved apt/base
+      # state, so without it a second attempt repoints a tag called immutable.
+      - name: Build, smoke-gate, and publish
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GIT_REVISION: ${{ github.sha }}
         run: |
-          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-          BUILD_STAMP="$(date -u +%Y%m%d)-${{ github.run_id }}.${{ github.run_attempt }}" \
-          just publish
+          set -euo pipefail
+
+          export BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          export BUILD_STAMP="$(date -u +%Y%m%d)-${{ github.run_id }}.${{ github.run_attempt }}"
+
+          # The scheduled rebuild exists to pick up a rebuilt base layer, which
+          # a cached build cannot do (decision 3). Push-triggered runs stay
+          # cached and fast.
+          nocache=""
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            nocache="--no-cache"
+            echo "scheduled rebuild: building with --no-cache"
+          fi
+
+          # Captured once, before any --set override, so it still carries the
+          # real tag list that promotion needs.
+          plan="$(docker buildx bake --print 2>/dev/null)"
+          targets=$(printf '%s' "${plan}" \
+            | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')
+          echo "targets: ${targets}"
+
+          # Refused up front rather than after a build: an image with no smoke
+          # script is a publishing run that cannot honour decision 10, and
+          # discovering that after pushing four digests wastes the run.
+          for t in ${targets}; do
+            [ -f "images/${t}/smoke.sh" ] || {
+              echo "::error title=No smoke test::${t} has no images/${t}/smoke.sh; refusing to publish"
+              exit 1
+            }
+          done
+
+          declare -A REPO DIGEST
+
+          for t in ${targets}; do
+            echo "::group::build ${t}"
+            repo="$(printf '%s' "${plan}" | python3 -c \
+              "import json,sys; print(json.load(sys.stdin)['target']['${t}']['tags'][0].rsplit(':', 1)[0])")"
+
+            # Clearing tags is required as well as overriding output: without it
+            # bake refuses with "can't push tagged ref by digest".
+            docker buildx bake ${nocache} \
+              --set "${t}.tags=" \
+              --set "${t}.output=type=registry,name=${repo},push-by-digest=true,name-canonical=true" \
+              --metadata-file "/tmp/meta-${t}.json" "${t}"
+
+            digest="$(python3 -c \
+              "import json; print(json.load(open('/tmp/meta-${t}.json'))['${t}']['containerimage.digest'])")"
+            REPO["${t}"]="${repo}"
+            DIGEST["${t}"]="${digest}"
+            echo "${t}: ${repo}@${digest}"
+            echo "::endgroup::"
+          done
+
+          for t in ${targets}; do
+            ref="${REPO[${t}]}@${DIGEST[${t}]}"
+            echo "::group::smoke ${t} (${ref})"
+            podman pull "${ref}"
+            bash "images/${t}/smoke.sh" "${ref}"
+            echo "::endgroup::"
+          done
+
+          for t in ${targets}; do
+            ref="${REPO[${t}]}@${DIGEST[${t}]}"
+            mapfile -t tags < <(printf '%s' "${plan}" | python3 -c \
+              "import json,sys; print('\n'.join(json.load(sys.stdin)['target']['${t}']['tags']))")
+            args=()
+            for tag in "${tags[@]}"; do args+=(--tag "${tag}"); done
+            echo "::group::promote ${t} -> ${tags[*]}"
+            docker buildx imagetools create "${args[@]}" "${ref}"
+            echo "::endgroup::"
+          done
+
+          echo "published: ${targets}"
+
+      # Scheduled failures are the silent ones -- nobody watches a cron the way
+      # they watch their own push -- and decision 12 makes this notification a
+      # precondition for the schedule existing at all.
+      #
+      # One reused issue, not one per week: fifty-two open issues describing the
+      # same broken rebuild is a mailing list, not a signal.
+      - name: Report scheduled rebuild failure
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: Weekly image rebuild is failing
+        run: |
+          set -euo pipefail
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          body=$(printf '%s\n' \
+            "The scheduled rebuild failed on $(date -u +%Y-%m-%d)." \
+            "" \
+            "Run: ${run_url}" \
+            "" \
+            "While this is failing, the mutable \`:<version>\` tags keep serving" \
+            "their last successful bytes. Consumers are not broken -- they are" \
+            "silently not receiving base-image security updates, which is the" \
+            "condition this rebuild exists to prevent." \
+            "" \
+            "Closing this issue is the signal that the rebuild is healthy again.")
+
+          # Exact title match against the open issue list rather than --search,
+          # which is index-backed and can lag a fresh issue by long enough to
+          # file a duplicate.
+          existing="$(gh issue list --state open --limit 100 --json number,title \
+            --jq "[.[] | select(.title == env.TITLE) | .number] | first // empty")"
+
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body "${body}"
+            echo "commented on existing issue #${existing}"
+          else
+            gh issue create --title "${TITLE}" --body "${body}"
+            echo "opened a new issue"
+          fi
