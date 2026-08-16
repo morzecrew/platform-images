@@ -1,22 +1,22 @@
 {
-	{$AUTO_HTTPS}
+	{$CADDY_AUTO_HTTPS}
 	order coraza_waf after rate_limit
 
-	import {$SERVERS_DIR:/etc/caddy/servers.d}/*.caddy
+	import {$CADDY_SERVERS_DIR}/*.caddy
 }
 
-import {$BUILTIN_SNIPPETS_DIR:/etc/caddy/snippets}/*.caddy
-import {$SNIPPET_DEFS_DIR:/etc/caddy/snippet_defs.d}/*.caddy
+import {$CADDY_BUILTIN_SNIPPETS_DIR}/*.caddy
+import {$CADDY_SNIPPET_DEFS_DIR}/*.caddy
 
-{$EDGE_ADDRESS} {
+{$CADDY_EDGE_ADDRESS} {
 	encode zstd gzip
 
-	handle {$HEALTH_PATH:/__platform_healthz} {
+	handle {$CADDY_HEALTH_PATH} {
 		respond "ok" 200
 	}
 
 	request_body {
-		max_size {$REQUEST_BODY_MAX_SIZE}
+		max_size {$CADDY_REQUEST_BODY_MAX_SIZE}
 	}
 
 	coraza_waf {
@@ -28,7 +28,7 @@ import {$SNIPPET_DEFS_DIR:/etc/caddy/snippet_defs.d}/*.caddy
 		`
 	}
 
-	import {$CONFIG_DIR:/etc/caddy/config.d}/*.caddy
+	import {$CADDY_CONFIG_DIR}/*.caddy
 
 	handle {
 		respond "No configuration injected" 501

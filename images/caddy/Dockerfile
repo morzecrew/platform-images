@@ -69,6 +69,9 @@ RUN apk add --no-cache gettext
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 COPY --from=crs /opt/coraza /opt/coraza
 
+# Named bake context, not a copy under images/caddy/ (RFC 0001 decision 6).
+COPY --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
+
 COPY rootfs/waf/ /opt/coraza/config/
 COPY rootfs/snippets/ /etc/caddy/snippets/
 COPY rootfs/Caddyfile /etc/caddy/Caddyfile
@@ -93,15 +96,23 @@ RUN addgroup -S caddy && adduser -S -G caddy caddy \
     /config \
     /data
 
-ENV EDGE_ADDRESS=":8080" \
-    REQUEST_BODY_MAX_SIZE="30MB" \
-    HEALTH_PATH="/__platform_healthz" \
-    AUTO_HTTPS="auto_https off" \
-    TEMPLATE_DIR="/etc/caddy/templates" \
-    CONFIG_DIR="/etc/caddy/config.d" \
-    SERVERS_DIR="/etc/caddy/servers.d" \
-    BUILTIN_SNIPPETS_DIR="/etc/caddy/snippets" \
-    SNIPPET_DEFS_DIR="/etc/caddy/snippet_defs.d"
+# Canonical spelling is CADDY_<NAME> (RFC 0001 decision 1). The unprefixed
+# names this image published first still work -- entrypoint.sh maps them and
+# warns -- but they are deliberately not ENV here: a legacy name present in
+# `environ` because the image set it is indistinguishable from one an operator
+# set, and the alias handling has to tell those apart.
+#
+# entrypoint.sh carries the same defaults, because knowing the baked value is
+# what lets the summary say who set what. smoke.sh asserts the two agree.
+ENV CADDY_EDGE_ADDRESS=":8080" \
+    CADDY_REQUEST_BODY_MAX_SIZE="30MB" \
+    CADDY_HEALTH_PATH="/__platform_healthz" \
+    CADDY_AUTO_HTTPS="auto_https off" \
+    CADDY_TEMPLATE_DIR="/etc/caddy/templates" \
+    CADDY_CONFIG_DIR="/etc/caddy/config.d" \
+    CADDY_SERVERS_DIR="/etc/caddy/servers.d" \
+    CADDY_BUILTIN_SNIPPETS_DIR="/etc/caddy/snippets" \
+    CADDY_SNIPPET_DEFS_DIR="/etc/caddy/snippet_defs.d"
 
 EXPOSE 8080
 
