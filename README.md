@@ -51,6 +51,13 @@ repo changed.** That is deliberate: a Debian security fix inside an unchanged
 upstream tag reaches you no other way. It is also exactly why the dated tag
 exists — pin it if a moving base is not acceptable to you.
 
+The rebuild runs **Mondays at 05:00 UTC**, uncached so that it actually picks up
+a rebuilt base layer. Every publish — scheduled or not — builds the image, pushes
+it **by digest with no tag attached**, starts it and runs that image's smoke
+test, and only then points the tags at it. So a tag never moves to an image that
+failed to start, and the bytes that were tested are the bytes you pull rather
+than a rebuild that ought to be equivalent.
+
 ### Attestations
 
 Images carry max-mode [SLSA provenance](https://slsa.dev/) and an SBOM:

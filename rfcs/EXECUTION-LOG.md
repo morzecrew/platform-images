@@ -424,3 +424,162 @@ code disagreeing with an RFC needs to know it was seen.
 - D-005's proposed row was corrected in place by an addendum rather than left
   standing, because it described a mechanism that had never run. Any future
   entry written from an unexecuted job deserves the same suspicion.
+
+---
+
+# Wave 2 · Weekly rebuild
+
+Branch `feat/wave-2-weekly-rebuild`. RFC 0002 P4 — the phase wave 1 descoped in
+D-007 and the spike in D-008 unblocked.
+
+**Drift count: 0.** Nothing here contradicts a decision row. The three entries
+below are one `spec-gap` the RFC left between two sections, one `spec-gap` about
+a file the RFC never mentions, and one `discovery` about cron ordering.
+
+**Scoped deliberately narrow.** The planned wave 2 was RFC 0006 P2+P3 carrying
+RFC 0001 P2. That track was **stopped at the readiness gate** — see D-012 — and
+P4 was pulled forward, because it was already specified, already spiked, and had
+been deferred only until wave 1 merged.
+
+## D-010 — Smoke runs against a pulled digest, not a local OCI layout
+
+- **Touches:** RFC 0002 §5.4, decisions row 10 (`LOCKED`)
+- **RFC said:** the run "builds to a local OCI layout
+  (`--set *.output=type=oci,dest=…` or a loaded image), runs §5.5's smoke script
+  against **that** artifact, and pushes it only if the script passes"
+- **Built:** push by digest with tags cleared → `podman pull` that digest →
+  smoke → `docker buildx imagetools create` to promote the tags
+- **Because:** §5.4 and D-008 disagree about *where* the gate happens, and only
+  one of them can be honoured. The local-layout shape cannot push what it
+  tested: buildx has no way to push an OCI archive as-is, so publishing means
+  re-running the build with `--push` — a second build, which under `--no-cache`
+  is not the same bytes. That is precisely the test-one-ship-another shape row
+  10 forbids. Pushing by digest first inverts it: the artifact exists in the
+  registry but is unreachable by name until it passes, and promotion re-points
+  tags at an index that already exists rather than producing a new one.
+- **Class:** `spec-gap`. §5.4 was written before the spike and reached for the
+  mechanism that looked local and safe; the spike then established that
+  promotion preserves identity, which is what makes the digest-first order
+  strictly better.
+- **Consequence:** a failed run leaves an untagged version in GHCR. That is
+  collected by `cleanup-images.yaml`, so it self-heals — see D-011 — but it does
+  mean the registry briefly holds bytes nothing points at. Verified end to end
+  against a throwaway local registry, including that a failing smoke leaves
+  **every** tag untouched, not just the failing image's.
+- **Proposed row (RFC 0002):** `LOCKED` — the gate is push-by-digest → pull that
+  digest → smoke → `imagetools create`. Building to a local OCI layout is
+  explicitly rejected: it cannot publish the artifact it tested without
+  rebuilding.
+
+## D-011 — The cron offset is doing work nobody wrote down
+
+- **Touches:** RFC 0002 §5.4 — unlisted
+- **RFC said:** `cron: "0 5 * * 1"`, annotated only "Mondays, an hour after
+  cleanup-images"
+- **Built:** the same cron, with the reason recorded
+- **Because:** the offset reads like politeness — stagger the jobs — and is
+  actually the thing that bounds D-010's failure mode. A run that dies between
+  the digest push and the promotion leaves an untagged version, and
+  `cleanup-images.yaml` is what collects it. Rebuilding an hour *after* cleanup
+  means an orphan waits an hour for the next cleanup; rebuilding an hour
+  *before* would mean it waits a week.
+- **Class:** `discovery`. Only building the digest-first gate made the ordering
+  load-bearing; before D-010 there were no orphans for cleanup to matter to.
+- **Consequence:** the two crons are now coupled. Moving either one without the
+  other re-opens the week-long orphan window, and neither file said so.
+- **Proposed row (RFC 0002):** `ASSUMED` — the rebuild cron must stay after the
+  cleanup cron on the same day, because cleanup is what collects the untagged
+  versions a failed publish leaves behind.
+
+## D-012 — `just publish` refuses instead of publishing
+
+- **Touches:** RFC 0002 decisions rows 2 and 10 (both `LOCKED`) — the `justfile`
+  is unlisted in every phase
+- **RFC said:** nothing. §5.4 specifies the workflow; no phase mentions the
+  recipe the workflow used to call.
+- **Built:** `just publish` refuses unless `I_KNOW_THIS_IS_UNGATED=1`, and the
+  workflow no longer calls it
+- **Because:** leaving it as it was would have left a one-word command that
+  violates both rows silently. It skips the smoke gate row 10 requires of *every*
+  publishing run, and on the default `docker` driver buildx emits no attestations
+  at all while reporting success (D-008), so an ungated local push is
+  indistinguishable from a correct one until someone inspects the registry.
+- **Class:** `spec-gap`. The RFC specified the pipeline and never asked what
+  happens to the other door into it.
+- **Consequence:** a developer who genuinely wants an ungated push types one
+  environment variable and gets it, with both reasons printed first. `just push`
+  is untouched — it moves an existing tag and was never a build.
+- **Proposed row (RFC 0002):** `ASSUMED` — publishing paths that bypass the
+  smoke gate refuse by default and name both silent failure modes.
+
+## D-013 — Wave 2's planned scope stopped at the readiness gate
+
+- **Touches:** the execution plan, not an RFC
+- **Planned:** RFC 0006 P2 + P3, carrying RFC 0001 P2
+- **Built:** RFC 0002 P4 instead
+- **Because:** `flag-dont-flip`'s readiness gate is three load-bearing decisions
+  the design does not settle, and the valkey track has three:
+  1. **The source-map shape.** RFC 0001 §5.2 requires `envconf_summary` to take
+     a source map and says each image builds one, but never says what it is. It
+     is the interface between every future image and the shared helper.
+  2. **Whether `shared/` gets its own test harness.** §6 routes every test
+     through per-image smoke tests. The helper's NUL-delimited wire format and
+     newline refusal are testable without starting a server, and only through a
+     running Valkey if the RFC's silence is taken literally.
+  3. **`VALKEY_RENAME_DANGEROUS`'s surface.** §5.4 locks *that* the dangerous
+     commands are renamed and re-enableable; §5.5 lists the variable without
+     saying whether it is a boolean or a list of exemptions.
+  Decisions 9 and 10 (Alpine base, fallback `maxmemory`) are `OPEN` and so are
+  the executor's to decide and log — they are not part of this count.
+- **Class:** `spec-gap`, against the plan.
+- **Consequence:** P4 shipped a wave earlier than planned and the valkey track
+  starts once those three are settled — each is a paragraph, against a
+  re-implementation if guessed at.
+
+## Rules distilled
+
+- When two sections of one RFC describe the same gate differently, the one
+  written *after* the measurement wins, and the disagreement is the entry —
+  §5.4's local-OCI sketch predates the spike that made digest-first viable
+  (D-010).
+- A gate that publishes what it tested has to make the tested artifact and the
+  published artifact **the same object**, not two objects a build is expected to
+  produce identically. Digest-first does that; build-test-rebuild cannot (D-010).
+- An offset between two schedules is a dependency. If moving one alone breaks
+  something, that is a coupling and it belongs in a comment on both (D-011).
+- Specifying a pipeline does not secure it. Ask what the *other* entrances are —
+  the local recipe, the manual dispatch — because a rule enforced in one path
+  and absent from another is a rule with a documented bypass (D-012).
+- The readiness gate is worth honouring when the answer is inconvenient. Three
+  paragraphs settled now is the cheap version of the same conversation (D-013).
+
+## Carried into the next unit
+
+- **RFC 0002 §6's first-publish verification is now discharge-able but not
+  discharged.** The gate is proven against a throwaway local registry, not
+  against GHCR. The first real scheduled run is what turns it into a fact, and
+  it will be the first time `podman pull` authenticates against GHCR in this
+  repo.
+- The valkey track (RFC 0001 P2, RFC 0006 P2+P3) is blocked on D-013's three
+  questions.
+- RFC 0004 P2 still carries wave 1's R-7 — a `POSTGRES_EXTENSIONS` override
+  publishes onto the default tags.
+- The rebuild has never run on a schedule. Cron triggers only fire from the
+  default branch, so this cannot be exercised until it merges.
+
+## Reconciliation — 2026-08-16 (wave 2)
+
+| RFC | Row | Outcome | Grade | Decision | From |
+|---|---|---|---|---|---|
+| 0002 | — | **Pending author** | — | Gate is push-by-digest → pull → smoke → `imagetools create`; local OCI layout rejected | D-010 |
+| 0002 | — | **Pending author** | — | Rebuild cron must stay after the cleanup cron on the same day | D-011 |
+| 0002 | — | **Pending author** | — | Publishing paths that bypass the smoke gate refuse by default | D-012 |
+
+Wave 1's pending rows (D-003, D-004, D-005, D-006, D-008) are still pending and
+are not restated here. **Row 17 (D-009) was written into RFC 0002 during wave 1's
+review and flagged as needing ratification; it has not been explicitly ratified
+and still stands.**
+
+Nothing in this wave was written into an RFC. Every entry above touches a
+`LOCKED` row or proposes a new one, and none of them is pre-authorised the way
+RFC 0004 row 5 pre-authorised D-001 — so they wait.
