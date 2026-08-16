@@ -23,8 +23,12 @@ Execution does not write them into a decision table itself.
 Branch `feat/wave-1-publishing-contract-extensions`. RFC 0001 P1, RFC 0002 P2 and
 P3, RFC 0004 P1. **RFC 0002 P4 was descoped before execution** — see D-007.
 
-**Drift count: 2** — A-1 and A-2, both against this wave, both found by the
-self-audit rather than during execution. See the findings table below.
+**Drift count: 8** — A-1, A-2 (self-audit); D-009, R-1, R-3, R-4, R-5, R-8
+(PR #27 review and its sabotage pass). All eight are against this wave; none was
+caught during execution. The count read 2 after the self-audit and was corrected
+upward twice — the history is kept because a count that only ever moves at the
+end of the process that produced it is not measuring that process. Eight is a
+bad number and is meant to read as one. See both findings tables below.
 
 ## D-001 — Extension manifest carries a fifth column
 
@@ -116,8 +120,32 @@ self-audit rather than during execution. See the findings table below.
   smoke job would have to rebuild, so CI would pay twice **and** the images
   tested would not be the ones the build step verified — the same
   test-one-ship-another shape row 10 rejects for publishing.
-- **Proposed row (RFC 0002):** `ASSUMED` — bake exports each target to a
-  docker-format tar which Podman loads, in a single job.
+- **Proposed row (RFC 0002):** ~~`ASSUMED` — bake exports each target to a
+  docker-format tar which Podman loads, in a single job.~~ **Corrected by the
+  addendum below.**
+
+**Addendum 2026-08-16 (PR #27 review, R-1).** The docker-format export never
+worked, and the entry above was written from a job that had never run. Two
+failures, in order:
+
+1. The tarball lands outside the bake context, which buildx classifies as a
+   privileged filesystem write and refuses. Scoped `--allow=fs.write=/tmp`
+   grants it; `BUILDX_BAKE_ENTITLEMENTS_FS=0` would have switched the check off
+   wholesale and is not used.
+2. Every target inherits `_attested`, so the result is a manifest list, and the
+   `docker` exporter rejects those outright — "does not support exporting
+   manifest lists, use the oci exporter instead".
+
+`type=oci` fixes the second, and is the better answer rather than merely a
+working one: dropping attestations to satisfy the docker exporter would have
+made CI smoke-test an artifact shape the registry never receives. Podman loads
+the OCI archive, resolves the runnable manifest, and ignores the attestation
+manifest. Verified locally end to end on all five images.
+
+- **Corrected proposed row (RFC 0002):** `ASSUMED` — bake exports each target to
+  an **OCI** archive which Podman loads, in a single job, with a scoped
+  `--allow=fs.write` for the destination. The docker exporter is explicitly
+  rejected: it cannot carry the attestations every target declares.
 
 ## D-006 — Equivalence is measured against a worktree of `main`
 
@@ -139,6 +167,21 @@ self-audit rather than during execution. See the findings table below.
 - **Proposed row (RFC 0004):** `ASSUMED` — the equivalence check is a one-shot
   merge gate against a worktree of the pre-refactor commit, and its result is
   recorded in the execution log rather than kept runnable.
+
+**Addendum 2026-08-16 (PR #27 review).** The reference does not have to die with
+the branch. The published pre-refactor image is immutable **by digest** even
+after `:18.6` is repointed:
+
+```text
+ghcr.io/morzecrew/postgres@sha256:9934cb32a8cf24f626c012f1019cd285f71d6f662cde760045b6049dab7c822c
+```
+
+That is the last `:18.6` published before this refactor. Pulling it and diffing
+`pg_settings` against a current build re-runs the §6 comparison at any later
+date, which the worktree method could not. It is a weaker reference in one way —
+it fixes the base image and package versions as they were, so a difference may
+be an upstream change rather than a refactor regression — and that is exactly
+why it belongs in the log next to the method rather than replacing it.
 
 ## D-007 — P4 descoped before execution
 
@@ -202,6 +245,69 @@ self-audit rather than during execution. See the findings table below.
 `--set *.output=type=oci,dest=…` as the build-once mechanism. Not built, pending
 D-007's spike — the sketch is what needs verifying, not what needs implementing.
 
+## D-009 — `BUILD_STAMP` needs `run_attempt`; `run_id` alone is not unique per build
+
+- **Touches:** RFC 0002 §5.3, decisions row 11 (`LOCKED`). **Supersedes D-002.**
+- **RFC said:** row 11 — the stamp is **unique per build**, written `<yyyymmdd>-<run>`
+- **Built (D-002):** `<yyyymmdd>-<run_id>`
+- **Now built:** `<yyyymmdd>-<run_id>.<run_attempt>`
+- **Because:** D-002 rejected `run_number` for being stable across re-runs and
+  concluded `run_id` "is unique per run and satisfies the stated property". The
+  first half is right and the second does not follow. `run_id` is unique per
+  *run* and is **also** stable across re-runs — only `run_attempt` increments.
+  A re-run rebuilds against moved apt and base-image state, so it produces
+  different bytes under the same stamp, which is precisely the repointing of an
+  immutable tag row 11 exists to prevent. D-002 changed which wrong identifier
+  was used without fixing the defect.
+- **Class:** `drift`. Row 11 covered the property, GitHub documents that
+  `run_id` does not change on re-run, and it was built otherwise anyway. The
+  rationale in D-002 asserted the property held rather than checking it.
+- **Consequence:** stamps gain a `.N` suffix. The first attempt is `.1`, so
+  every stamp carries one even though re-runs are rare — a conditional suffix
+  would make the format depend on history, and the tag is meant to be read
+  without knowing whether it was retried.
+- **Found by:** PR #27 review — both reviewers flagged it independently.
+- **Proposed row (RFC 0002):** `LOCKED` — `BUILD_STAMP` is
+  `<yyyymmdd>-<run_id>.<run_attempt>`. Both `run_number` and bare `run_id` are
+  rejected: neither changes when a run is re-run, so either would repoint a tag
+  decision 1 calls immutable.
+
+## Review findings — PR #27, 2026-08-16
+
+Findings from the PR's automated reviewers. Filed alongside the self-audit's so
+the wave's total is countable in one place. D-009 above is the substantive one
+and is written up as a departure rather than a row.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| R-1 | `.github/workflows/bake.yaml` | The job had never run in CI and failed on its first execution — twice over. The tar destination is outside the bake context, which buildx refuses without `--allow=fs.write`; and every target inherits `_attested`, so the result is a manifest list, which the `docker` exporter rejects outright. Now exports `type=oci`, which Podman loads while ignoring the attestation manifest. See D-005's addendum. | `drift` | Fixed |
+| R-2 | `images/postgres/smoke.sh` | Expectations were hard-coded to the default extension set although `PG_EXTENSIONS` is a build input and decision 7 admits three variants. Now derived from the image's own label and manifest. | `spec-gap` | Fixed |
+| R-3 | `images/python-distroless/smoke.sh` | The TMPDIR check used a bare `NamedTemporaryFile()`, which falls back to `/tmp` when `TMPDIR` is unusable. Verified: the old assertion **passed** against `TMPDIR=/nonexistent`. Now asserts `gettempdir() == TMPDIR` and writes with `dir=`. | `drift` | Fixed |
+| R-4 | `images/README.md` | Touchpoint 9 still said "once RFC 0002 P3 ships" and touchpoint 7 still said a missing `DESCRIPTIONS` entry publishes an empty label — decision 16 made that fail the build. Both stale as of this branch. | `drift` | Fixed |
+| R-5 | `rfcs/0004`, `rfcs/0006` | §5.3 described `inherits` as carrying args "wholesale" against decision 6's measured per-key merge, and its unresolved-questions entry was still open; RFC 0006 called four upstream references "pinned" when §3.1 records one as floating. | `drift` | Fixed |
+| R-6 | `rfcs/0004` §5.1 | The five-column manifest was recorded in D-001 but never reconciled into the RFC, leaving the build-input contract split between the two documents. Row 14 added, citing D-001. | `spec-gap` | Fixed |
+| R-7 | `docker-bake.hcl` | Overriding `POSTGRES_EXTENSIONS` changes image contents while the tags stay `postgres:<version>`, so a locally-published variant would overwrite the default tags. Real, and decision 3 already says variants are tag suffixes — the guard belongs with the variant targets. | — | **Open**, carried to RFC 0004 P2 |
+| R-8 | `images/postgres/smoke.sh` | **Found by sabotage, not by a reviewer.** The rewritten R-2 test checked that every labelled extension was present but never that unlabelled ones were absent, so an image labelled `cron` while shipping pgroonga passed. The manifest is a closed set, so unselected rows are now asserted absent. | `drift` | Fixed |
+
+**Drift count correction: the wave stands at 8**, not 2 — A-1, A-2, D-009, R-1,
+R-3, R-4, R-5, R-8. The group heading records 2, which was the count after the
+self-audit and before review.
+
+R-1 is classified `drift` and the temptation to call it `discovery` is worth
+naming, because "the job had never run" reads like an excuse for it. It is not:
+§5.4 sketches `type=oci` for the same build-once-smoke pattern one section
+above §5.5, decisions 2 and 13 put attestations on every target — which is what
+makes the result a manifest list — and **this wave's own D-008 recorded the
+entitlement flag** while spiking the publish path. Every input needed to write
+the job correctly existed before it was written. A failure that only surfaces
+when the code first runs is still `drift` if the design said the right thing and
+the code said otherwise; `discovery` is for what building it *revealed*, not for
+what running it *caught*.
+
+R-8 is worth separating for the opposite reason: it was found neither by a
+reviewer nor by reading, but by breaking the image and watching the new test
+pass anyway.
+
 ## Self-audit findings — 2026-08-16
 
 Departures the executor did not notice, found by the adversarial pass over the
@@ -224,11 +330,48 @@ input silently, or refuse it and name the correct spelling. Refusing keeps the
 label equal to the argument **by construction**, so the guarantee cannot drift
 again the next time something reads one and not the other.
 
+## Reconciliation — 2026-08-16
+
+What became of this wave's proposed rows. Kept as a table because a log whose
+`Proposed row` lines never reach an RFC is a private diary of disagreements with
+a spec that still says the old thing.
+
+| RFC | Row | Outcome | Grade | Decision | From |
+|---|---|---|---|---|---|
+| 0004 | 14 | **Accepted** | `ASSUMED` | Manifest is five columns; SQL name carried explicitly | D-001 |
+| 0002 | — | **Pending author** | — | `BUILD_STAMP` = `<yyyymmdd>-<run_id>.<run_attempt>` | D-009 (supersedes D-002) |
+| 0002 | — | **Pending author** | — | `BUILD_STAMP` declared in the tag-policy section, not §5.1's label snippet | D-003 |
+| 0002 | — | **Pending author** | — | Build-stage smoke tests assert toolchain and helper validity, not `--help` | D-004 |
+| 0002 | — | **Pending author** | — | Bake exports each target to an **OCI** archive which Podman loads, in one job | D-005 as corrected by R-1 |
+| 0004 | — | **Pending author** | — | Equivalence is a one-shot merge gate, result recorded not kept runnable | D-006 |
+| 0002 | — | **Pending author** | — | P4 builds with `push-by-digest`, smokes the digest, promotes with `imagetools create` | D-008 |
+
+Row 14 was written because RFC 0004 row 5 is `ASSUMED` and pre-authorised this
+exact departure ("depart — with a new column, not a second mechanism"), so
+appending it records a change the design already permitted. The rest touch
+`LOCKED` rows or propose new ones and are the author's to accept or refuse; they
+are listed as pending rather than quietly carried, because the reader who finds
+the code disagreeing with RFC 0002 §5.3 needs to know it was seen.
+
 ## Rules distilled
 
 - A decision row that names both a property and an implementation is two claims,
   and they can disagree. When they do, the property is the decision — the
   implementation was an illustration (D-002).
+- Having identified the property, **check that the replacement satisfies it**
+  rather than that it is better than what was rejected. D-002 disqualified
+  `run_number`, then adopted `run_id` on the strength of that argument alone —
+  and the two fail the property identically (D-009).
+- A test written against a *build input* has to derive its expectations from the
+  artifact, not restate the default. The default is one value of the input, and
+  the test is the thing that stops being true when someone changes it (R-2).
+- A check that every claimed thing is present is half a check. Ask what happens
+  when the artifact contains **more** than it claims — that half is invisible to
+  reading and shows up the moment the check is sabotaged (R-8).
+- When a decision row changes what a failure mode is, the prose describing that
+  failure mode elsewhere is now wrong and nothing will flag it. Decision 16 made
+  a missing description fail the build; `images/README.md` still listed it as
+  one of the silent ones (R-4).
 - A format defined in one section and consumed in another is a place to check
   that the consumer's needs survived the trip; §5.1 dropped the column §5.2
   depended on (D-001).
@@ -257,3 +400,12 @@ again the next time something reads one and not the other.
 - `images/README.md` touchpoint 9 (`smoke.sh`) is now real — a new image without
   one silently gets no smoke coverage, since the loop iterates over the files
   that exist.
+- **R-7 is open and belongs to RFC 0004 P2.** Overriding `POSTGRES_EXTENSIONS`
+  on the `postgres` target changes the contents while the tags stay
+  `postgres:<version>`, so publishing a variant that way would overwrite the
+  default image. Decision 3 already settles the shape of the fix — variants are
+  tag suffixes — so P2 must add the suffixed targets and, with them, a guard
+  that stops the base target from publishing a non-default selection.
+- D-005's proposed row was corrected in place by an addendum rather than left
+  standing, because it described a mechanism that had never run. Any future
+  entry written from an unexecuted job deserves the same suspicion.
