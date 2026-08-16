@@ -1,13 +1,18 @@
 # RFC 0002 — Publishing pipeline: attestations, tag policy, rebuild cadence
 
-- **Status:** 🚧 In progress — **P1's configuration shipped 2026-08-12**: the
-  label set and the attestation declaration are in
-  [docker-bake.hcl](../docker-bake.hcl) and verified with `bake --print`.
-  **Attestations on published images remain unverified** — nothing has been
-  pushed from that configuration yet, and §6's `imagetools inspect` against a
-  real digest is what would turn the declaration into a fact. Execution also
-  found §5.2's specified syntax is silently ignored by buildx (§5.2a, decision
-  13). P2–P4 not started.
+- **Status:** 🚧 In progress — **all four phases shipped; one claim still
+  unverified against GHCR.** P1's labels and attestation declaration landed
+  2026-08-12 ([docker-bake.hcl](../docker-bake.hcl), verified with
+  `bake --print`); P2's tag policy and P3's rootless smoke stage landed
+  2026-08-16 in wave 1; P4's weekly rebuild and smoke gate landed 2026-08-16 in
+  wave 2. Execution found §5.2's specified syntax is silently ignored by buildx
+  (§5.2a, decision 13) and that §5.3's stamp was not unique per build (decision
+  17, EXECUTION-LOG D-009).
+  **Attestations on published images remain unverified.** The full
+  build → push-by-digest → smoke → promote gate is measured end to end, but
+  against a throwaway local registry (EXECUTION-LOG D-008, D-010). §6's
+  `imagetools inspect` against a real GHCR digest is what turns the declaration
+  into a fact, and only a real publishing run can produce one.
 - **Scope:** What a published `ghcr.io/morzecrew/*` tag guarantees about itself.
   Covers the OCI label set in [docker-bake.hcl](../docker-bake.hcl), buildx
   provenance and SBOM attestations, a stated tag-mutability policy with an

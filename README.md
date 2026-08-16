@@ -15,10 +15,21 @@ From the **repo root**. Requires [just](https://github.com/casey/just) and [Dock
 ```bash
 just bake                 # all images (default group)
 just bake postgres        # single image
-just publish              # build + push everything (uses gh auth)
-just push postgres 18.4
+just push postgres 18.4   # push an already-built local tag
 just push uv-builder 3.14
 ```
+
+**Publishing is CI's job, not a local command.** A merge to `main` that touches
+`docker-bake.hcl` or `images/**` publishes, as does the weekly rebuild and a
+manual run of [publish.yaml](.github/workflows/publish.yaml). Each of those
+builds the image, pushes it by digest with no tag attached, smoke-tests that
+exact digest, and only then moves the tags.
+
+`just publish` still exists and **refuses by default**, because both of its
+failure modes are silent: it skips that smoke gate, and on the default Buildx
+driver it publishes no attestations while reporting success. Set
+`I_KNOW_THIS_IS_UNGATED=1` if you genuinely mean to bypass both. `just push`
+moves an already-built tag and is unaffected.
 
 Pushing uses `gh auth token` for registry login to `ghcr.io`.
 
@@ -50,6 +61,13 @@ immutable reference; the dated tag is the ergonomic approximation of one.
 repo changed.** That is deliberate: a Debian security fix inside an unchanged
 upstream tag reaches you no other way. It is also exactly why the dated tag
 exists — pin it if a moving base is not acceptable to you.
+
+The rebuild runs **Mondays at 05:00 UTC**, uncached so that it actually picks up
+a rebuilt base layer. Every publish — scheduled or not — builds the image, pushes
+it **by digest with no tag attached**, starts it and runs that image's smoke
+test, and only then points the tags at it. So a tag never moves to an image that
+failed to start, and the bytes that were tested are the bytes you pull rather
+than a rebuild that ought to be equivalent.
 
 ### Attestations
 
