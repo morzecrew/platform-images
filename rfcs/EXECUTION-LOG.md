@@ -1612,3 +1612,67 @@ refusing is caught by the timeout path rather than hanging the run.
   ~20 near-identical lines. Left alone deliberately: extracting it couples two
   per-image tests through a shared file, and the two copies already differ in
   timeout and container name. Recorded rather than done silently.
+
+## W-3 — `ALTER SYSTEM` is a fourth configuration layer, and no RFC mentions it
+
+- **Touches:** RFC 0001 decision 3 (`LOCKED`), decision 13 (`LOCKED`)
+- **RFC said:** precedence is baked default → mounted config file → environment,
+  "in every image, printed at startup"
+- **Measured:** there is a fourth layer above all three.
+  `ALTER SYSTEM SET work_mem = '7MB'` writes `${PGDATA}/postgresql.auto.conf`,
+  which Postgres reads **after** `postgresql.conf` and everything its
+  `include_dir` pulled in. With `PG_CONF__work_mem=64MB` also set, the effective
+  value after a restart is 7MB — and the summary went on printing
+  `source=env  work_mem = 64MB`, a value the server had stopped using.
+- **Built:** the file is scanned last and attributed `source=sql` with an
+  `(ALTER SYSTEM)` origin; `postgres`'s footer reads
+  `precedence: baked < mounted < env < ALTER SYSTEM`.
+- **Class:** `spec-gap`. The design names three layers because nobody looked for
+  a fourth; the summary defect is the consequence rather than the finding.
+- **Not built, and proposed instead:** `-c allow_alter_system=off` at startup
+  would close the route, and cannot be overridden by any config file because
+  command-line options outrank them. It also removes something this image has
+  always permitted, which is a **policy change to a published image** rather than
+  part of moving it onto the shared helper. Cited from
+  `rootfs/denylist.conf` and the entrypoint so a reader meets the proposal where
+  the switch is discussed.
+- **Proposed row (RFC 0001):** decision 3 enumerates the layers an image must
+  print, and an image whose server can write its own configuration reports that
+  file as a layer of its own. Whether to disable `ALTER SYSTEM` in `postgres` is
+  a separate question for RFC 0004's image policy.
+
+## Review findings — PR #32, 2026-08-17
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| R-18 | `smoke.sh` | Claimed the new stderr assertion could not work because `engine logs` returns a combined stream. It does not: container stdout goes to the command's stdout and stderr to its stderr. Measured `0` summary lines on stdout and all 43 on stderr, and the assertion passes in CI. | — | **Refuted** |
+| R-19 | `rootfs/denylist.conf` | The comment on `shared_preload_libraries` read as though *the denylist file* were generated from `PG_EXTENSIONS`. The **setting** is, into `conf.d/10-extensions.conf`; the file ships as written for every variant. | — | Fixed |
+| R-20 | `README.md` | Said every non-control `PG_*` variable warns, while `PG_MAJOR` and `PG_VERSION` are deliberately silent. The exclusion and its reason are now stated. | — | Fixed |
+| R-21 | `rootfs/entrypoint.sh` | **`mktemp` with no template writes to `/tmp`**, so `mv` into `conf.d` is a rename only while they share a filesystem — measured `--tmpfs /tmp` giving device ids 1048775 vs 1048655, where `mv` becomes copy-then-unlink and an interruption leaves the truncated `99-overrides.conf` the comment claimed the pattern prevented. Template moved into `CONF_D`, dot-prefixed so a leftover is invisible to both `include_dir` and the attribution loop. | — | Fixed |
+| R-22 | `rfcs/0001`, `rfcs/INDEX.md` | Marked RFC 0001 complete while decision 4 is known to conflict with decision 1 (A-21). The status now reads "Complete (one decision under review)" and names the conflict; the index carries the same qualification. Narrowing decision 4 is still not done here — it is a `LOCKED` row. | — | Fixed |
+| R-23 | `rootfs/entrypoint.sh`, `build-extensions.sh` | **A bind mount can replace an image fragment at its own path**, and matching on the basename reported the operator's own value back as `source=baked`. Decision 13 (`LOCKED`) exists to answer "which layer won"; this answered it wrongly. The build now records a sha256 per fragment and content that differs reads as `mounted`. | `drift` | Fixed |
+| R-24 | `rootfs/entrypoint.sh` | The `ALTER SYSTEM` layer, reported and proposed — see W-3. | `spec-gap` | Fixed (report); policy proposed |
+
+**Drift count for the wave is now 2** — D-036 and R-23. Both are the same shape:
+a `LOCKED` row describing what the summary must tell an operator, and an
+implementation telling them something else. Neither was reachable by reading the
+code; both needed a container and a mount.
+
+**R-23 and R-24 arrived with no inline thread.** They were "outside diff range"
+comments in a review body, which is the surface a review loop drops silently —
+they were answered in a reply naming the commit, and are filed here because a
+finding whose only record is a PR comment is a finding nobody will count.
+
+**Two process facts worth keeping**, both about trusting a green:
+
+- **CodeRabbit's check reported `success` twice while it had not reviewed.** The
+  first time it was rate-limited (`Review limit reached … we couldn't start this
+  review`) and the check was green anyway; the review only happened after the
+  window reset and an explicit request. A reviewer's check status is not evidence
+  that a review occurred.
+- **The `--since` timestamp for round 2 was computed with `sed 's/+.*/Z/'`**,
+  which strips a `+03:00` offset instead of converting it — three hours into the
+  future, so the sweep returned nothing and looked like convergence. The same
+  expression was used on PR #31, which is already merged: its "round 2 empty"
+  rests on zero unresolved threads and a possibly-false-green check, not on a
+  correct sweep.
