@@ -13,6 +13,16 @@ ARG POSTGRES_IMAGE_TAG
 # quietly producing a smaller image. See RFC 0004.
 ARG PG_EXTENSIONS="cron pgroonga"
 
+# The extensions label is written here, from the same string that drives the
+# install, rather than in docker-bake.hcl beside the tags (RFC 0004 §5.3's
+# sketch put it there). Two literals -- one for `args`, one for `labels` -- can
+# disagree, and `--set postgres.args.PG_EXTENSIONS=pgroonga` proved it: the image
+# installed pgroonga alone and went on claiming `cron pgroonga`, which decision
+# 10 (`LOCKED`) forbids. From here it cannot disagree, because there is one
+# string; and build-extensions refuses a non-canonical spelling, so the one
+# string is the canonical one decision 10 requires.
+LABEL io.morze.postgres.extensions="${PG_EXTENSIONS}"
+
 # ....................... #
 # Install extensions and generate their config
 #

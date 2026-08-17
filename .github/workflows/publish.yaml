@@ -127,11 +127,20 @@ jobs:
           # Refused up front rather than after a build: an image with no smoke
           # script is a publishing run that cannot honour decision 10, and
           # discovering that after pushing four digests wastes the run.
+          #
+          # Resolved from each target's context rather than from its name. An
+          # RFC 0004 extension variant is its own target sharing the base image's
+          # directory, so `images/<target>/smoke.sh` does not exist for it and the
+          # old check refused every variant on sight.
+          declare -A SMOKE
           for t in ${targets}; do
-            [ -f "images/${t}/smoke.sh" ] || {
-              echo "::error title=No smoke test::${t} has no images/${t}/smoke.sh; refusing to publish"
+            script="$(printf '%s' "${plan}" | python3 -c \
+              "import json,sys,pathlib; print(pathlib.PurePath(json.load(sys.stdin)['target']['${t}']['context'], 'smoke.sh'))")"
+            [ -f "${script}" ] || {
+              echo "::error title=No smoke test::${t} has no ${script}; refusing to publish"
               exit 1
             }
+            SMOKE["${t}"]="${script}"
           done
 
           declare -A REPO DIGEST
@@ -160,7 +169,7 @@ jobs:
             ref="${REPO[${t}]}@${DIGEST[${t}]}"
             echo "::group::smoke ${t} (${ref})"
             podman pull "${ref}"
-            bash "images/${t}/smoke.sh" "${ref}"
+            bash "${SMOKE[${t}]}" "${ref}"
             echo "::endgroup::"
           done
 
