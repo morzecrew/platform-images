@@ -201,6 +201,21 @@ refuse() {
 refuse "a denylisted key" -e PG_CONF__data_directory=/tmp
 expect_in "denylist refusal names the variable" "$(cat "${REFUSE_OUT}")" "PG_CONF__data_directory"
 
+# The allowlist is operator-replaceable, so "denylisted" has to mean refused even
+# when the operator's own allowlist permits it. The README says so; nothing
+# tested it before this battery.
+ALT_ALLOWLIST="$(mktemp)"
+printf 'work_mem\nlog_line_prefix !secret\ndata_directory\n' >"${ALT_ALLOWLIST}"
+chmod 0644 "${ALT_ALLOWLIST}"
+refuse "a denylisted key the operator's allowlist permits" \
+	-v "${ALT_ALLOWLIST}:/tmp/al.conf:ro,Z" -e PG_CONF_ALLOWLIST_PATH=/tmp/al.conf \
+	-e PG_CONF__data_directory=/tmp/elsewhere
+expect_in "denylist outranks the allowlist" "$(cat "${REFUSE_OUT}")" "PG_CONF__data_directory"
+
+# Decision 2: a missing allowlist is a build defect, not a runtime condition.
+refuse "a missing allowlist file" -e PG_CONF_ALLOWLIST_PATH=/nonexistent.conf
+expect_in "missing allowlist names the path" "$(cat "${REFUSE_OUT}")" "/nonexistent.conf"
+
 # The property most likely to regress in a rewrite (§6), and the one this image
 # had no test for: ignore mode must not soften the denylist.
 refuse "a denylisted key under strict=ignore" -e PG_CONF_STRICT_MODE=ignore -e PG_CONF__include=/tmp/x
@@ -246,9 +261,66 @@ for _ in $(seq 1 60); do
 done
 logs="$(logs_of)"
 expect_in "ignore mode warns by name" "${logs}" "PG_CONF__nonexistent_thing"
+# Decision 8 (LOCKED): the summary is diagnostic output about configuration and
+# belongs on stderr, so stdout stays clean for anyone shipping structured logs.
+# Asserted by taking stdout alone -- every other assertion here reads the streams
+# merged and so cannot tell the two apart.
+stdout_only=$("${ENGINE}" logs "${CTR}" 2>/dev/null || true)
+expect_not_in "summary is not on stdout" "${stdout_only}" "[envconf]"
 got=$("${ENGINE}" exec "${CTR}" psql -U postgres -tAc "SHOW work_mem")
 [ "${got}" = "48MB" ] || { echo "FAIL: work_mem=${got}, expected 48MB"; exit 1; }
 echo "ok: an allowed key still applies while an unknown one is skipped"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# --- value safety and redaction (§6) ----------------------------------------
+
+# A tab is the case that made the wire format NUL-delimited rather than
+# `key<TAB>value` (decision 12). It has to survive into the rendered file and
+# into the running server, not merely be accepted.
+"${ENGINE}" run -d --name "${CTR}" -e POSTGRES_PASSWORD=smoke \
+	-v "${ALT_ALLOWLIST}:/tmp/al.conf:ro,Z" -e PG_CONF_ALLOWLIST_PATH=/tmp/al.conf \
+	-e "PG_CONF__log_line_prefix=%m$(printf '\t')[%p] " "${IMAGE}" >/dev/null
+for _ in $(seq 1 60); do
+	"${ENGINE}" exec "${CTR}" pg_isready -U postgres >/dev/null 2>&1 && break
+	sleep 2
+done
+got=$("${ENGINE}" exec "${CTR}" psql -U postgres -tAc "SHOW log_line_prefix" | od -c | head -1)
+case "${got}" in
+*'\t'*) echo "ok: a tab survives into the server's effective config" ;;
+*)
+	echo "FAIL: tab lost, effective value is ${got}"
+	exit 1
+	;;
+esac
+
+# The same allowlist marks log_line_prefix !secret, so the summary must print the
+# key and redact only the value.
+logs="$(logs_of)"
+expect_in "a !secret key is redacted" "${logs}" "log_line_prefix = <redacted>"
+expect_not_in "the secret value does not appear" "${logs}" "[%p] "
+# ...and a non-secret key on the same allowlist is printed in full.
+expect_in "a non-secret key is not redacted" "${logs}" "source=baked        work_mem"
+echo "ok: redaction applies per allowlist marker, not per row"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# --- decision 9: a guessed curated name is not silence ----------------------
+
+# This image has no curated channel, so PG_SHARED_BUFFERS is a plausible guess
+# that configures nothing. Warning is the whole point of decision 9.
+"${ENGINE}" run -d --name "${CTR}" -e POSTGRES_PASSWORD=smoke \
+	-e PG_SHARED_BUFFERS=1GB "${IMAGE}" >/dev/null
+for _ in $(seq 1 60); do
+	"${ENGINE}" exec "${CTR}" pg_isready -U postgres >/dev/null 2>&1 && break
+	sleep 2
+done
+logs="$(logs_of)"
+expect_in "a guessed name warns" "${logs}" "PG_SHARED_BUFFERS is set but this image does not use it"
+expect_in "the remedy names the passthrough channel" "${logs}" "PG_CONF__<directive>"
+# Upstream sets these two on every start; warning about them is how an ignore
+# list stops being read.
+expect_not_in "upstream PG_MAJOR not warned" "${logs}" "PG_MAJOR is set but"
+expect_not_in "upstream PG_VERSION not warned" "${logs}" "PG_VERSION is set but"
+echo "ok: decision 9 warns on a guess and stays quiet about upstream's names"
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
 # --- precedence across all three layers (§6's last case) --------------------
@@ -256,7 +328,7 @@ echo "ok: an allowed key still applies while an unknown one is skipped"
 # work_mem is set by the baked file; a mounted fragment and the environment both
 # override it. The env value must win, and each layer must be attributed.
 WORKDIR="$(mktemp -d)"
-trap '"${ENGINE}" rm -f "${CTR}" "${CTR}-r" >/dev/null 2>&1 || true; rm -rf "${REFUSE_OUT}" "${WORKDIR}"' EXIT
+trap '"${ENGINE}" rm -f "${CTR}" "${CTR}-r" >/dev/null 2>&1 || true; rm -rf "${REFUSE_OUT}" "${ALT_ALLOWLIST}" "${WORKDIR}"' EXIT
 # Two keys on purpose. `work_mem` is contested by all three layers, so the
 # summary must collapse it to the env row -- which means it cannot also be the
 # key that proves mounted attribution works. `temp_buffers` is set by this

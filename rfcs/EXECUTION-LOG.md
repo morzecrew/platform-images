@@ -1550,3 +1550,65 @@ defects rather than decisions.
 (0004 row 15, 0002 §6), which is the reconciliation half doing what it is for —
 a row written from a prediction gets corrected by the measurement, in the same
 table, instead of standing as a claim nobody rechecked.
+
+## Self-audit findings — wave 5, 2026-08-17
+
+Scope: the whole branch, 5 commits, 15 files, +879/−140 — source, tests, docs,
+the RFCs it amends, and the bake config.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-21 | RFC 0001 decisions 1 and 4 | **Two `LOCKED` rows contradict each other, and P4 shipped without recording it.** Decision 4 says `<NAME>_FILE` takes precedence over `<NAME>` "for every secret" and calls it "retroactive for `postgres`"; decision 1 says upstream-owned names are never intercepted, and `POSTGRES_PASSWORD` is upstream's. Measured: `postgres` with both set exits 1 (`both … are set (but are exclusive)`), while `valkey` — an image-curated secret — takes the file and answers `PONG` to it. So the rule holds where the image owns the name and cannot hold where upstream does. | `drift` | **Open — needs the author.** Narrowing decision 4 is a `LOCKED` edit, so the executor does not make it |
+| A-22 | `images/postgres/smoke.sh` | Six §6 and decision-table properties were implemented and asserted by nothing: `!secret` redaction, a tab surviving into effective config, decision 9's warning on a guessed name, decision 9's silence on upstream's `PG_MAJOR`/`PG_VERSION`, decision 8's stderr-only summary, and the denylist outranking an operator-supplied allowlist. All six pass; **none was proven before this pass.** | — | Fixed |
+| A-23 | `images/postgres/rootfs/entrypoint.sh` | The header claimed "the published surface is unchanged". Three things did change: the summary is new, refusal wording comes from the helper, and a read-only fragment no longer aborts. The claim a reader needs is "nothing that worked before stops working", which is true and is now what it says. | — | Fixed |
+| A-24 | `images/postgres/rootfs/entrypoint.sh` | `tmp_overrides` was outside the cleanup trap, so an aborted render left a temp file in the container. | — | Fixed |
+| A-25 | `images/postgres/rootfs/entrypoint.sh` | The unknown-name warning printed *after* the summary; `caddy` and `valkey` both print it before. Same information, worse placement — the comparison an operator makes is between "you set this" and "here is what I used". | — | Fixed |
+| A-26 | §6's channel-collision case | Not applicable to `postgres`: it has no curated channel, so no curated name can collide with a passthrough key. Recorded because an unexplained gap in a test list reads as an omission. The nearest real case — two spellings of one *control* variable — is asserted instead (D-035). | — | Recorded |
+
+**A-21 is the one that matters, and pass 10 is what found it.** Every other
+finding here came from probing behaviour or reading prose; this one came from
+walking the decision table row by row and asking what the code does about each.
+Nothing in the diff looks wrong, because the departure is an absence — `postgres`
+implements upstream's rule by not implementing the contract's, and that leaves no
+trace to notice.
+
+**A-22 is the pattern this practice keeps producing.** Six properties, all
+working, none tested. They were "verified" by having been read. The measurement
+that proved them took one container each.
+
+- **Proposed row (RFC 0001, decision 4):** the `_FILE` rule binds only for
+  secrets the **image** names. For an upstream-owned name, upstream's own
+  handling stands, and the image's README states what that is — for `postgres`,
+  setting both spellings is refused rather than resolved.
+
+### Sabotages run
+
+| Sabotage | Result |
+|---|---|
+| `pgconf` quoting: drop the `''` doubling | `FAIL   ...doubled, not escaped` |
+| Parser: strip `#` inside quotes too | `FAIL   ...hash inside quotes kept` |
+| Parser: require an `=` separator | `FAIL   ...no equals sign needed` |
+| Parser: stop lowering keys | `FAIL   ...key lowered` |
+| Entrypoint: ignore the fragment manifest | `FAIL: image fragment reads as baked` |
+| Entrypoint: stop refusing a control collision | `FAIL: both spellings of the strict control started and kept running` |
+
+The last one also re-exercised wave 4's `--kill-after` work: a refusal that stops
+refusing is caught by the timeout path rather than hanging the run.
+
+### Residue — what I would still distrust
+
+- **A whole-directory mount over `conf.d`** replaces the image's own fragments,
+  including `10-extensions.conf` with the generated preload line. The summary
+  degrades honestly (the manifest becomes unreadable, so everything reads
+  `mounted`) but the *server* loses its preload configuration. Pre-existing, out
+  of this wave's scope, and untested either way.
+- **Decision 8's stderr routing is now asserted for `postgres` only.** `caddy` and
+  `valkey` print to stderr and nothing proves it; the assertion is three lines
+  and belongs in both.
+- **The equivalence check is one-shot.** It compared this build against a digest
+  pulled today, and the result lives in this log rather than in CI. A future
+  change to the renderer will not re-run it.
+- **`refuse` is duplicated** between `caddy`'s and `postgres`'s smoke scripts,
+  ~20 near-identical lines. Left alone deliberately: extracting it couples two
+  per-image tests through a shared file, and the two copies already differ in
+  timeout and container name. Recorded rather than done silently.

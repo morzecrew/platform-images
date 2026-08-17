@@ -2,11 +2,16 @@
 # Render PG_CONF__* into an overrides file, print what the server will actually
 # use, then hand off to the upstream entrypoint.
 #
-# RFC 0001 P4. This replaced a bash implementation of the same two channels: the
-# logic now lives in the shared helper, so `postgres` and every later image
-# refuse the same keys, quote values the same way, and print the same summary.
-# The published surface is unchanged (decision 10) -- PG_CONF__*,
-# PG_CONF_ALLOWLIST_PATH and PG_CONF_STRICT_MODE all keep working.
+# RFC 0001 P4. This replaced a bash implementation of the same channel: the logic
+# now lives in the shared helper, so `postgres` and every later image refuse the
+# same keys, quote values the same way, and print the same summary.
+#
+# Nothing that worked before stops working (decision 10): PG_CONF__*,
+# PG_CONF_ALLOWLIST_PATH and PG_CONF_STRICT_MODE all keep their meaning, and the
+# generated file is byte-identical. Three things did change, deliberately -- the
+# summary is new, refusal messages are worded by the helper rather than by this
+# script, and a fragment mounted read-only no longer aborts the container
+# (EXECUTION-LOG D-036).
 set -eu
 
 # shellcheck disable=SC1091
@@ -74,7 +79,11 @@ envconf_load_denylist /etc/postgresql/denylist.conf
 
 SRCMAP=$(mktemp)
 COLLECTED=$(mktemp)
-cleanup() { rm -f "${SRCMAP}" "${COLLECTED}"; }
+# tmp_overrides joins this set once it exists; the render can abort between
+# mktemp and the mv, and a temp file left behind by a failed start is one more
+# thing to explain to whoever debugs the next one.
+tmp_overrides=""
+cleanup() { rm -f "${SRCMAP}" "${COLLECTED}" ${tmp_overrides:+"${tmp_overrides}"}; }
 trap cleanup EXIT
 
 envconf_collect PG >"${COLLECTED}"
@@ -137,11 +146,15 @@ tr '\0' '\n' <"${COLLECTED}" |
 		printf '%s\0%s\0%s\0%s\0' "${key}" "${value}" env "PG_CONF__${key}" >>"${SRCMAP}"
 	done
 
-envconf_summary postgres "${SRCMAP}"
-
 # Decision 9. The upstream names are the ones the base image sets; PGDATA has no
 # underscore after the prefix and never matches.
+#
+# Before the summary, as `caddy` and `valkey` both do: an operator reading the
+# log sees "you set something I do not use" immediately above the list of what
+# was used, which is where the comparison is useful.
 envconf_warn_unknown PG "PG_MAJOR PG_VERSION PG_CONF_STRICT_MODE PG_CONF_ALLOWLIST_PATH"
+
+envconf_summary postgres "${SRCMAP}"
 
 # The trap does not fire across `exec`.
 cleanup
