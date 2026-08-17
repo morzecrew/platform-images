@@ -1825,7 +1825,7 @@ exactly.
 | 0004 | 17 | **Proposed** | `ASSUMED` | Extension sets are literal per target; no bake variable | D-041 |
 | 0004 | 18 | **Proposed** | `ASSUMED` | CI resolves a smoke script from the target's context; §6's build tests get a harness | D-042 |
 | 0004 | §10 | **Answered** | — | pgvector packaged for 18; pgmq packaged for nothing | D-039 |
-| 0004 | status | **Corrected** | — | `Draft` → `In progress`, five days late; scope's "no specific extension" reconciled against decision 7 | this wave |
+| 0004 | status | **Corrected twice** | — | `Draft` → `In progress` (five days late) → **`Complete`**: §12 has three phases and all shipped. The intermediate step was itself wrong, caught by PR #33's review (R-26). Scope's "no specific extension" reconciled against decision 7 | this wave, R-26 |
 
 Wave 5's rows 23 and 24 (RFC 0001) were ratified by merging PR #32. The two
 `LOCKED`-row questions it raised are still open and are the author's.

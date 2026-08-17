@@ -1,6 +1,11 @@
 # RFC 0004 — Postgres extensions as a build argument
 
-- **Status:** ✅ Complete — all three phases shipped. **P1 2026-08-16** (manifest, build-time generation, the default image produced by the new mechanism, equivalence proven in EXECUTION-LOG D-006). **P2 and P3 shipped 2026-08-17**: the `pgvector` and `cron` variants, the build-mechanism tests §6 asked for, and the variant documentation. This field read **Draft** until 2026-08-17, five days after P1 merged — recorded rather than quietly corrected, because a status that lags the work is the failure a status field has.
+- **Status:** ✅ Complete — all three phases shipped. **What completion means
+  here:** every phase in §12 has shipped. It does **not** mean every decision row
+  has been ratified — rows 16–18 are proposed by execution and ratify when their
+  PR merges — and it does not mean decision 7's three-variant ceiling has expired,
+  which is a standing constraint rather than a task. Same criterion as RFC 0001,
+  marked Complete in wave 5 with two rows outstanding. **P1 2026-08-16** (manifest, build-time generation, the default image produced by the new mechanism, equivalence proven in EXECUTION-LOG D-006). **P2 and P3 shipped 2026-08-17**: the `pgvector` and `cron` variants, the build-mechanism tests §6 asked for, and the variant documentation. This field read **Draft** until 2026-08-17, five days after P1 merged — recorded rather than quietly corrected, because a status that lags the work is the failure a status field has.
   The 2026-08-12 demand measurement (§3.1) stands: pgvector had two live
   consumers on a *different base image* and pgmq none, which is why P2 shipped
   `pgvector` and the cron-only subset rather than a queue.
