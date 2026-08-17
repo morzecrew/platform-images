@@ -17,7 +17,9 @@
 #   envconf_collect        <prefix> [curated_keys]
 #   envconf_warn_unknown   <prefix> <curated_var_names> [remediation]
 #   envconf_quote_valkeyconf <value>
+#   envconf_quote_pgconf   <value>
 #   envconf_refuse_newline <label> <value>
+#   envconf_scan_pgconf    <file> <source> <origin>
 #   envconf_render         <fmt> [infile]
 #   envconf_summary        <prefix> [infile] [header] [footer]
 #   envconf_secret         <name>
@@ -292,18 +294,20 @@ envconf_render() {
 	local fmt="$1"
 	local infile="${2:-}"
 
+	local renderer
 	case "${fmt}" in
-	valkeyconf) ;;
-	pgconf | keyvalue)
+	valkeyconf) renderer=_envconf_render_valkeyconf ;;
+	pgconf) renderer=_envconf_render_pgconf ;;
+	keyvalue)
 		envconf_die "envconf_render: format '${fmt}' is declared by RFC 0001 but not implemented; it ships with its first consumer"
 		;;
 	*) envconf_die "envconf_render: unknown format '${fmt}'" ;;
 	esac
 
 	if [ -n "${infile}" ]; then
-		_envconf_render_valkeyconf <"${infile}"
+		"${renderer}" <"${infile}"
 	else
-		_envconf_render_valkeyconf
+		"${renderer}"
 	fi
 }
 
@@ -337,6 +341,102 @@ _envconf_render_valkeyconf() {
 	tr '\0' '\n' | while IFS= read -r key && IFS= read -r value; do
 		printf '%s %s\n' "${key}" "$(envconf_quote_valkeyconf "${value}")"
 	done
+}
+
+# postgresql.conf is `parameter = 'value'` per line. Postgres accepts a quoted
+# literal for every parameter type -- numeric and boolean settings included --
+# so quoting unconditionally is both correct and what this repo already
+# published, which the retrofit must not change.
+#
+# A single quote is doubled, per Postgres's own escaping rule. A backslash is
+# **not** escaped: `standard_conforming_strings` governs string literals in SQL,
+# not values in the configuration file, where a backslash is literal.
+envconf_quote_pgconf() {
+	local value="$1"
+	# `sed s/'/''/g` needs the quote character passed in, since a POSIX sh
+	# single-quoted string cannot contain one.
+	value=$(printf '%s' "${value}" | sed "s/'/''/g")
+	printf "'%s'" "${value}"
+}
+
+_envconf_render_pgconf() {
+	local key value
+	tr '\0' '\n' | while IFS= read -r key && IFS= read -r value; do
+		printf '%s = %s\n' "${key}" "$(envconf_quote_pgconf "${value}")"
+	done
+}
+
+# Emit NUL-delimited quads for every setting a postgresql.conf-format file
+# assigns, for an image building the source map decision 13 requires.
+#
+#   envconf_scan_pgconf <file> <source> <origin>
+#
+# Postgres's own parser is the specification here, and three of its rules are
+# easy to get wrong by reading the file as `key = value`:
+#
+#   * `=` is optional -- `include 'x'` and `work_mem 32MB` are both valid.
+#   * A `#` inside a quoted value is data, not a comment. `log_line_prefix` in
+#     the shipped file is exactly this case.
+#   * A doubled `''` inside a quoted value is one literal quote.
+#
+# Parameter names are case-insensitive, so they are lowered: the summary must
+# collapse `Work_Mem` and `work_mem` to one row or it reports a conflict the
+# server does not have.
+envconf_scan_pgconf() {
+	local file="$1"
+	local source="$2"
+	local origin="$3"
+	local key value
+
+	[ -r "${file}" ] || return 0
+
+	# Pairs cross the pipe newline-delimited rather than NUL-delimited: a
+	# config file cannot carry a newline inside a value (Postgres has no
+	# continuation syntax), while `awk`'s handling of `%c` with a zero
+	# argument is not portable across the awks in scope.
+	_envconf_pgconf_pairs <"${file}" | while IFS= read -r key && IFS= read -r value; do
+		printf '%s\0%s\0%s\0%s\0' "${key}" "${value}" "${source}" "${origin}"
+	done
+}
+
+_envconf_pgconf_pairs() {
+	awk '
+	function unquote(s,    out, i, c, n) {
+		out = ""; i = 2; n = length(s)
+		while (i <= n) {
+			c = substr(s, i, 1)
+			if (c == "\047") {
+				if (substr(s, i + 1, 1) == "\047") { out = out "\047"; i += 2; continue }
+				return out
+			}
+			out = out c; i++
+		}
+		# Unterminated quote: Postgres refuses the file outright, so whatever
+		# is reported here is cosmetic -- the server will not start.
+		return out
+	}
+	{
+		line = $0
+		sub(/^[ \t]+/, "", line)
+		if (line ~ /^#/ || line == "") next
+		if (line !~ /^[A-Za-z_][A-Za-z0-9_.]*/) next
+
+		match(line, /^[A-Za-z_][A-Za-z0-9_.]*/)
+		key = tolower(substr(line, 1, RLENGTH))
+		rest = substr(line, RLENGTH + 1)
+		sub(/^[ \t]*=?[ \t]*/, "", rest)
+
+		if (substr(rest, 1, 1) == "\047") {
+			value = unquote(rest)
+		} else {
+			hash = index(rest, "#")
+			if (hash > 0) rest = substr(rest, 1, hash - 1)
+			sub(/[ \t]+$/, "", rest)
+			value = rest
+		}
+		printf "%s\n%s\n", key, value
+	}
+	'
 }
 
 _envconf_is_secret() {

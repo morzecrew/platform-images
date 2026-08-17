@@ -41,10 +41,14 @@ contract. It is normative: image READMEs link here rather than restating it.
 >   `notify-keyspace-events` — a real allowlisted directive. The amendment is
 >   proposed and not yet accepted (EXECUTION-LOG D-018), so the rule below is
 >   still the normative one and this is the gap.
-> - **`postgres`** implements the two channels and the allowlist with its own
->   code, predating the helper. It emits no summary and has no denylist file.
->   RFC 0001 P4 retrofits it, deliberately last, because it is the only step
->   that can regress a running deployment.
+> - **`postgres`** implements the passthrough channel, the allowlist, a denylist
+>   file and the startup summary, through the same helper (RFC 0001 P4). It is
+>   the one image that attributes **every** value to the file or variable it came
+>   from, because it is the one whose layers are all enumerable. It has no
+>   curated channel: every setting is either a `PG_CONF__*` override or comes
+>   from a config file. Its two control variables keep their published spellings
+>   — `PG_CONF_STRICT_MODE` and `PG_CONF_ALLOWLIST_PATH` — with the contract's
+>   `PG_CONF_STRICT` and `PG_CONF_ALLOWLIST` accepted as aliases (decision 10).
 > - **`caddy`** emits the summary and warns about unknown `CADDY_*` names
 >   (RFC 0001 P3). It has **no passthrough channel** — Caddy is configured by
 >   Caddyfile fragments, not key-value directives — so a `CADDY_CONF__*`
@@ -130,15 +134,23 @@ logging, and `docker logs` / `podman logs` capture both streams anyway:
 
 ```text
 [envconf] postgres: effective non-default settings
-[envconf]   source=baked      shared_preload_libraries = pg_cron,pg_stat_statements
-[envconf]   source=mounted    work_mem = 32MB          (/etc/postgresql/conf.d/50-tuning.conf)
-[envconf]   source=env        max_connections = 200    (PG_CONF__max_connections)
-[envconf]   source=env        <redacted>               (PG_CONF__log_line_prefix)
+[envconf]   source=baked        shared_preload_libraries = pg_cron,pg_stat_statements  (/etc/postgresql/conf.d/10-extensions.conf)
+[envconf]   source=mounted      temp_buffers = 12MB      (/etc/postgresql/conf.d/50-tuning.conf)
+[envconf]   source=env          work_mem = 64MB          (PG_CONF__work_mem)
 [envconf] precedence: baked < mounted < env
 ```
 
 Values are redacted for keys the allowlist marks `!secret` and for anything
-matching `*PASSWORD*`, `*TOKEN*`, `*SECRET*`, `*KEY*`, `*HEADERS*`.
+matching `*PASSWORD*`, `*TOKEN*`, `*SECRET*`, `*KEY*` (as a whole segment) or
+`*HEADERS*`. **The key is still printed** — only the value is replaced, because a
+row that hides which setting was configured answers nothing:
+
+```text
+[envconf]   source=env          requirepass = <redacted>   (VALKEY_PASSWORD_FILE=/run/pw)
+```
+
+That example is `valkey`'s because `postgres` has no redacting key: nothing in
+its allowlist matches those patterns.
 
 **`source=` attribution is required only of images that generate a config file**
 from layers they can enumerate. An image whose defaults are Dockerfile `ENV`

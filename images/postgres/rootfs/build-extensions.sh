@@ -142,6 +142,26 @@ done
 chown -R postgres:postgres "${CONF_D}"
 chmod 0644 "${CONF_D}"/*.conf
 
+# Record what this build put in conf.d, so the startup summary can tell an
+# image-shipped fragment from an operator-mounted one. The build is the only
+# place that knows: at runtime both are just files in the include directory,
+# and RFC 0001 decision 13 requires this image to attribute each of them.
+#
+# A filename convention would be cheaper and wrong the moment an operator
+# mounts a file whose name looks baked.
+#
+# The digest, not just the name: a bind mount can replace an image fragment at
+# its own path, and a name-only list would then report the operator's content as
+# the image's choice.
+(
+	cd "${CONF_D}"
+	for f in *.conf; do
+		[[ -f "${f}" ]] && sha256sum "${f}"
+	done
+) >"${CONF_D}/.baked-fragments"
+chown postgres:postgres "${CONF_D}/.baked-fragments"
+chmod 0644 "${CONF_D}/.baked-fragments"
+
 # -------------------------
 # Verify
 # -------------------------

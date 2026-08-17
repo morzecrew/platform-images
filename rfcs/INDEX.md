@@ -15,7 +15,7 @@ number in the filename in sync.
 
 | # | Title | Status | One-line routing description |
 |---|---|---|---|
-| [0001](0001-shared-env-config-contract.md) | Shared env-config contract | 🚧 In progress | Two images configure themselves from the environment two different ways; one contract for naming, allowlists, precedence and a startup summary, plus a shared helper and how it reaches build contexts. |
+| [0001](0001-shared-env-config-contract.md) | Shared env-config contract | ✅ Complete¹ | Two images configure themselves from the environment two different ways; one contract for naming, allowlists, precedence and a startup summary, plus a shared helper and how it reaches build contexts. |
 | [0002](0002-publishing-pipeline-attestations-tag-policy-rebuild-cadence.md) | Publishing pipeline: attestations, tag policy, rebuild cadence | 🚧 In progress | A published tag cannot say what commit built it, what is inside it, or whether it means the same tomorrow; labels, attestations, an immutable companion tag, a weekly rebuild, rootless smoke tests. |
 | [0003](0003-image-admission-and-retirement-rule.md) | Image admission and retirement rule | 🚧 In progress | Nothing decides whether an image belongs here or when it leaves; a two-project admission bar, an annual review, and a retirement checklist that says what happens to the published package. |
 | [0004](0004-postgres-extensions-as-a-build-argument.md) | Postgres extensions as a build argument | 📝 Draft | Adding a Postgres extension currently means a second image directory; a `PG_EXTENSIONS` build arg and manifest that also generates the preload line, so combinations become bake targets. |
@@ -27,6 +27,10 @@ number in the filename in sync.
 
 Departures found while executing these designs are recorded in
 [EXECUTION-LOG.md](EXECUTION-LOG.md), which is not an RFC and carries no number.
+
+¹ RFC 0001 is complete in phases, with **decision 4 under review**: it conflicts
+with decision 1 for upstream-owned secrets. See its status block and
+[EXECUTION-LOG.md](EXECUTION-LOG.md) A-21.
 
 ## Status legend
 

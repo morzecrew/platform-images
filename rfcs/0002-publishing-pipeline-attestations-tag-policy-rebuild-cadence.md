@@ -344,6 +344,14 @@ The smoke stage of §5.5 is itself most of this RFC's verification. Beyond it:
 - After the first attested publish, `docker buildx imagetools inspect` shows the
   provenance and SBOM manifests, and a `dry_run: true` cleanup run reports zero
   deletions against them.
+
+  **Amendment (2026-08-16, EXECUTION-LOG D-029):** "zero deletions" is the wrong
+  universal. The first real dry run reported **69**, every one of them an
+  untagged pre-tag-policy publish, which is the mechanism working rather than
+  failing. The property to test is **zero deletions of anything the gate
+  published** — current digests and their attestation manifests — and that is
+  what was verified. A weekly rebuild orphans the previous week's digest by
+  design, so the count is expected to be non-zero forever.
 - `docker inspect` on a published image shows all eight labels populated, with
   `.revision` matching the commit that produced it.
 - The dated tag and the mutable tag resolve to the same digest immediately after

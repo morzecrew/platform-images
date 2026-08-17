@@ -1317,3 +1317,362 @@ the script, exactly as the counter increments did in wave 3. It was rewritten
 to write to a file and run in the main shell before it ever ran. The rule
 distilled from G7 was in this same file and did not prevent the same shape
 being written a second time; what caught it was reading the diff.
+
+---
+
+# Wave 5 · The postgres retrofit
+
+Branch `feat/wave-5-postgres-retrofit`. RFC 0001 P4, and the `pgconf` renderer
+it needed (D-019).
+
+**Drift count: 1** — D-036, against the pre-RFC `postgres` entrypoint, found by
+the §6 battery this wave wrote. Two further defects (D-037, D-038) are ordinary
+ones with no row behind them.
+
+RFC 0001 is complete with this unit: P1 the contract, P2 the helper and `valkey`,
+P3 `caddy`, P4 `postgres`.
+
+## D-033 — The `pgconf` renderer quotes every value, and does not escape backslashes
+
+- **Touches:** RFC 0001 §5.2 (`envconf_render` formats), decision 19
+- **RFC said:** `pgconf` is one of three formats; it does not say what the output
+  looks like
+- **Built:** `parameter = 'value'`, single quotes doubled, backslashes left alone
+- **Because:** the retrofit must not change what this image already publishes,
+  and the bash version quoted unconditionally. Postgres accepts a quoted literal
+  for every parameter type, so `max_connections = '200'` is valid and is what
+  operators' existing `99-overrides.conf` files already contain. Backslashes are
+  literal in `postgresql.conf` — `standard_conforming_strings` governs SQL string
+  literals, not configuration values — so escaping them would corrupt a
+  `log_line_prefix`.
+- **Class:** `discovery`. The format existed only as a name until it had a
+  consumer, which is exactly what decision 19 delegates.
+- **Verified:** the generated `99-overrides.conf` is byte-identical between the
+  published pre-retrofit image and this build, header line excluded.
+
+## D-034 — The summary reports all 35 baked directives, and the build says which fragments are its own
+
+- **Touches:** RFC 0001 decision 13 (`LOCKED`), decision 3 (`LOCKED`)
+- **RFC said:** full `source=` attribution is required of images that generate a
+  config file from enumerable layers. It does not say what "enumerable" includes
+  for an image whose baked layer is an 880-line file, nor how a baked fragment in
+  an include directory is told from a mounted one.
+- **Built:** every directive the baked `postgresql.conf` assigns gets a row
+  (35 of them), and `build-extensions` records the fragments it installed in
+  `conf.d/.baked-fragments`, so anything else in that directory reads as
+  `mounted`.
+- **Because:** the alternative readings both make the summary answer less than
+  the row asks. Reporting only contested keys hides the image's tuning from an
+  operator who set nothing; reporting nothing from the baked file makes
+  `source=baked` almost unreachable on the one image that can compute it. And a
+  filename convention for the fragment question is wrong the moment somebody
+  mounts a file whose name looks baked — the build is the only place that knows
+  the answer, so it writes it down.
+- **Class:** `spec-gap` for both halves — decision 13 is pitched at "which images
+  must attribute" and leaves "how" to each image, which is right for one image
+  and underspecified at three.
+- **Settled with the author before execution**, along with the third question in
+  this wave's gate.
+- **Proposed row (RFC 0001):** an image whose baked layer is a config file
+  reports every directive that file assigns; an image that reads an include
+  directory records at build time which files it shipped.
+
+## D-035 — The published control names keep working, and the contract's are accepted too
+
+- **Touches:** RFC 0001 decision 10 (`ASSUMED`)
+- **RFC said:** `postgres` keeps `PG_CONF_STRICT_MODE` and
+  `PG_CONF_ALLOWLIST_PATH` as published; new images use the `_CONF_STRICT` form
+- **Built:** both spellings work, the published one wins nothing — setting the
+  two to **different** values refuses naming both
+- **Because:** the helper reads the contract's spelling, so the retrofit has to
+  translate, and translation makes both names live whether or not that is
+  admitted. Refusing a conflicting pair is the same rule decision 11 applies to
+  a curated name colliding with a passthrough key, for the same reason: an
+  operator who sets both cannot tell from any document which one the code reads.
+- **Also:** the helper's allowlist-miss message names `PG_CONF_STRICT`, which is
+  the contract's spelling and not this image's published one. It is not wrong —
+  that variable does work — so the README documents both rather than the message
+  being special-cased per image again (wave 4 R-14 did that once already).
+- **Class:** `spec-gap`. Decision 10 says which names survive and not what
+  happens when both are set.
+- **Proposed row (RFC 0001):** where an image publishes an alias for a contract
+  control, both spellings are accepted and a conflicting pair refuses.
+
+## D-036 — A read-only mounted fragment has never been able to start this image
+
+- **Touches:** RFC 0001 decision 3 (`LOCKED`), §6's precedence case
+- **RFC said:** precedence is baked → mounted → environment "in every image", and
+  §6 asks for a test where a baked value, a mounted `50-*.conf` value and an env
+  value resolve to the env value
+- **Found:** the mounted layer aborts the container whenever the fragment is
+  mounted read-only, which is the natural way to mount one:
+
+  ```
+  chown: changing ownership of '/etc/postgresql/conf.d/50-tuning.conf':
+         Read-only file system
+  ```
+
+  The cause is a `chown -R` over the include directory, under `set -e`.
+- **Reproduced against the published pre-retrofit image**, so this is not a
+  regression introduced here — it is a defect the retrofit's own §6 battery is
+  what finally caught. Nothing tested the mounted layer before this wave.
+- **Built:** the directory is still chowned, and the recursive pass is attempted
+  and **warned about** rather than fatal. A read-write fragment with a
+  restrictive mode still gets taken over, which is what the recursion was for;
+  whether the server can read a file it does not own is the server's own error to
+  report, and it does.
+- **Class:** `drift`. A `LOCKED` row says the mounted layer works in every image,
+  and this image refused it. The code predates the row, which explains it and
+  does not change the class — the row describes what the image must do, and the
+  count is what makes "we never checked" visible.
+
+## D-037 — `$( )` would have dropped a trailing empty value from the summary
+
+- **Touches:** nothing in an RFC; wave 3's A-10 in a different costume
+- **Built:** the env channel's quads are read through a pipe, not a here-document
+- **Because:** `PG_CONF__log_line_prefix=` renders `log_line_prefix = ''`, and a
+  final pair whose value is empty ends the stream with two NULs. Converted
+  inside `$(...)`, both trailing newlines are stripped, `read value` fails, and
+  the row vanishes from the summary while still reaching the file — a setting
+  applied and not reported, which is the one failure the summary exists to
+  prevent.
+- **Class:** `discovery`, and it was found by writing the loop rather than by a
+  test. The rule from A-10 is what made it visible.
+
+## D-038 — Three test defects, each of which looked like a code defect
+
+- **Touches:** nothing; recorded because the pattern is the finding
+- **Found while running the new §6 battery**, in order:
+  1. `expect_in <label> <needle> <haystack>` where every sibling image uses
+     `<label> <haystack> <needle>`. The first assertion failed and the code was
+     correct.
+  2. Asserting `source=mounted` for `work_mem` — a key all three layers set, so
+     the summary correctly collapses it to the env row. The assertion demanded
+     the summary contradict wave 3's F3 fix.
+  3. Counting `work_mem = ` rows with a substring match, which
+     `maintenance_work_mem` also satisfies. Reported "2 rows for one key".
+- **Because:** all three are the same mistake — asserting against a
+  remembered shape of the output rather than the measured one.
+- **Class:** ordinary defects, in tests rather than code. Worth one entry because
+  three consecutive red runs were all the test's fault, and the temptation each
+  time was to change the code.
+
+## Facts measured this wave
+
+| What | Result |
+|---|---|
+| The weekly rebuild's **first scheduled run** | Fired 05:27 UTC 2026-08-17 (run 31997975960), success, after the 04:49 cleanup — the offset D-011 describes, working. Wave 2's last carried item, discharged. |
+| `postgres@sha256:9934cb32…`, RFC 0004 §6's equivalence reference | **Deleted** by that morning's cleanup (`manifest unknown`), ~3 hours before wave 4 merged. D-029 predicted it; the window closed first. |
+| Effective server state, pre-retrofit vs retrofit | All 414 `pg_settings` rows identical, with two `PG_CONF__` overrides applied. |
+| `99-overrides.conf`, pre-retrofit vs retrofit | Identical, generated-at header excluded. |
+| Refusal paths, pre-retrofit vs retrofit | Denylist, allowlist-miss, and denylist-under-`ignore` all still exit 1. Message wording differs. |
+
+**The deletion has a better answer than the one D-029 proposed.** It asked for a
+registry write to tag the digest. The tag policy already solved this: a **dated
+tag is immutable and is never repointed**, so `postgres:18.6-20260817-31997975960.1`
+cannot become untagged and cannot be collected. `9934cb32` had no dated tag
+because it predates the policy. This wave's equivalence check used the dated
+tag's digest and needed no registry write — which is the shape RFC 0004 §6
+should ask for.
+
+## Findings against earlier units — wave 5
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| W-1 | `rfcs/0001` status block | Said "**P3 and P4 not started**" and "until P4, the contract is implemented twice" after wave 4 had shipped P3. Wave 4 wrote decision rows 20–22 from `caddy`'s execution and left the status field describing the state before it. A reader checking whether the summary exists would have been told it does not. | `drift` | Fixed, and the lag is recorded in the block itself rather than quietly overwritten |
+| W-2 | `images/README.md` §Startup summary | The normative example showed `source=env  <redacted>  (PG_CONF__log_line_prefix)` — the key replaced by `<redacted>` rather than the value, and on a key that matches none of the redaction patterns. Both halves are wrong about behaviour that has shipped since wave 3, in the document images are told to link to instead of restating. | `drift` | Fixed, with `valkey`'s measured line as the example |
+
+W-1 and W-2 are the same shape as wave 1's R-4 and are why that entry is worth
+re-reading: **prose that describes the state of the work goes stale one wave
+later, and the wave that stales it is never the wave that notices.** Neither is
+counted in this wave's drift count — they are findings against waves 1–4 — but
+both would have been caught by a pass over "every claim about what is shipped"
+at the end of any of them.
+
+## Rules distilled
+
+- A config-format parser has to be written against the *server's* grammar, not
+  the shape the file happens to have. `=` optional, `#` inside quotes literal,
+  `''` an escaped quote — three rules, all of which a naive `key = value` split
+  gets wrong, and none of which the RFC mentioned (D-033).
+- When a runtime cannot tell two layers apart, have the **build** write down what
+  it knows. A filename convention is a guess evaluated at the wrong time
+  (D-034).
+- An alias is two live names whether or not the document admits it. Translating
+  a published name onto a contract name makes both work, so both need
+  documenting and a conflicting pair needs refusing (D-035).
+- `$( )` strips trailing newlines, so any NUL-delimited stream read through
+  command substitution loses a trailing empty field. The second time this
+  pattern has produced a defect in this repo (D-037, after A-10).
+- **Three consecutive red runs were the test's fault, not the code's.** When an
+  assertion fails, check what the code actually printed before changing it:
+  each of the three was written against a remembered output shape (D-038).
+- A `chown -R` over a directory an operator can mount into is a startup failure
+  waiting for its first read-only mount. Take ownership of what the image
+  created, warn about the rest (D-036).
+- The durable reference to an image is a **dated tag**, not a digest. Untagged
+  digests are what garbage collection is for, so a bare digest is a reference
+  with a deletion date nobody wrote down (this wave's facts table).
+
+## Carried into the next unit
+
+- **RFC 0004 P2** — the first real variant, and the question of which extension
+  has a consumer (pgvector or pgmq) is the author's. It still carries wave 1's
+  R-7: a `POSTGRES_EXTENSIONS` override publishes onto the default tags.
+- **RFC 0004 §6's equivalence reference is gone** and the check is now only the
+  log entry that recorded it. Row 15 says so, and says a dated tag is what a
+  future reference should name.
+- **`keyvalue` renderer** still ships with RFC 0005 (D-019). `pgconf` and
+  `valkeyconf` both exist now, so the next renderer has two shapes to follow.
+- **`caddy`'s aliases have no sunset date**, recorded deliberately at this
+  wave's gate: nine table rows and one warning line is cheaper than breaking
+  working compose files. Revisit only if the table stops being nine rows.
+- ~~RFC 0001 P3, P4~~ — shipped; **RFC 0001 is complete**.
+- ~~The weekly rebuild has never run on a schedule~~ — it has, successfully.
+- ~~`postgres@sha256:9934cb32…` will be deleted unless tagged~~ — it was.
+
+## Reconciliation — 2026-08-17 (wave 5)
+
+| RFC | Row | Outcome | Grade | Decision | From |
+|---|---|---|---|---|---|
+| 0001 | 23 | **Proposed** | `ASSUMED` | How an image attributes a config-file layer and an include directory | D-034 |
+| 0001 | 24 | **Proposed** | `ASSUMED` | A published control alias and the contract name both work; a conflict refuses | D-035 |
+| 0004 | 15 | **Amended** | `ASSUMED` | The reference was deleted; a dated tag is the durable form | D-029, this wave |
+| 0002 | §6 | **Amended** | — | "Zero deletions" narrowed to "of what the gate published" | D-029 |
+| 0001 | — | **Status corrected** | — | P3 and P4 marked shipped; RFC 0001 closed as complete | W-1 |
+
+Wave 4's sixteen rows were ratified by merging PR #31; none was struck, so no
+refusal is recorded against them. D-033, D-036, D-037 and D-038 propose no row:
+the first is a shape decision 19 delegates outright, and the other three are
+defects rather than decisions.
+
+**Two amendments here are corrections to rows this practice itself produced**
+(0004 row 15, 0002 §6), which is the reconciliation half doing what it is for —
+a row written from a prediction gets corrected by the measurement, in the same
+table, instead of standing as a claim nobody rechecked.
+
+## Self-audit findings — wave 5, 2026-08-17
+
+Scope: the whole branch, 5 commits, 15 files, +879/−140 — source, tests, docs,
+the RFCs it amends, and the bake config.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-21 | RFC 0001 decisions 1 and 4 | **Two `LOCKED` rows contradict each other, and P4 shipped without recording it.** Decision 4 says `<NAME>_FILE` takes precedence over `<NAME>` "for every secret" and calls it "retroactive for `postgres`"; decision 1 says upstream-owned names are never intercepted, and `POSTGRES_PASSWORD` is upstream's. Measured: `postgres` with both set exits 1 (`both … are set (but are exclusive)`), while `valkey` — an image-curated secret — takes the file and answers `PONG` to it. So the rule holds where the image owns the name and cannot hold where upstream does. | `drift` | **Open — needs the author.** Narrowing decision 4 is a `LOCKED` edit, so the executor does not make it |
+| A-22 | `images/postgres/smoke.sh` | Six §6 and decision-table properties were implemented and asserted by nothing: `!secret` redaction, a tab surviving into effective config, decision 9's warning on a guessed name, decision 9's silence on upstream's `PG_MAJOR`/`PG_VERSION`, decision 8's stderr-only summary, and the denylist outranking an operator-supplied allowlist. All six pass; **none was proven before this pass.** | — | Fixed |
+| A-23 | `images/postgres/rootfs/entrypoint.sh` | The header claimed "the published surface is unchanged". Three things did change: the summary is new, refusal wording comes from the helper, and a read-only fragment no longer aborts. The claim a reader needs is "nothing that worked before stops working", which is true and is now what it says. | — | Fixed |
+| A-24 | `images/postgres/rootfs/entrypoint.sh` | `tmp_overrides` was outside the cleanup trap, so an aborted render left a temp file in the container. | — | Fixed |
+| A-25 | `images/postgres/rootfs/entrypoint.sh` | The unknown-name warning printed *after* the summary; `caddy` and `valkey` both print it before. Same information, worse placement — the comparison an operator makes is between "you set this" and "here is what I used". | — | Fixed |
+| A-26 | §6's channel-collision case | Not applicable to `postgres`: it has no curated channel, so no curated name can collide with a passthrough key. Recorded because an unexplained gap in a test list reads as an omission. The nearest real case — two spellings of one *control* variable — is asserted instead (D-035). | — | Recorded |
+
+**A-21 is the one that matters, and pass 10 is what found it.** Every other
+finding here came from probing behaviour or reading prose; this one came from
+walking the decision table row by row and asking what the code does about each.
+Nothing in the diff looks wrong, because the departure is an absence — `postgres`
+implements upstream's rule by not implementing the contract's, and that leaves no
+trace to notice.
+
+**A-22 is the pattern this practice keeps producing.** Six properties, all
+working, none tested. They were "verified" by having been read. The measurement
+that proved them took one container each.
+
+- **Proposed row (RFC 0001, decision 4):** the `_FILE` rule binds only for
+  secrets the **image** names. For an upstream-owned name, upstream's own
+  handling stands, and the image's README states what that is — for `postgres`,
+  setting both spellings is refused rather than resolved.
+
+### Sabotages run
+
+| Sabotage | Result |
+|---|---|
+| `pgconf` quoting: drop the `''` doubling | `FAIL   ...doubled, not escaped` |
+| Parser: strip `#` inside quotes too | `FAIL   ...hash inside quotes kept` |
+| Parser: require an `=` separator | `FAIL   ...no equals sign needed` |
+| Parser: stop lowering keys | `FAIL   ...key lowered` |
+| Entrypoint: ignore the fragment manifest | `FAIL: image fragment reads as baked` |
+| Entrypoint: stop refusing a control collision | `FAIL: both spellings of the strict control started and kept running` |
+
+The last one also re-exercised wave 4's `--kill-after` work: a refusal that stops
+refusing is caught by the timeout path rather than hanging the run.
+
+### Residue — what I would still distrust
+
+- **A whole-directory mount over `conf.d`** replaces the image's own fragments,
+  including `10-extensions.conf` with the generated preload line. The summary
+  degrades honestly (the manifest becomes unreadable, so everything reads
+  `mounted`) but the *server* loses its preload configuration. Pre-existing, out
+  of this wave's scope, and untested either way.
+- **Decision 8's stderr routing is now asserted for `postgres` only.** `caddy` and
+  `valkey` print to stderr and nothing proves it; the assertion is three lines
+  and belongs in both.
+- **The equivalence check is one-shot.** It compared this build against a digest
+  pulled today, and the result lives in this log rather than in CI. A future
+  change to the renderer will not re-run it.
+- **`refuse` is duplicated** between `caddy`'s and `postgres`'s smoke scripts,
+  ~20 near-identical lines. Left alone deliberately: extracting it couples two
+  per-image tests through a shared file, and the two copies already differ in
+  timeout and container name. Recorded rather than done silently.
+
+## W-3 — `ALTER SYSTEM` is a fourth configuration layer, and no RFC mentions it
+
+- **Touches:** RFC 0001 decision 3 (`LOCKED`), decision 13 (`LOCKED`)
+- **RFC said:** precedence is baked default → mounted config file → environment,
+  "in every image, printed at startup"
+- **Measured:** there is a fourth layer above all three.
+  `ALTER SYSTEM SET work_mem = '7MB'` writes `${PGDATA}/postgresql.auto.conf`,
+  which Postgres reads **after** `postgresql.conf` and everything its
+  `include_dir` pulled in. With `PG_CONF__work_mem=64MB` also set, the effective
+  value after a restart is 7MB — and the summary went on printing
+  `source=env  work_mem = 64MB`, a value the server had stopped using.
+- **Built:** the file is scanned last and attributed `source=sql` with an
+  `(ALTER SYSTEM)` origin; `postgres`'s footer reads
+  `precedence: baked < mounted < env < ALTER SYSTEM`.
+- **Class:** `spec-gap`. The design names three layers because nobody looked for
+  a fourth; the summary defect is the consequence rather than the finding.
+- **Not built, and proposed instead:** `-c allow_alter_system=off` at startup
+  would close the route, and cannot be overridden by any config file because
+  command-line options outrank them. It also removes something this image has
+  always permitted, which is a **policy change to a published image** rather than
+  part of moving it onto the shared helper. Cited from
+  `rootfs/denylist.conf` and the entrypoint so a reader meets the proposal where
+  the switch is discussed.
+- **Proposed row (RFC 0001):** decision 3 enumerates the layers an image must
+  print, and an image whose server can write its own configuration reports that
+  file as a layer of its own. Whether to disable `ALTER SYSTEM` in `postgres` is
+  a separate question for RFC 0004's image policy.
+
+## Review findings — PR #32, 2026-08-17
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| R-18 | `smoke.sh` | Claimed the new stderr assertion could not work because `engine logs` returns a combined stream. It does not: container stdout goes to the command's stdout and stderr to its stderr. Measured `0` summary lines on stdout and all 43 on stderr, and the assertion passes in CI. | — | **Refuted** |
+| R-19 | `rootfs/denylist.conf` | The comment on `shared_preload_libraries` read as though *the denylist file* were generated from `PG_EXTENSIONS`. The **setting** is, into `conf.d/10-extensions.conf`; the file ships as written for every variant. | — | Fixed |
+| R-20 | `README.md` | Said every non-control `PG_*` variable warns, while `PG_MAJOR` and `PG_VERSION` are deliberately silent. The exclusion and its reason are now stated. | — | Fixed |
+| R-21 | `rootfs/entrypoint.sh` | **`mktemp` with no template writes to `/tmp`**, so `mv` into `conf.d` is a rename only while they share a filesystem — measured `--tmpfs /tmp` giving device ids 1048775 vs 1048655, where `mv` becomes copy-then-unlink and an interruption leaves the truncated `99-overrides.conf` the comment claimed the pattern prevented. Template moved into `CONF_D`, dot-prefixed so a leftover is invisible to both `include_dir` and the attribution loop. | — | Fixed |
+| R-22 | `rfcs/0001`, `rfcs/INDEX.md` | Marked RFC 0001 complete while decision 4 is known to conflict with decision 1 (A-21). The status now reads "Complete (one decision under review)" and names the conflict; the index carries the same qualification. Narrowing decision 4 is still not done here — it is a `LOCKED` row. | — | Fixed |
+| R-23 | `rootfs/entrypoint.sh`, `build-extensions.sh` | **A bind mount can replace an image fragment at its own path**, and matching on the basename reported the operator's own value back as `source=baked`. Decision 13 (`LOCKED`) exists to answer "which layer won"; this answered it wrongly. The build now records a sha256 per fragment and content that differs reads as `mounted`. | `drift` | Fixed |
+| R-24 | `rootfs/entrypoint.sh` | The `ALTER SYSTEM` layer, reported and proposed — see W-3. | `spec-gap` | Fixed (report); policy proposed |
+
+**Drift count for the wave is now 2** — D-036 and R-23. Both are the same shape:
+a `LOCKED` row describing what the summary must tell an operator, and an
+implementation telling them something else. Neither was reachable by reading the
+code; both needed a container and a mount.
+
+**R-23 and R-24 arrived with no inline thread.** They were "outside diff range"
+comments in a review body, which is the surface a review loop drops silently —
+they were answered in a reply naming the commit, and are filed here because a
+finding whose only record is a PR comment is a finding nobody will count.
+
+**Two process facts worth keeping**, both about trusting a green:
+
+- **CodeRabbit's check reported `success` twice while it had not reviewed.** The
+  first time it was rate-limited (`Review limit reached … we couldn't start this
+  review`) and the check was green anyway; the review only happened after the
+  window reset and an explicit request. A reviewer's check status is not evidence
+  that a review occurred.
+- **The `--since` timestamp for round 2 was computed with `sed 's/+.*/Z/'`**,
+  which strips a `+03:00` offset instead of converting it — three hours into the
+  future, so the sweep returned nothing and looked like convergence. The same
+  expression was used on PR #31, which is already merged: its "round 2 empty"
+  rests on zero unresolved threads and a possibly-false-green check, not on a
+  correct sweep.

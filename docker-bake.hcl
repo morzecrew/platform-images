@@ -167,6 +167,7 @@ variable "POSTGRES_EXTENSIONS" {
 target "postgres" {
   inherits   = ["_attested"]
   context    = "./images/postgres"
+  contexts   = { shared = "./shared" }
   dockerfile = "Dockerfile"
   tags       = tag("postgres", POSTGRES_VERSION)
   labels = merge(label("postgres", POSTGRES_VERSION), {

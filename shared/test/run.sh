@@ -291,9 +291,8 @@ out=$(run "valkeyconf quotes an empty value" 0 \
 expect_contains "  ...quoted empty" "${out}" 'loglevel ""'
 
 # Declared by RFC 0001 §5.2, deliberately unimplemented until they have a
-# consumer. They must refuse loudly rather than emit nothing.
-run "pgconf refuses, it has no consumer yet" 1 \
-	'printf "a\000b\000" | envconf_render pgconf' >/dev/null
+# consumer. They must refuse loudly rather than emit nothing. `pgconf` moved to
+# the implemented side with RFC 0001 P4 and is covered below.
 run "keyvalue refuses, it has no consumer yet" 1 \
 	'printf "a\000b\000" | envconf_render keyvalue' >/dev/null
 run "an unknown format refuses" 1 \
@@ -441,6 +440,85 @@ esac
 out=$(run "an empty header override keeps the default" 0 \
 	'printf "" | envconf_summary VALKEY "" ""')
 expect_contains "  ...default header" "${out}" "effective non-default settings"
+
+# --- the pgconf renderer ---------------------------------------------------
+
+# Every value goes through printf's %s rather than into the format string:
+# `printf "k\0200\0"` reads `\020` as an octal escape and silently emits one
+# byte where two fields were meant.
+out=$(run "pgconf renders parameter = 'value'" 0 \
+	'printf "work_mem\0%s\0" "32MB" | envconf_render pgconf')
+expect_contains "  ...quoted form" "${out}" "work_mem = '32MB'"
+
+# Postgres accepts a quoted literal for every parameter type, and the shipped
+# image already published this form -- the retrofit must not change it.
+out=$(run "a numeric value is quoted too" 0 \
+	'printf "max_connections\0%s\0" "200" | envconf_render pgconf')
+expect_contains "  ...still quoted" "${out}" "max_connections = '200'"
+
+out=$(run "a single quote is doubled" 0 \
+	'printf "log_line_prefix\0%s\0" "it'"'"'s" | envconf_render pgconf')
+expect_contains "  ...doubled, not escaped" "${out}" "log_line_prefix = 'it''s'"
+
+# A backslash is literal in postgresql.conf; escaping it would change the value.
+out=$(run "a backslash is left alone" 0 \
+	'printf "log_line_prefix\0%s\0" "a\\b" | envconf_render pgconf')
+expect_contains "  ...one backslash" "${out}" 'a\b'
+
+out=$(run "a tab survives the NUL wire format" 0 \
+	'printf "search_path\0%s\0" "$(printf "a\tb")" | envconf_render pgconf')
+expect_contains "  ...tab intact" "${out}" "$(printf "search_path = 'a\tb'")"
+
+out=$(run "keyvalue still refuses" 1 'printf "" | envconf_render keyvalue')
+expect_contains "  ...names the reason" "${out}" "ships with its first consumer"
+
+# --- reading a postgresql.conf layer ---------------------------------------
+
+cat >"${TMP}/pg.conf" <<'PGCONF'
+# a comment
+   # an indented comment
+
+max_connections = 100
+work_mem 32MB
+shared_buffers='256MB'
+lc_messages = 'en_US.utf8'              # locale for system error messages
+log_line_prefix = '%m [%p] #not-a-comment'
+weird_quotes = 'it''s fine'
+Mixed_Case = on
+cron.log_run = on
+include_dir = '/etc/postgresql/conf.d'
+PGCONF
+
+out=$(run "scan emits quads for every assignment" 0 \
+	'envconf_scan_pgconf "'"${TMP}"'/pg.conf" baked /etc/postgresql.conf | tr "\0" "\n"')
+expect_contains "  ...plain key" "${out}" "max_connections"
+# `=` is optional in Postgres's own parser.
+expect_contains "  ...no equals sign needed" "${out}" "32MB"
+expect_contains "  ...quoted value unquoted" "${out}" "256MB"
+# A `#` inside quotes is data. The shipped file has exactly this case.
+expect_contains "  ...hash inside quotes kept" "${out}" "%m [%p] #not-a-comment"
+# ...and a trailing comment outside quotes is not.
+expect_contains "  ...trailing comment dropped" "${out}" "en_US.utf8"
+case "${out}" in
+*"locale for system"*) bad "  ...comment text must not appear" "${out}" ;;
+*) ok "  ...comment text does not appear" ;;
+esac
+expect_contains "  ...doubled quote collapsed" "${out}" "it's fine"
+# Parameter names are case-insensitive to Postgres.
+expect_contains "  ...key lowered" "${out}" "mixed_case"
+expect_contains "  ...dotted GUC read" "${out}" "cron.log_run"
+expect_contains "  ...source attributed" "${out}" "baked"
+
+out=$(run "scan of a missing file is empty, not fatal" 0 \
+	'envconf_scan_pgconf "'"${TMP}"'/nope.conf" baked x | wc -c')
+expect_contains "  ...zero bytes" "${out}" "0"
+
+# The summary's own dedupe decides which layer won, so the scan must report
+# both occurrences rather than picking one.
+printf 'work_mem = 4MB\nwork_mem = 8MB\n' >"${TMP}/dup.conf"
+out=$(run "a key set twice in one file yields two quads" 0 \
+	'envconf_scan_pgconf "'"${TMP}"'/dup.conf" baked x | tr "\0" "\n" | grep -c work_mem')
+expect_contains "  ...two rows" "${out}" "2"
 
 # --- newline refusal outside envconf_collect -------------------------------
 
