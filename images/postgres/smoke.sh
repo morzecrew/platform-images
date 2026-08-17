@@ -362,4 +362,68 @@ echo "ok: baked < mounted < env, each attributed, one row for the key"
 expect_not_in "mounted fragment does not read as baked" "${logs}" "source=baked        temp_buffers"
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
+# --- a mount that replaces an image fragment at its own path -----------------
+
+# The build records a digest per shipped fragment, not just a name: mounting over
+# `12-cron.conf` puts the operator's content at a path the image also ships, and
+# matching on the name alone reported it back to them as `source=baked`.
+printf 'cron.log_run = off\n' >"${WORKDIR}/12-cron.conf"
+chmod 0644 "${WORKDIR}/12-cron.conf"
+"${ENGINE}" run -d --name "${CTR}" -e POSTGRES_PASSWORD=smoke \
+	-v "${WORKDIR}/12-cron.conf:/etc/postgresql/conf.d/12-cron.conf:ro,Z" "${IMAGE}" >/dev/null
+for _ in $(seq 1 60); do
+	"${ENGINE}" exec "${CTR}" pg_isready -U postgres >/dev/null 2>&1 && break
+	sleep 2
+done
+logs="$(logs_of)"
+expect_in "a replaced fragment reads as mounted" "${logs}" "source=mounted      cron.log_run = off"
+expect_not_in "a replaced fragment does not read as baked" "${logs}" "source=baked        cron.log_run"
+echo "ok: replacing a shipped fragment is attributed to the operator"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# --- ALTER SYSTEM is a fourth layer, and it outranks the other three ---------
+
+# postgresql.auto.conf is read after postgresql.conf and everything its
+# include_dir pulled in, so a value written by SQL beats the env channel. The
+# summary reported `source=env` for a value the server had stopped using.
+"${ENGINE}" run -d --name "${CTR}" -e POSTGRES_PASSWORD=smoke \
+	-e PG_CONF__work_mem=64MB "${IMAGE}" >/dev/null
+for _ in $(seq 1 60); do
+	"${ENGINE}" exec "${CTR}" pg_isready -U postgres >/dev/null 2>&1 && break
+	sleep 2
+done
+got=$("${ENGINE}" exec "${CTR}" psql -U postgres -tAc "SHOW work_mem")
+[ "${got}" = "64MB" ] || { echo "FAIL: env value not applied, work_mem=${got}"; exit 1; }
+"${ENGINE}" exec "${CTR}" psql -U postgres -qc "ALTER SYSTEM SET work_mem='7MB'" >/dev/null
+
+# Restarted rather than reloaded: the claim under test is about the order the
+# files are read in at startup, which is when the summary is printed.
+"${ENGINE}" restart "${CTR}" >/dev/null
+for _ in $(seq 1 60); do
+	"${ENGINE}" exec "${CTR}" pg_isready -U postgres >/dev/null 2>&1 && break
+	sleep 2
+done
+got=$("${ENGINE}" exec "${CTR}" psql -U postgres -tAc "SHOW work_mem")
+[ "${got}" = "7MB" ] || { echo "FAIL: ALTER SYSTEM should outrank env, work_mem=${got}"; exit 1; }
+# The container has been restarted, so its log holds two summaries. The first
+# one said `source=env  work_mem = 64MB` and was right at the time: no
+# postgresql.auto.conf existed yet. Only the most recent block describes the
+# running server, so the assertions below read that block rather than the log.
+last_summary() {
+	logs_of | awk '
+		/\[envconf\] postgres: effective non-default settings/ { n = 0; delete a }
+		{ a[++n] = $0 }
+		END { for (i = 1; i <= n; i++) print a[i] }'
+}
+
+logs="$(last_summary)"
+expect_in "the SQL layer is reported" "${logs}" "source=sql          work_mem = 7MB"
+expect_in "the SQL layer names ALTER SYSTEM" "${logs}" "(ALTER SYSTEM)"
+expect_in "the footer names the fourth layer" "${logs}" "precedence: baked < mounted < env < ALTER SYSTEM"
+# The whole point: the current summary must not still be claiming the env value
+# won, since the server has stopped using it.
+expect_not_in "the beaten env value is not reported as effective" "${logs}" "source=env          work_mem = 64MB"
+echo "ok: ALTER SYSTEM is reported as the layer that won"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
 echo "PASS: postgres"

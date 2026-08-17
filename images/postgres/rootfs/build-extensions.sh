@@ -149,10 +149,14 @@ chmod 0644 "${CONF_D}"/*.conf
 #
 # A filename convention would be cheaper and wrong the moment an operator
 # mounts a file whose name looks baked.
+#
+# The digest, not just the name: a bind mount can replace an image fragment at
+# its own path, and a name-only list would then report the operator's content as
+# the image's choice.
 (
 	cd "${CONF_D}"
 	for f in *.conf; do
-		[[ -f "${f}" ]] && echo "${f}"
+		[[ -f "${f}" ]] && sha256sum "${f}"
 	done
 ) >"${CONF_D}/.baked-fragments"
 chown postgres:postgres "${CONF_D}/.baked-fragments"

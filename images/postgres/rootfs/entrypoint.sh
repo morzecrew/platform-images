@@ -123,6 +123,19 @@ chmod 0644 "${OVERRIDES_FILE}"
 # configuration from enumerable layers, and this is the image that motivated the
 # row. `caddy` prints env-or-default because it cannot do better; here every
 # value has a file behind it.
+# A fragment counts as the image's own only if its digest is the one the build
+# recorded. An operator who mounts content identical to the baked file is
+# indistinguishable from one who mounted nothing, and that is the right answer:
+# the value is the same either way.
+is_baked_fragment() {
+	local path="$1" name="$2" recorded actual
+	[ -r "${BAKED_LIST}" ] || return 1
+	recorded=$(awk -v n="${name}" '$2 == n { print $1 }' "${BAKED_LIST}")
+	[ -n "${recorded}" ] || return 1
+	actual=$(sha256sum "${path}" | awk '{ print $1 }')
+	[ "${recorded}" = "${actual}" ]
+}
+
 envconf_scan_pgconf "${BAKED_CONF}" baked "${BAKED_CONF}" >>"${SRCMAP}"
 
 for f in "${CONF_D}"/*.conf; do
@@ -131,9 +144,12 @@ for f in "${CONF_D}"/*.conf; do
 
 	[ "${f}" = "${OVERRIDES_FILE}" ] && continue
 
-	# An image-shipped fragment is one this build recorded. Anything else in
-	# the include directory arrived from outside the image.
-	if [ -r "${BAKED_LIST}" ] && grep -qxF "${base}" "${BAKED_LIST}"; then
+	# An image-shipped fragment is one this build recorded, **with the content
+	# it recorded**. A bind mount can replace a fragment at its own path --
+	# `-v ./mine.conf:/etc/postgresql/conf.d/12-cron.conf` -- and matching on
+	# the name alone reported the operator's own value back to them as
+	# `source=baked`, which is the one thing decision 13 exists to prevent.
+	if is_baked_fragment "${f}" "${base}"; then
 		envconf_scan_pgconf "${f}" baked "${f}" >>"${SRCMAP}"
 	else
 		envconf_scan_pgconf "${f}" mounted "${f}" >>"${SRCMAP}"
@@ -163,7 +179,26 @@ tr '\0' '\n' <"${COLLECTED}" |
 # was used, which is where the comparison is useful.
 envconf_warn_unknown PG "PG_MAJOR PG_VERSION PG_CONF_STRICT_MODE PG_CONF_ALLOWLIST_PATH"
 
-envconf_summary postgres "${SRCMAP}"
+# A fourth layer, and it outranks all three above.
+#
+# `ALTER SYSTEM` writes ${PGDATA}/postgresql.auto.conf, which Postgres reads
+# **after** postgresql.conf and everything its include_dir pulled in. Measured:
+# with PG_CONF__work_mem=64MB set, `ALTER SYSTEM SET work_mem='7MB'` makes the
+# effective value 7MB, while the summary went on reporting `source=env  64MB`.
+# A summary that states a value the server is not using is worse than no
+# summary, so this file is scanned last and attributed to the SQL that wrote it.
+#
+# Reported rather than prevented: `allow_alter_system=off` would close the
+# bypass and would also stop something this image has always allowed, which is a
+# policy change rather than a retrofit (EXECUTION-LOG W-3).
+AUTO_CONF="${PGDATA:-}/postgresql.auto.conf"
+if [ -n "${PGDATA:-}" ]; then
+	envconf_scan_pgconf "${AUTO_CONF}" sql "${AUTO_CONF} (ALTER SYSTEM)" >>"${SRCMAP}"
+fi
+
+envconf_summary postgres "${SRCMAP}" \
+	"effective non-default settings" \
+	"precedence: baked < mounted < env < ALTER SYSTEM"
 
 # The trap does not fire across `exec`.
 cleanup
