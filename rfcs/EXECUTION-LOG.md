@@ -1912,8 +1912,14 @@ Branch `docs/wave-7-rfc-close-out`. RFC 0002 §6's verification against GHCR,
 RFC 0006's close-out, and RFC 0009's evidence and open decisions. No image
 changed; the only executable change is one `smoke.sh` section.
 
-**Drift count: 0** — this wave introduced none. D-044 is `drift` against wave 3,
-found here, and is not counted in this wave's number.
+**Drift count: 3** — A-31, A-32 and A-33, all introduced by this wave and all
+caught by its own audit. D-044 is `drift` against wave 3, found here, and is not
+counted in this wave's number.
+
+This number was written as **0** when the group was drafted, before the audit
+ran, and is corrected here rather than in place — a drift count written before
+the audit is a prediction, and this one was wrong. The three are one failure
+repeated: a correction that stopped short of the places it implicated.
 
 The wave exists because three RFCs were finished, or wrong, in ways nobody had
 checked. Two of them turned out to be finished.
