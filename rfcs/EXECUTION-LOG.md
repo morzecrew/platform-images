@@ -1829,3 +1829,52 @@ exactly.
 
 Wave 5's rows 23 and 24 (RFC 0001) were ratified by merging PR #32. The two
 `LOCKED`-row questions it raised are still open and are the author's.
+
+## Self-audit findings — wave 6, 2026-08-17
+
+Scope: the whole branch, 2 commits, 11 files, +458/−44 — the manifest row, the
+bake targets, both workflows, the new build-mechanism harness, and the docs.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-27 | `test-extensions.sh` | `cleanup()` reads `${TEST_TAG}`, and `trap cleanup EXIT` is installed **before** that variable is assigned. A failure in between would make cleanup itself die on an unbound variable under `set -u`, taking the `rm -rf "${WORK}"` after it. An advisory cleanup outranking the outcome it trails. | — | Fixed (`${TEST_TAG:-}`) |
+| A-28 | `bake.yaml`, `publish.yaml` | The context→script resolution had only ever run on the happy path: all eight targets resolve, so nothing exercised the refusal. Tested against a doctored plan whose target names a nonexistent context — it refuses by name and the loop exits 1. | — | Verified |
+| A-29 | RFC 0004 §8's empty set | `PG_EXTENSIONS=""` is where wave 1's A-1 defect lived, and nothing had exercised it since that fix. Measured: builds, starts, preload is `pg_stat_statements` alone, label is empty, and `conf.d` holds only the unconditional fragments. **Deliberately not automated** — it is a full build for a case with no shipped tag, and the harness already pays for one. Recorded so the omission is visible rather than assumed. | — | Verified, not automated |
+| A-30 | decisions 3 and 6 | Both verified by measurement rather than read: every variant carries `POSTGRES_IMAGE_TAG=18.6`, so `inherits` merged args per key (D-006 warned this fails as a build against the wrong major, not as an error); `PACKAGES` still lists `postgres` once, so variants cost no new GHCR package. | — | Conformant |
+
+**The wave's real finding is D-040 and it was found by the harness, not by this
+pass.** Writing the tests §6 had asked for since wave 1 exposed a defect this
+wave had just introduced, within minutes of the harness existing. The audit's own
+findings here are smaller: a cleanup path that could outrank its outcome, and a
+refusal branch that had never fired.
+
+### Verified
+
+| Check | Result |
+|---|---|
+| Helper suite | 139 passed / 0 failed (bash), 136 / 0 (busybox ash) |
+| `postgres`, `:18.6-pgvector`, `:18.6-cron` smoke | all exit 0; labels `cron pgroonga`, `cron pgroonga pgvector`, `cron` |
+| Extension mechanism harness | 6 assertions, PASS |
+| Tag shapes with `BUILD_STAMP` set | `18.6-pgvector` and `18.6-pgvector-<stamp>`; the mutable tag is a strict prefix of the immutable one for every variant |
+| Label set per image | 9 — the eight OCI labels plus the extensions label; the Dockerfile `LABEL` merges with bake's rather than displacing them |
+
+### Residue — what I would still distrust
+
+- **pgvector is unpinned, like every other extension package (decision 8), and it
+  is the first extension where that matters differently.** A weekly `--no-cache`
+  rebuild can move pgvector across a minor release, and vector index formats are
+  not guaranteed stable across those; a stateful database may need a `REINDEX`
+  that nothing here would announce. Decision 8 accepted unpinned packages when
+  the set was cron and pgroonga, where the equivalent risk is much lower. **This
+  is the author's call** and is carried, not fixed.
+- **CI now runs three extra builds** for the harness — two are `type=cacheonly`
+  and cheap, the third is a full build. If the job gets slow, the full one is what
+  to gate on paths.
+- **`test-extensions.sh` does not follow `smoke.sh`'s assertion helpers**
+  (`expect_in`/`expect_not_in`); it uses `fail` plus `case`. Both are bash under
+  `set -euo pipefail`, and the harness is testing builds rather than a running
+  image, so the shapes differ for a reason — but a reader moving between the two
+  files will notice.
+- **No variant omits `cron`,** so the §6 trap test depends entirely on the
+  harness's throwaway build. If that step is ever skipped, the test §6 calls
+  unskippable is skipped with it.

@@ -20,7 +20,10 @@ CTR="test-ext-$$"
 
 cleanup() {
 	"${ENGINE}" rm -f "${CTR}" >/dev/null 2>&1 || true
-	"${ENGINE}" rmi -f "${TEST_TAG}" >/dev/null 2>&1 || true
+	# ${TEST_TAG:-}: the trap is installed before the assignment, so a failure
+	# in between would otherwise make cleanup itself die on an unbound variable
+	# under `set -u` -- and take the WORK removal below with it.
+	"${ENGINE}" rmi -f "${TEST_TAG:-}" >/dev/null 2>&1 || true
 	rm -rf "${WORK}"
 }
 trap cleanup EXIT
