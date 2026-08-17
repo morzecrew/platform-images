@@ -942,3 +942,378 @@ Nothing from those waves has been accepted into an RFC except row 14 (D-001).
 **Nine proposed rows are now outstanding across three waves**, which is the
 failure mode `flag-dont-flip` calls "the log with no proposals accepted" and is
 worth a deliberate pass rather than another entry.
+
+---
+
+# Wave 4 · The caddy summary, and the reconciliation backlog
+
+Branch `feat/wave-4-caddy-summary`. RFC 0001 P3, RFC 0002 §6's first-publish
+verification, and a pass over every proposed row from waves 1–3.
+
+**Drift count: 0** — no entry below is a case where a decision row covered it
+and the code did something else. Two of the entries record a conflict *inside*
+RFC 0001 (D-022) and one records an implementation the RFC could not have
+anticipated (D-024); the rest are gaps. The count is written after the
+self-audit and carries its findings, so it is the final figure for this wave
+rather than the pre-audit one.
+
+**RFC 0001 P4 is deliberately not here.** §12 and §9 both say the `postgres`
+retrofit lands as its own PR — it is the only step in this RFC that can regress
+a running deployment, and folding it in would have made this wave the one that
+does. The reconciliation pass is here instead, because eleven unratified rows
+across three waves is the failure mode the practice is named against.
+
+## D-022 — `caddy`'s curated names become `CADDY_*`, with the old names kept
+
+- **Touches:** RFC 0001 decision 1 (`LOCKED`), §4 non-goals, §5.4
+- **RFC said:** two things that cannot both hold. Decision 1: curated names are
+  `<PREFIX>_<NAME>`, and `<PREFIX>` for this image is `CADDY`. §4: renaming
+  existing variables is a **non-goal**, naming `CONFIG_DIR` and `EDGE_ADDRESS`
+  specifically, because "the contract is written to fit them".
+- **Built:** `CADDY_<NAME>` as the canonical spelling, with all nine unprefixed
+  names kept as aliases that warn, are honoured, and are attributed in the
+  summary as `source=env`.
+- **Because:** the conflict is in the document, so the executor does not get to
+  pick — it went to the author at the plan gate, who chose decision 1's rule
+  with the published surface preserved rather than either half alone.
+- **Class:** `spec-gap`. Both statements were written before any code and
+  neither cites the other; nothing about building it revealed the conflict,
+  only reading the two sections next to each other did.
+- **Consequence:** two spellings to maintain, and a deprecation window that
+  nothing yet schedules. The alias table is nine rows in the entrypoint, and
+  dropping it later is a separate decision with its own announcement.
+- **Proposed row (RFC 0001):** `LOCKED` — written as decision 20.
+
+## D-023 — The summary's header and footer belong to the image
+
+- **Touches:** RFC 0001 §5.2, which fixes both strings in its example
+- **RFC said:** `[envconf] postgres: effective non-default settings`, closing
+  with `precedence: baked < mounted < env`
+- **Built:** `envconf_summary <prefix> [infile] [header] [footer]`, and `caddy`
+  passes `effective configuration` over `precedence: image default <
+  environment`
+- **Because:** `caddy` prints *every* variable it reads — decision 13 says it
+  cannot tell a default from a supplied value, so "non-default" is a claim it
+  is not entitled to make — and it has neither a baked config file nor a
+  mounted layer, so the precedence line names layers that do not exist. Both
+  defaults are claims about `postgres`, and the helper had been asserting them
+  on behalf of every image.
+- **Class:** `spec-gap`. §5.2's example and §5.4's description of `caddy` are
+  four hundred words apart in the same document and contradict each other.
+- **Consequence:** an image that overrides neither string still inherits
+  `postgres`-shaped claims, which is the right default and a live trap for the
+  next image that is not `postgres`-shaped.
+- **Proposed row (RFC 0001):** `ASSUMED` — written as decision 18, with the
+  function-list change folded into decision 17.
+
+## D-024 — Three source labels, and the one that was left on the table
+
+- **Touches:** RFC 0001 decision 13 (`LOCKED`)
+- **Built:** `source=env` when a legacy alias supplied the value, `source=baked`
+  when the variable was absent or empty and the image default applied, and
+  `source=env-or-default` for everything else
+- **Because:** decision 13's reasoning is that `environ` cannot distinguish a
+  Dockerfile default from a supplied value. That is true of the canonical
+  names, which the Dockerfile sets — and false of the legacy names, which it
+  deliberately does not, so a value under one is provably the operator's.
+- **Class:** `discovery`. The alias mechanism created a channel with no baked
+  default, and that channel did not exist when decision 13 was written.
+- **Deliberately not applied:** the same reasoning would license `source=env`
+  for a *canonical* value that differs from the entrypoint's copy of the baked
+  default — the image does know that. It is not implemented, because decision
+  13 is `LOCKED` and says those lines print `env-or-default`. The gain is one
+  more precise word on lines an operator can already read; the cost is an
+  executor overruling a `LOCKED` row on their own judgement, which is the exact
+  trade the grade exists to refuse.
+- **Consequence:** the summary is more informative for operators still on the
+  old spelling than for those who migrated, which is backwards as an incentive
+  and correct as a statement of what is known.
+
+## D-025 — Two spellings of one name collide, with one case that cannot
+
+- **Touches:** RFC 0001 decision 11 (`LOCKED`), which covers curated-versus-passthrough
+- **Built:** setting both `EDGE_ADDRESS` and `CADDY_EDGE_ADDRESS` to different
+  values aborts naming both and their values
+- **Because:** decision 11's principle is that an operator who set the same
+  thing twice must not silently get one of them. Nothing about that principle
+  is specific to the passthrough channel.
+- **Class:** `spec-gap`.
+- **Consequence:** one case is undetectable and is documented rather than
+  hidden. A canonical value that happens to equal the image default is
+  indistinguishable from unset (decision 13 again), so `CADDY_EDGE_ADDRESS=:8080`
+  plus `EDGE_ADDRESS=:9000` starts on `:9000`. The warning names the value it
+  started with, so the operator can see the choice that was made even though
+  the code could not refuse it.
+- **Proposed row (RFC 0001):** `ASSUMED` — written as decision 21.
+
+## D-026 — The defaults are duplicated three times, on purpose, and pinned
+
+- **Touches:** nothing in any RFC — an implementation shape
+- **Built:** the nine defaults live in the Dockerfile's `ENV`, in the
+  entrypoint's alias table, and in the README table. `smoke.sh` extracts all
+  three from the built image and the repo and asserts they agree.
+- **Because:** the entrypoint needs its own copy to answer "did you set this or
+  did we", which is the whole source column; the `ENV` copy is what a bypassed
+  entrypoint and a derived image see; the README is what an operator reads.
+  Removing any one of the three costs something real.
+- **Class:** `discovery`.
+- **Consequence:** three copies with a test between them, rather than one copy
+  and a documentation lie. Nothing at runtime can catch them drifting — an
+  operator-supplied value and a baked one are the same string — so the check
+  has to live in the smoke test or nowhere.
+
+## D-027 — `caddy` gets no passthrough channel, and says so
+
+- **Touches:** RFC 0001 §10's first unresolved question
+- **RFC said:** open, "leaning: no channel", to be settled before RFC 0005
+  copies the pattern
+- **Built:** no channel, and a `CADDY_CONF__*` variable is **warned about**
+  rather than ignored
+- **Because:** the leaning is right — Caddy's config is not key-value, so the
+  mapping would be a fiction — and the warning exists because the helper skips
+  `<PREFIX>_CONF__*` for every other image, where that prefix *is* the channel.
+  Without it, an operator copying the `postgres` pattern gets exactly the
+  silence decision 9 exists to prevent.
+- **Class:** `discovery` for the warning; the channel question itself was
+  delegated and is now answered.
+- **Proposed row (RFC 0001):** `ASSUMED` — written as decision 22, and §10's
+  question struck through with a pointer to it.
+
+## D-028 — RFC 0002 §6's first publish, verified against GHCR
+
+- **Touches:** RFC 0002 §6 — carried unfinished since wave 1
+- **Verified** against the two real publishes that ran on merge (runs
+  31964963480 and 31969227420), not against the throwaway local registry wave 2
+  used:
+  - **What was smoked is what is published.** The digests the gate pulled and
+    smoke-tested are the digests the mutable tags resolve to today, for all
+    four images: `caddy@f5e63f05`, `flyway@f6113802`, `postgres@1524c8a9`,
+    `valkey@a21e6e31`.
+  - **Attestations survived the promotion.** `imagetools inspect` returns SLSA
+    provenance with the build arguments and an SPDX SBOM listing both Alpine
+    packages and Go modules.
+  - **Eight labels populated**, with `.revision` = `c643ad2`, the merge commit
+    that produced the image.
+  - **The dated tag and the mutable tag resolve to one digest**:
+    `18.6-20260816-31969227420.1` and `18.6` are the same version.
+  - **A local `just bake postgres` produces one tag and no dated alias.**
+- **Not verified:** divergence of the two tags after the *next* publish, which
+  needs a second run and is now mechanical.
+- **Class:** not a departure — the discharge of a test the RFC asked for.
+
+## D-029 — The cleanup job's dry run is not zero, and one deletion matters
+
+- **Touches:** RFC 0002 §6, RFC 0004 §6 and D-006's addendum
+- **RFC said:** "a `dry_run: true` cleanup run reports **zero deletions**
+  against them"
+- **Measured** (run 31971410999, dry run, nothing deleted): **69 versions would
+  be deleted**, none of them tagged, none of them belonging to any image
+  published under the tag policy. Every current digest and every current
+  attestation manifest is untouched, which is the property §6 was reaching for;
+  the deletions are the pre-tag-policy publishes, whose digests went untagged
+  the moment the mutable tag moved. `valkey`, published only once and only
+  since the policy, reports "nothing to delete".
+- **Because:** the tag policy landed on 2026-08-16. Everything published before
+  it has exactly one tag, and that tag has since moved.
+- **Class:** `spec-gap` — §6's expectation is written as "zero deletions" when
+  the property that matters is "zero deletions *of what the gate published*".
+- **The finding that matters:** one of those 69 is
+  `postgres@sha256:9934cb32…`, the digest **RFC 0004 D-006's addendum names as
+  the immutable pre-refactor reference** for the equivalence check. It is
+  untagged, so the next real cleanup run deletes it — the cron is 04:00 Monday,
+  which is roughly seven hours after this was measured. A digest survives a
+  repointed tag; it does not survive this repo's own garbage collection, and
+  the addendum treated the first property as if it implied the second.
+  RFC 0004's proposed row 15 is written to say so rather than to repeat the
+  claim. Keeping the reference means giving it a tag, which is a registry write
+  and the author's to make.
+- **Proposed row (RFC 0002):** none. §6 is a test list, not a decision table;
+  the correction belongs in §6's wording, which is the author's to amend.
+
+## Self-audit findings — wave 4, 2026-08-16
+
+Found by the adversarial pass over the finished branch, after the entries above
+were written.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-12 | `images/caddy/smoke.sh`, `images/valkey/smoke.sh` | **A refusal that stops refusing hangs the job instead of failing it.** Both scripts assert a refusal with `run --rm … "${IMAGE}"` and check for a non-zero exit — but an image that no longer refuses *starts a server*, so the command never returns. Measured: `timeout` reports 124 against a non-refusing image, and unbounded it runs until CI kills the job, which reads as an infrastructure problem rather than as the data-loss regression it is. Both now bounded, with 124 reported as its own failure. The valkey helper also passed `--name` to `rm -f` for a container it had never named. | — | Fixed |
+| A-13 | `entrypoint.sh` | The source map survived into the running container. `trap … EXIT` does not fire across `exec`, so `/tmp/tmp.XXXX` — a file describing the configuration — sat there for the life of the process. Removed after the summary consumes it. | — | Fixed |
+| A-14 | `entrypoint.sh` | `env_present()` was written, never called. Dead code in the file that decides what an operator's variables mean. Removed. | — | Fixed |
+| A-15 | `images/caddy/README.md` | "everything beginning with `CADDY_` is checked against the table above" — false. `CADDY_CONF__*`, `CADDY_CONF_STRICT`, `CADDY_CONF_ALLOWLIST`, any `*_FILE` and upstream's `CADDY_VERSION` are all exempt by decision 9's ignore list. The sentence was selling the migration on a guarantee one paragraph wider than the one that exists. | — | Fixed |
+
+**None of the four is `drift`,** and saying so is worth more than the count:
+no decision row governs test bounding, temp-file lifetime, dead code or that
+sentence. The wave's drift count stays 0 — not because the audit found
+nothing, but because what it found is not the thing that number measures.
+
+**A-12 is the one that mattered**, and it was found by accident: an experiment
+meant to sabotage the *image* revealed the *test* could not fail. It is also
+the second time this wave that a check turned out to be shaped so a regression
+would show up as something other than a failing assertion — the first was the
+reason `smoke.sh` compares three copies of the defaults rather than trusting
+them. A test that hangs is worse than a test that fails, because the hang gets
+attributed to the runner.
+
+Verification actually performed, rather than claimed:
+
+- Helper suite: **102 passed / 0 failed** under `bash`, **99 / 0** under busybox
+  `ash` in an Alpine container (the shell the images actually run). The gap is
+  two capability skips plus one case that cannot run as root.
+- `images/caddy/smoke.sh`: full pass against the built image, including the
+  three-way defaults check and the summary ordering assertion.
+- `images/valkey/smoke.sh`: full pass, re-run because A-12 changed its helper.
+- Sabotage, each verified red and reverted: the header override removed from
+  the helper (2 assertions fail); a README default changed (1); an entrypoint
+  default changed (1); the deprecation warning removed (1); a non-refusing
+  image fed to the collision case (reported as "started and kept running",
+  which is the branch A-12 added).
+- Runtime states: root and `--user caddy` both start and serve; an emptied
+  variable; a `/docker-entrypoint.d` hook is still sourced before resolution.
+
+## Rules distilled
+
+- A refusal test must be **bounded**. The failure mode of a lost refusal is not
+  a non-zero exit, it is a process that keeps running, and an unbounded
+  assertion turns that into a hung job attributed to the runner (A-12).
+- When two sections of one document disagree, the executor's job is to notice,
+  not to choose. D-022's conflict was one `LOCKED` row against one non-goal,
+  four hundred words apart, and either half read alone looked settled.
+- A default duplicated across a Dockerfile, an entrypoint and a README is fine
+  if a test compares all three, and a lie waiting to happen otherwise. Ask
+  which copies exist before deciding whether duplication is the problem (D-026).
+- `trap … EXIT` does not fire across `exec`. Any entrypoint that hands off to a
+  server leaks whatever it meant to clean up (A-13).
+- A digest is immutable, not durable. It survives a repointed tag and not a
+  garbage collector, and this repo runs one weekly (D-029).
+- Precision you are entitled to is not always precision you may print. A
+  `LOCKED` row that mandates a weaker label outranks an executor's correct
+  observation that a stronger one is available (D-024).
+
+## Carried into the next unit
+
+- **RFC 0001 P4** (`postgres` retrofit) is the last phase of RFC 0001 and the
+  only one that can regress a running deployment. It needs the `pgconf`
+  renderer (D-019), the denylist moved to a file (§5.4), and §6's tests green
+  before it lands.
+- **`postgres@sha256:9934cb32…` is deleted by the next cleanup run** unless it
+  is tagged. That digest is RFC 0004 §6's pre-refactor reference (D-029). A
+  registry write is the author's call; nothing in this wave made one.
+- **RFC 0002 §6's wording** needs the correction D-029 describes: "zero
+  deletions" is true only of images published under the tag policy.
+- **The alias deprecation has no end date.** Decision 20 keeps nine unprefixed
+  names working; nothing schedules their removal, and the next wave that
+  touches `caddy` should either set that date or record that there is none.
+- ~~RFC 0002 §6's first-publish verification~~ — discharged, D-028.
+- ~~Nine proposed rows outstanding across three waves~~ — drafted as rows for
+  ratification; see the reconciliation table below.
+- **`keyvalue` renderer** still ships with RFC 0005, `pgconf` with P4 (D-019).
+
+## Reconciliation — 2026-08-16 (wave 4)
+
+Every outstanding proposal from waves 1–3 is written into its RFC's decision
+table as a row citing the entry it came from. **They are proposals until this
+branch merges** — the author ratifies by accepting the PR, or strikes any row
+and the refusal is recorded here in the next pass.
+
+| RFC | Row | Outcome | Grade | Decision | From |
+|---|---|---|---|---|---|
+| 0002 | 17 | **Awaiting explicit ratification** | `LOCKED` | `BUILD_STAMP` is `<yyyymmdd>-<run_id>.<run_attempt>` | D-009 |
+| 0002 | 18 | **Proposed** | `ASSUMED` | Build-stage images are smoked for toolchain presence, not a `--help` | D-004 |
+| 0002 | 19 | **Proposed** | `ASSUMED` | CI exports `type=oci` and loads into Podman; the docker exporter cannot | D-005 (as corrected) |
+| 0002 | 20 | **Proposed** | `LOCKED` | The gate is push-by-digest → pull → smoke → `imagetools create` | D-008, D-010 |
+| 0002 | 21 | **Proposed** | `ASSUMED` | One concurrency group for every workflow that mutates GHCR | D-011 |
+| 0002 | 22 | **Proposed** | `ASSUMED` | Publishing paths that bypass the gate refuse by default | D-012 |
+| 0004 | 15 | **Proposed** | `ASSUMED` | The equivalence reference is a digest — and a digest is not durable here | D-006, D-029 |
+| 0001 | 14 | **Proposed** | `ASSUMED` | The summary reads NUL-delimited quads | D-014 |
+| 0001 | 15 | **Proposed** | `LOCKED` | The allowlist is the authority on canonical spelling | D-015 |
+| 0001 | 16 | **Proposed** | `ASSUMED` | Redaction matches `KEY`/`KEYS` as a segment | D-018 |
+| 0001 | 17 | **Proposed** | `ASSUMED` | Six functions, and `envconf_summary` takes a header and footer | D-017, D-023 |
+| 0001 | 18 | **Proposed** | `ASSUMED` | Header and footer are the image's claims, not the helper's | D-023 |
+| 0001 | 19 | **Proposed** | `ASSUMED` | A renderer ships with its first consumer; the rest abort | D-019 |
+| 0001 | 20 | **Decided by the author** | `LOCKED` | `caddy`'s curated names are `CADDY_*`, old names kept as warning aliases | D-022 |
+| 0001 | 21 | **Proposed** | `ASSUMED` | Two spellings of one curated name collide and refuse | D-025 |
+| 0001 | 22 | **Proposed** | `ASSUMED` | `caddy` has no passthrough channel; §10's question struck through | D-027 |
+
+**Sixteen rows, of which fifteen were owed from earlier waves or this one and
+one is a ratification.** D-003, D-016, D-024 and D-026 propose no row on
+purpose: the first is a cosmetic mismatch between a phase and a snippet, and
+the other three are implementation shapes with no decision to record. D-013,
+D-021 and D-029 touch the plan or a test list rather than a decision table.
+
+The row to read first is **RFC 0001 row 15** (`LOCKED`), which constrains every
+future image's allowlist file, and **row 20**, which is the one decision in this
+table the author made rather than the executor proposing.
+
+## D-030 — Hooks are sourced, so their assignments are not in `environ`
+
+- **Touches:** nothing in any RFC — this image's own hook contract
+- **Built first:** every curated variable read through `awk ENVIRON`, per the
+  habit D-016 established
+- **Built now:** read through the shell scope, with a guard that refuses a name
+  that is not a plain identifier before it reaches `eval`
+- **Because:** `/docker-entrypoint.d/*.sh` are **sourced**, so a hook writing
+  the natural `EDGE_ADDRESS=:8081` sets a shell variable, not an environment
+  variable. `ENVIRON` cannot see one, so the alias resolution ignored it and
+  started on the baked default — while the comment directly above the hook loop
+  claimed hook-set legacy names reach the alias handling. Reproduced both ways:
+  unexported is ignored, `export` works.
+- **Class:** ordinary defect, found by review. No decision row governs hooks.
+- **On D-016:** its rule is "never `eval` on a name you did not construct", and
+  every name here comes from the literal table in the same file. The guard is
+  what keeps that true — a future row containing a `-` now aborts with an
+  internal error instead of silently expanding as `${VAR-default}`, which is
+  the exact failure D-016 was written about.
+
+## D-031 — A newline is refused for values Caddy substitutes, not just rendered
+
+- **Touches:** RFC 0001 decision 12 (`LOCKED`)
+- **RFC said:** the collect→render wire format is NUL-delimited and
+  newline-bearing values are refused
+- **Built first:** curated values exported unchecked — this image never calls
+  `envconf_collect`, so nothing refused anything
+- **Built now:** `envconf_refuse_newline` in the helper, applied to both
+  spellings before either is exported or written to the source map
+- **Because:** Caddy expands `{$VAR}` itself, so a newline is not a corrupt
+  record — it is a second directive. Measured before the fix: a newline-bearing
+  `CADDY_EDGE_ADDRESS` added a complete server block and a second listener on
+  `:8099` to the running configuration, invisible in the Caddyfile on disk
+  because substitution happens at adapt time.
+- **Class:** `drift`, and the temptation to call it `spec-gap` is worth naming.
+  Decision 12 attaches its refusal to `envconf_collect`, which this image does
+  not use, so a literal reading exempts it. That reading is wrong for the same
+  reason wave 3's A-8 was: the rule exists so no image lets a newline reach a
+  config parser, and this image let one reach Caddy's. **The wave's drift count
+  is 1.**
+- **Proposed row (RFC 0001):** none needed — decision 12 already says it. What
+  changed is that the helper now offers the check to images that do not collect.
+
+## D-032 — The unknown-name warning's remediation is the image's to write
+
+- **Touches:** RFC 0001 decision 9 (`LOCKED`), §5.2's function list
+- **Built:** `envconf_warn_unknown <prefix> <known> [remediation]`
+- **Because:** the helper's sentence ends "or use `<PREFIX>_CONF__<directive>`
+  for a passthrough setting", and `caddy` warns against exactly that two lines
+  later. A typo'd variable was answered with advice the next check rejects.
+- **Class:** ordinary defect, found by review.
+- **Proposed row (RFC 0001):** folded into decision 17's function list.
+
+## Review findings — PR #31, 2026-08-16
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| R-11 | `entrypoint.sh` | A hook's plain `EDGE_ADDRESS=:8081` was silently ignored — sourced hooks set shell variables and `awk ENVIRON` sees only exported ones. The comment above the hook loop claimed the opposite. See D-030. | — | Fixed |
+| R-12 | `entrypoint.sh` | A newline in a curated value reached Caddy's substitution and **added a server block** to the running config. Decision 12 (`LOCKED`) refuses newline-bearing values; this image never called the function that enforces it. See D-031. | `drift` | Fixed |
+| R-13 | `README.md`, `smoke.sh` | "Setting both spellings to different values aborts startup" was unconditional, and one combination cannot abort — a canonical value equal to the baked default is indistinguishable from unset. Now documented with its exception and pinned by a smoke case that asserts the alias wins and says so. The reviewer's alternative — drop the baked `ENV` defaults so every state is detectable — was not taken: the `ENV` block is what a derived image overrides and what a bypassed entrypoint reads. | — | Fixed |
+| R-14 | `envconf.sh`, `entrypoint.sh` | The unknown-name warning offered `CADDY_CONF__<directive>` as the remedy on an image whose next warning rejects that channel. See D-032. | — | Fixed |
+| R-15 | both `smoke.sh` | `timeout` sends `SIGTERM` and then waits, so an engine that ignores it hangs the assertion the timeout was added to bound. Both now use `--kill-after`, and **both treat 137 as well as 124** as "started and kept running" — without that, the kill path would have exited 137 and been read as a successful refusal, which is the hole the fix would otherwise have opened. | — | Fixed |
+| R-16 | `rfcs/0002` §5.4, §5.5 | Rows 18 and 20 superseded procedures whose prose still read as normative. Both sections now carry a superseded note pointing at the row, rather than being rewritten — the procedure is the record of what was decided then. | — | Fixed |
+| R-17 | `.github/workflows/cleanup-images.yaml` | Preserve RFC 0004 §6's equivalence digest from cleanup. Real, and **not fixable in this PR**: `dataaxiom/ghcr-cleanup-action` exposes `exclude-tags` and `keep-n-untagged` — nothing that names an untagged digest — so the only durable fix is giving the digest a tag, which is a registry write. Recorded in D-029 and in RFC 0004 row 15. | — | **Open**, needs a registry write |
+
+**Found while fixing R-15: the fix nearly repeated wave 3's G7.** The first
+version of the shared `refuse` helper was called as `out=$(refuse …)`, which
+puts its `exit 1` inside a subshell — where it ends the substitution and not
+the script, exactly as the counter increments did in wave 3. It was rewritten
+to write to a file and run in the main shell before it ever ran. The rule
+distilled from G7 was in this same file and did not prevent the same shape
+being written a second time; what caught it was reading the diff.

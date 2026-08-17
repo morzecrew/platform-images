@@ -421,6 +421,58 @@ out=$(run "summary prints the precedence line" 0 \
 	'printf "" | envconf_summary VALKEY')
 expect_contains "  ...precedence" "${out}" "baked < mounted < env"
 
+# An image whose layers are not baked/mounted/env says so. Both defaults are
+# claims about the image, and both are false for `caddy`.
+out=$(run "summary takes an alternate header and footer" 0 \
+	'printf "" | envconf_summary caddy "" "effective configuration" "precedence: image default < environment"')
+expect_contains "  ...header" "${out}" "caddy: effective configuration"
+expect_contains "  ...footer" "${out}" "precedence: image default < environment"
+case "${out}" in
+*"non-default"*) bad "  ...must not print the default header" "${out}" ;;
+*) ok "  ...the default header does not appear" ;;
+esac
+case "${out}" in
+*"baked < mounted"*) bad "  ...must not print the default footer" "${out}" ;;
+*) ok "  ...the default footer does not appear" ;;
+esac
+
+# An empty override is not an override: it falls back rather than printing a
+# blank line where the header was.
+out=$(run "an empty header override keeps the default" 0 \
+	'printf "" | envconf_summary VALKEY "" ""')
+expect_contains "  ...default header" "${out}" "effective non-default settings"
+
+# --- newline refusal outside envconf_collect -------------------------------
+
+# Decision 12 for images that never call envconf_collect. `caddy` substitutes
+# values into a Caddyfile, where a newline is a second directive rather than a
+# corrupt record.
+out=$(run "a newline-bearing value is refused by name" 1 \
+	'envconf_refuse_newline CADDY_EDGE_ADDRESS "$(printf ":8080\nrespond 200")"')
+expect_contains "  ...names the variable" "${out}" "CADDY_EDGE_ADDRESS contains a newline"
+
+out=$(run "a carriage return is refused too" 1 \
+	'envconf_refuse_newline X "$(printf "a\rb")"')
+expect_contains "  ...says carriage return" "${out}" "carriage return"
+
+run "an ordinary value passes" 0 'envconf_refuse_newline X ":8080"' >/dev/null
+run "an empty value passes" 0 'envconf_refuse_newline X ""' >/dev/null
+
+# --- the unknown-name warning's remediation --------------------------------
+
+out=$(VALKEY_NOPE=1 run "unknown name warns with the passthrough remedy by default" 0 \
+	'envconf_warn_unknown VALKEY "VALKEY_KNOWN"')
+expect_contains "  ...points at the channel" "${out}" "VALKEY_CONF__<directive>"
+
+# An image with no passthrough channel must not be told to use one.
+out=$(CADDY_NOPE=1 run "the remediation is overridable" 0 \
+	'envconf_warn_unknown CADDY "CADDY_KNOWN" "this image has no passthrough channel"')
+expect_contains "  ...uses the image's text" "${out}" "this image has no passthrough channel"
+case "${out}" in
+*"CADDY_CONF__<directive>"*) bad "  ...must not offer the channel" "${out}" ;;
+*) ok "  ...does not offer the channel" ;;
+esac
+
 # --- result ---------------------------------------------------------------
 
 PASS=$(wc -l <"${TMP}/.pass" | tr -d ' ')

@@ -45,7 +45,13 @@ contract. It is normative: image READMEs link here rather than restating it.
 >   code, predating the helper. It emits no summary and has no denylist file.
 >   RFC 0001 P4 retrofits it, deliberately last, because it is the only step
 >   that can regress a running deployment.
-> - **`caddy`** has no passthrough channel and emits no summary yet (RFC 0001 P3).
+> - **`caddy`** emits the summary and warns about unknown `CADDY_*` names
+>   (RFC 0001 P3). It has **no passthrough channel** — Caddy is configured by
+>   Caddyfile fragments, not key-value directives — so a `CADDY_CONF__*`
+>   variable is reported rather than applied. Its curated names are the
+>   `CADDY_*` spellings; the unprefixed names it published first still work and
+>   warn (EXECUTION-LOG D-022), which supersedes §4's "renaming existing
+>   variables" non-goal and is proposed, not yet accepted.
 >
 > Where an image's behaviour and this section disagree, this section is the
 > target and the image is the gap. Each image's own README states what it
@@ -140,6 +146,13 @@ prints `source=env-or-default`, because the process environment cannot
 distinguish a baked default from an operator-supplied value. The effective value
 and the redaction are required of every image; inventing attribution an image
 cannot compute would be printing a guess.
+
+The header and the precedence footer are the summarising image's claims, not
+the helper's: an image with no config file and no mounted layer says
+`effective configuration` over `precedence: image default < environment`, because
+printing "non-default settings" above a list of defaults, under the names of
+layers it does not have, would be two false sentences per start (`caddy` is the
+case; EXECUTION-LOG D-023).
 
 ### No templating
 

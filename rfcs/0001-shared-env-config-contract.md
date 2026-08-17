@@ -153,6 +153,13 @@ this RFC is not read as claiming otherwise.
   not a reason to add one.
 - **Renaming existing variables.** `PG_CONF__*`, `CONFIG_DIR`, `EDGE_ADDRESS` and
   friends are published surface; the contract is written to fit them.
+
+  **Superseded for `caddy` by decision 20 (2026-08-16).** This non-goal and
+  decision 1 disagreed: one says the contract fits `EDGE_ADDRESS`, the other
+  says curated names are `<PREFIX>_<NAME>`. Resolved at the plan gate in favour
+  of decision 1, with every published name kept working as a deprecated alias —
+  so the surface this protected is intact and the naming rule holds. `PG_CONF__*`
+  is untouched and stays untouched.
 - **Shadowing upstream variables.** Where an upstream image owns a name
   (`POSTGRES_PASSWORD`, `CLICKHOUSE_USER`, `OTEL_EXPORTER_OTLP_ENDPOINT`), it is
   passed through untouched — that is RFC 0007's decision 2, generalized here.
@@ -311,6 +318,15 @@ effective values, marked `source=env-or-default` per §5.2 — it cannot say mor
 without a source map it has no way to build. Its config path is Caddy's own and
 is not touched.
 
+**Amended by execution 2026-08-16 (decisions 20–22).** "The summary only" turned
+out not to be reachable on its own: the summary lists curated variables, and
+`caddy`'s were not spelled the way decision 1 requires. So P3 is the summary,
+the `CADDY_*` spellings with the old names kept as warning aliases, and
+decision 9's unknown-name warning that the prefix makes possible. Two labels
+beyond `env-or-default` are used where they are provably true: `source=env` for
+a value supplied under a legacy name (the image sets none), and `source=baked`
+for a variable that was absent or empty and took the image default.
+
 ### Alternatives considered
 
 - **Flat `<PREFIX>_<UPSTREAM_KEY>` naming**, as the source note proposed. Reads
@@ -406,10 +422,13 @@ RFC 0002 §on rootless CI covers running these under rootless Podman.
 
 ## 10. Unresolved questions
 
-- Whether `caddy` should also gain a `CADDY_CONF__*` passthrough channel, or
+- ~~Whether `caddy` should also gain a `CADDY_CONF__*` passthrough channel, or
   whether snippet directories already cover everything an operator would reach
   for. Leaning: no channel — Caddy config is not key-value and the mapping would
-  be a fiction. Settle before RFC 0005 copies the pattern.
+  be a fiction. Settle before RFC 0005 copies the pattern.~~ **Answered by
+  execution 2026-08-16 (decision 22, EXECUTION-LOG D-027):** no channel, the
+  leaning as written. A `CADDY_CONF__*` variable is reported rather than
+  ignored.
 - Whether the summary goes to stderr or stdout. Stderr keeps it out of a
   log-shipping pipeline's structured stream; stdout means it survives in
   `docker logs` alongside everything else. Implementation may settle it
@@ -436,6 +455,15 @@ RFC 0002 §on rootless CI covers running these under rootless Podman.
 | 11 | `LOCKED` | A curated variable and a passthrough key targeting the same upstream setting abort startup naming both, rather than one silently winning (§5.1). Consequence: each image must declare the upstream key(s) behind every curated name — work its README was going to do anyway. |
 | 12 | `LOCKED` | The collect→render wire format is NUL-delimited, and values containing a newline are refused (§5.2). A `key<TAB>value` stream splits a tab-bearing value into two malformed records, and no config format in scope can represent an embedded newline. |
 | 13 | `LOCKED` | Full `source=` attribution is required only of images that generate a config file from enumerable layers; `ENV`-defaulted values print `source=env-or-default`, because `environ` cannot distinguish a Dockerfile default from a supplied value (§5.2). Effective value and redaction stay required of every image. Consequence: `caddy`'s summary is weaker than `postgres`'s, by construction rather than by omission. |
+| 14 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-014.** `envconf_summary` reads NUL-delimited **quads** — key, value, source, origin — not the key/source/origin triple §5.2 specified. The summary prints the effective value and the helper cannot obtain it, so a triple forces every image to pass values through a second channel. |
+| 15 | `LOCKED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-015.** The allowlist file carries the **canonical upstream spelling** and is the authority on it; normalization (lowercase, `-`→`_`) decides only whether a variable *matches* an entry, never what is written out. Normalizing is lossy and its inverse is not computable — `valkey.conf` has both `maxmemory-policy` and `server_cpulist`. Consequence: every image's allowlist file is a spelling table, and a typo in it reaches the rendered config. |
+| 16 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-018.** The redaction heuristic matches `KEY`/`KEYS` as a delimited **segment**, not as the substring §5.2 states. `*KEY*` is sound for environment variable names and wrong for config directives, where `notify-keyspace-events` and `tcp-keepalive` are ordinary words whose values operators need to read. The other four patterns are unchanged. |
+| 17 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-017 and D-023.** §5.2's function list is six functions, not five: `envconf_load_denylist <path>` (§5.4 moves the postgres denylist to a file, so it needs a loader), `envconf_collect <prefix> [curated_keys]` (decision 11's collision check needs both key sets in one place), and `envconf_summary <prefix> [infile] [header] [footer]`. |
+| 18 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-023.** The summary's header and precedence footer are the **image's** claims, not the helper's, and an image whose layers are not baked/mounted/env overrides both. A renderer-less image printing "effective non-default settings" over its defaults, under a precedence line naming layers it does not have, states two false things per start. Consequence: the two default strings are still the helper's, so an image that overrides neither inherits `postgres`-shaped claims. |
+| 19 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-019.** `envconf_render` implements a format when that format has a consumer; the unimplemented ones **abort naming themselves** rather than falling through. `valkeyconf` shipped with RFC 0006; `pgconf` lands with P4 and `keyvalue` with RFC 0005. A renderer with no consumer is a renderer with no test. |
+| 20 | `LOCKED` | **Decided by the author at the plan gate 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-022.** `caddy`'s curated names are the `CADDY_*` spellings decision 1 requires; the unprefixed names it published first (`EDGE_ADDRESS`, `CONFIG_DIR` and seven others) keep working as **deprecated aliases** that warn and are attributed in the summary. This **supersedes §4's "renaming existing variables" non-goal**, which was written to protect exactly those names and is answered instead by keeping them working. Consequence: two spellings to maintain until the aliases are dropped, which is a separate decision with its own deprecation window. |
+| 21 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-025.** Decision 11's collision rule extends to **two spellings of one curated name**: setting both aborts naming both and their values. One case cannot be caught — a canonical value equal to the image's baked default is indistinguishable from unset (decision 13) — and there the alias wins and the warning names the value it started with, rather than choosing silently. |
+| 22 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-027.** `caddy` has **no passthrough channel**, answering §10's first unresolved question with its stated leaning: Caddy's config is not key-value, so `CADDY_CONF__<directive>` would be a fiction. A `CADDY_CONF__*` variable is reported at startup rather than ignored, because the helper skips that prefix for every other image and silence is the failure decision 9 exists to prevent. Consequence: RFC 0005 decides its own channel on its own grounds rather than copying this. |
 
 ## 12. Phasing
 

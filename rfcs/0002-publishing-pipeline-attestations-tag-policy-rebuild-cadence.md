@@ -284,6 +284,13 @@ every publishing run is one job that builds to a local OCI layout
 against **that** artifact, and pushes it only if the script passes. The digest
 tested is the digest published, and the gate is a gate rather than a coincidence.
 
+**The mechanism above is superseded by decision 20 (2026-08-16); the property
+it exists for is not.** The local OCI layout cannot publish the artifact it
+tested without a second push step that re-derives it, so the built gate is
+**push-by-digest → pull that digest → smoke → `imagetools create`**. "The digest
+tested is the digest published" is unchanged and is now literally true: the
+smoke stage pulls the object the registry already holds.
+
 Consequence to state plainly in the README: **on the mutable tag, the bytes
 behind `:18.4` change weekly even when nothing in this repo changed.** That is
 the intended behaviour and it is exactly why §5.3's dated tag exists.
@@ -304,6 +311,11 @@ per-image `images/<name>/smoke.sh`:
 - Build-stage images (`uv-builder`, `flyway`) run their entrypoint helper with
   `--help`-equivalent instead; `python-distroless` runs `python -c` importing
   `magic`, which is the one claim its README makes that a build cannot verify.
+
+  **Superseded by decision 18 (2026-08-16)** for `uv-builder`: `build-uv-app`
+  has no `--help` and no argument parsing, so the `--help`-equivalent
+  invocation would be a build. The smoke test asserts toolchain presence and
+  helper validity instead. `flyway` and `python-distroless` are unaffected.
 
 Rootless rather than Docker because rootless is where UID mapping, volume
 ownership and sub-1024 port binds actually fail. `caddy` already listens on
@@ -426,6 +438,11 @@ The smoke stage of §5.5 is itself most of this RFC's verification. Beyond it:
 | 15 | `ASSUMED` | **Set by execution.** The shared attestation target is named `_attested`, not §5.2's `_common` — it carries only attestations, and a name that says so survives the next thing someone wants to share across targets. |
 | 16 | `LOCKED` | **Set by review.** `DESCRIPTIONS` is indexed directly (`DESCRIPTIONS[name]`), not via `lookup()` with a default, so a target with no entry **fails the build**. Bake evaluates every target on every invocation, so the failure is immediate and local rather than surfacing as a blank GHCR page after a push. Consequence: adding an image is a nine-item checklist and removing one has to drop the row too, both in [images/README.md](../images/README.md). Keys stay quoted — bare hyphenated keys parse as subtraction in HCL. |
 | 17 | `LOCKED` | **Found by review 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-009.** Fixes the stamp format row 11 left as `<run>`: `BUILD_STAMP` is `<yyyymmdd>-<run_id>.<run_attempt>`. This **refines** row 11 rather than superseding it — row 11's property (unique per build) is unchanged, and the shipped `run_id` did not satisfy it. Both `github.run_number` and bare `github.run_id` are rejected: neither changes when a run is re-run, and a re-run rebuilds against moved upstream state, so either would repoint the tag decision 1 calls immutable. Consequence: every stamp carries a `.N` even though the first attempt is always `.1`, because a conditional suffix would make the format depend on history. |
+| 18 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-004.** A build-stage image is smoke-tested for **toolchain presence and helper validity**, not by §5.5's "entrypoint helper with a trivial argument": `build-uv-app` takes a project directory and has no `--help` and no argument parsing, so the trivial invocation would be a build. Depart when a build-stage image ships a helper that does parse flags. |
+| 19 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-005 as corrected by PR #27 R-1.** The build-only CI job exports each target as **`type=oci`** to a tarball and loads it into Podman. `type=docker` is rejected outright: every target inherits `_attested`, attestations make the result a manifest list, and the docker exporter refuses those. The tarball lands outside the bake context, so the job carries a scoped `--allow=fs.write=/tmp` rather than disabling the entitlement check wholesale. |
+| 20 | `LOCKED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-008 and D-010.** The publish gate is **push-by-digest → pull that digest → smoke → `imagetools create`**, and attestations survive all three steps (measured). §5.4's local-OCI-layout sketch is rejected: it cannot publish the artifact it tested without rebuilding, which is the property row 10 requires. Consequence: publishing is CI-only — a local build on the default `docker` driver produces no attestations at all. |
+| 21 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-011.** Every workflow that mutates GHCR shares **one concurrency group**. A gated publish is untagged by construction between its digest push and its promotion, and untagged is exactly what the cleanup job deletes. The cron offset orders the two scheduled runs; it does not protect that window, because every non-scheduled trigger bypasses the schedules entirely. |
+| 22 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-012.** Publishing paths that bypass the smoke gate **refuse by default** and name both silent failure modes. Specifying the pipeline does not secure it: a rule enforced in the workflow and absent from the local recipe is a rule with a documented bypass. |
 
 ## 12. Phasing
 

@@ -130,6 +130,13 @@ target "caddy" {
   dockerfile = "Dockerfile"
   tags       = tag("caddy", CADDY_VERSION)
   labels     = label("caddy", CADDY_VERSION)
+
+  # The shared env-config helper reaches this build as a named context rather
+  # than a copy under images/caddy/ (RFC 0001 decision 6).
+  contexts = {
+    shared = "./shared"
+  }
+
   args = {
     CADDY_VERSION        = CADDY_VERSION
     # renovate: datasource=github-releases depName=corazawaf/coraza-caddy
