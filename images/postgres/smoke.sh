@@ -106,4 +106,188 @@ case " ${selected} " in
 	;;
 esac
 
+
+# ===========================================================================
+# RFC 0001 §6 — the env-config contract, on the image that motivated it.
+#
+# Every case below existed as a claim in the README before P4 and was tested by
+# nothing. The retrofit is the point at which they became shared behaviour, so
+# they are asserted here rather than trusted to the helper's own suite: the
+# helper's suite proves the functions work, and these prove this image wired
+# them up.
+# ===========================================================================
+
+logs_of() { "${ENGINE}" logs "${CTR}" 2>&1; }
+
+# expect_in <label> <haystack> <needle>, matching images/caddy/smoke.sh. The
+# needle is quoted inside the pattern so `[envconf]` is literal text rather than
+# a character class.
+expect_in() {
+	case "$2" in
+	*"$3"*) echo "ok: $1" ;;
+	*)
+		echo "FAIL: $1"
+		echo "  wanted: $3"
+		exit 1
+		;;
+	esac
+}
+
+expect_not_in() {
+	case "$2" in
+	*"$3"*)
+		echo "FAIL: $1 (found '$3')"
+		exit 1
+		;;
+	*) echo "ok: $1" ;;
+	esac
+}
+
+# The container from the extension checks above is still running with no
+# PG_CONF__* set, so this is the summary an operator sees by default.
+logs="$(logs_of)"
+expect_in "summary is printed" "${logs}" "[envconf] postgres: effective non-default settings"
+expect_in "summary states the precedence" "${logs}" "precedence: baked < mounted < env"
+# Decision 13 (LOCKED) requires per-setting attribution from this image, and the
+# baked file is the layer it would be easiest to summarise as one line.
+expect_in "baked file is attributed per setting" "${logs}" "source=baked        shared_buffers"
+expect_in "baked file is named" "${logs}" "(/etc/postgresql.conf)"
+# The build records which conf.d fragments it shipped; without that list these
+# read as operator-supplied.
+expect_in "image fragment reads as baked" "${logs}" "source=baked        pg_stat_statements.max"
+
+# The summary must precede the server, or it describes a configuration that is
+# already in use by the time anyone can read it.
+first_server_line=$(logs_of | grep -n "database system is ready to accept" | head -1 | cut -d: -f1)
+last_summary_line=$(logs_of | grep -n "precedence: baked < mounted < env" | head -1 | cut -d: -f1)
+[ -n "${first_server_line}" ] && [ -n "${last_summary_line}" ] &&
+	[ "${last_summary_line}" -lt "${first_server_line}" ] ||
+	{ echo "FAIL: summary does not precede the server's ready line"; exit 1; }
+echo "ok: summary completes before the server is ready"
+
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# --- refusals ---------------------------------------------------------------
+
+REFUSE_OUT="$(mktemp)"
+trap '"${ENGINE}" rm -f "${CTR}" "${CTR}-r" >/dev/null 2>&1 || true; rm -f "${REFUSE_OUT}"' EXIT
+
+# Bounded twice: a refusal that stops refusing starts a server that runs
+# forever, and plain `timeout` waits after SIGTERM for a process that may not
+# take it. The kill path exits 137 rather than 124 and means the same thing.
+refuse() {
+	local label="$1"
+	shift
+	local rc
+	set +e
+	timeout --kill-after=10 40 "${ENGINE}" run --rm --name "${CTR}-r" \
+		-e POSTGRES_PASSWORD=smoke "$@" "${IMAGE}" >"${REFUSE_OUT}" 2>&1
+	rc=$?
+	set -e
+	"${ENGINE}" rm -f "${CTR}-r" >/dev/null 2>&1 || true
+	case "${rc}" in
+	124 | 137)
+		echo "FAIL: ${label} started and kept running"
+		exit 1
+		;;
+	0)
+		echo "FAIL: ${label} started"
+		tail -5 "${REFUSE_OUT}"
+		exit 1
+		;;
+	esac
+}
+
+refuse "a denylisted key" -e PG_CONF__data_directory=/tmp
+expect_in "denylist refusal names the variable" "$(cat "${REFUSE_OUT}")" "PG_CONF__data_directory"
+
+# The property most likely to regress in a rewrite (§6), and the one this image
+# had no test for: ignore mode must not soften the denylist.
+refuse "a denylisted key under strict=ignore" -e PG_CONF_STRICT_MODE=ignore -e PG_CONF__include=/tmp/x
+expect_in "denylist holds in ignore mode" "$(cat "${REFUSE_OUT}")" "PG_CONF__include"
+
+refuse "a key outside the allowlist" -e PG_CONF__nonexistent_thing=1
+expect_in "allowlist refusal names the variable" "$(cat "${REFUSE_OUT}")" "PG_CONF__nonexistent_thing"
+
+# Decision 12: no config format in scope can represent an embedded newline, so
+# it is refused rather than written and left to the server's parser.
+refuse "a value containing a newline" -e "PG_CONF__log_line_prefix=a
+b"
+expect_in "newline refusal names the variable" "$(cat "${REFUSE_OUT}")" "PG_CONF__log_line_prefix"
+
+# Two spellings of one control variable with two values. Neither would silently
+# win before P4 -- the bash script simply never read PG_CONF_STRICT.
+refuse "both spellings of the strict control" \
+	-e PG_CONF_STRICT_MODE=fail -e PG_CONF_STRICT=ignore
+expect_in "control collision names both" "$(cat "${REFUSE_OUT}")" "PG_CONF_STRICT_MODE=fail and PG_CONF_STRICT=ignore"
+
+# Decision 4: an unreadable secret file aborts rather than falling back. This
+# name is upstream's, so upstream's file_env enforces it -- asserted here
+# because the contract requires the behaviour, not a particular implementation.
+set +e
+timeout --kill-after=10 40 "${ENGINE}" run --rm --name "${CTR}-r" \
+	-e POSTGRES_PASSWORD_FILE=/nonexistent "${IMAGE}" >"${REFUSE_OUT}" 2>&1
+rc=$?
+set -e
+"${ENGINE}" rm -f "${CTR}-r" >/dev/null 2>&1 || true
+case "${rc}" in
+0 | 124 | 137) echo "FAIL: an unreadable POSTGRES_PASSWORD_FILE started"; exit 1 ;;
+esac
+echo "ok: refused an unreadable POSTGRES_PASSWORD_FILE"
+
+# --- ignore mode, and what it does not soften -------------------------------
+
+"${ENGINE}" run -d --name "${CTR}" -e POSTGRES_PASSWORD=smoke \
+	-e PG_CONF_STRICT_MODE=ignore -e PG_CONF__nonexistent_thing=1 \
+	-e PG_CONF__work_mem=48MB "${IMAGE}" >/dev/null
+for _ in $(seq 1 60); do
+	"${ENGINE}" exec "${CTR}" pg_isready -U postgres >/dev/null 2>&1 && break
+	sleep 2
+done
+logs="$(logs_of)"
+expect_in "ignore mode warns by name" "${logs}" "PG_CONF__nonexistent_thing"
+got=$("${ENGINE}" exec "${CTR}" psql -U postgres -tAc "SHOW work_mem")
+[ "${got}" = "48MB" ] || { echo "FAIL: work_mem=${got}, expected 48MB"; exit 1; }
+echo "ok: an allowed key still applies while an unknown one is skipped"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# --- precedence across all three layers (§6's last case) --------------------
+
+# work_mem is set by the baked file; a mounted fragment and the environment both
+# override it. The env value must win, and each layer must be attributed.
+WORKDIR="$(mktemp -d)"
+trap '"${ENGINE}" rm -f "${CTR}" "${CTR}-r" >/dev/null 2>&1 || true; rm -rf "${REFUSE_OUT}" "${WORKDIR}"' EXIT
+# Two keys on purpose. `work_mem` is contested by all three layers, so the
+# summary must collapse it to the env row -- which means it cannot also be the
+# key that proves mounted attribution works. `temp_buffers` is set by this
+# fragment alone.
+printf 'work_mem = 8MB\ntemp_buffers = 12MB\n' >"${WORKDIR}/50-tuning.conf"
+chmod 0644 "${WORKDIR}/50-tuning.conf"
+
+"${ENGINE}" run -d --name "${CTR}" -e POSTGRES_PASSWORD=smoke \
+	-v "${WORKDIR}/50-tuning.conf:/etc/postgresql/conf.d/50-tuning.conf:ro,Z" \
+	-e PG_CONF__work_mem=64MB "${IMAGE}" >/dev/null
+for _ in $(seq 1 60); do
+	"${ENGINE}" exec "${CTR}" pg_isready -U postgres >/dev/null 2>&1 && break
+	sleep 2
+done
+got=$("${ENGINE}" exec "${CTR}" psql -U postgres -tAc "SHOW work_mem")
+[ "${got}" = "64MB" ] || { echo "FAIL: env should win, work_mem=${got}"; exit 1; }
+logs="$(logs_of)"
+expect_in "mounted fragment is attributed" "${logs}" "source=mounted      temp_buffers = 12MB"
+expect_in "mounted fragment is named" "${logs}" "50-tuning.conf"
+expect_in "the winning value is the env one" "${logs}" "source=env          work_mem = 64MB"
+# One row per key, or the summary is claiming two effective values for one
+# setting. The leading space matters: `maintenance_work_mem` ends in the same
+# nine characters, and counting without it reports two rows for one key.
+rows=$(logs_of | grep -cE " work_mem = ")
+[ "${rows}" = 1 ] || { echo "FAIL: ${rows} rows for work_mem, expected 1"; exit 1; }
+echo "ok: baked < mounted < env, each attributed, one row for the key"
+
+# A mounted file is not on the build's fragment list, so it must not read as
+# baked -- the distinction the manifest exists to make. Asserted on the key only
+# this fragment sets, since a contested key's mounted row is collapsed away.
+expect_not_in "mounted fragment does not read as baked" "${logs}" "source=baked        temp_buffers"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
 echo "PASS: postgres"

@@ -38,8 +38,16 @@ COPY rootfs/postgresql.conf /etc/postgresql.conf
 RUN chown -R postgres:postgres /etc/postgresql
 
 COPY rootfs/allowlist.conf /etc/postgresql/allowlist.conf
-RUN chown postgres:postgres /etc/postgresql/allowlist.conf \
-    && chmod 0644 /etc/postgresql/allowlist.conf
+# The denylist is data too, and lives beside the allowlist so the whole policy
+# reads in one place (RFC 0001 §5.4).
+COPY rootfs/denylist.conf /etc/postgresql/denylist.conf
+RUN chown postgres:postgres /etc/postgresql/allowlist.conf /etc/postgresql/denylist.conf \
+    && chmod 0644 /etc/postgresql/allowlist.conf /etc/postgresql/denylist.conf
+
+# The shared env-config helper, from the `shared` named context wired up in
+# docker-bake.hcl (RFC 0001 decision 6). A target that does not declare the
+# context cannot reference it, so a stale copy is not a failure mode here.
+COPY --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 
 COPY rootfs/entrypoint.sh /usr/local/bin/entrypoint-merge.sh
 RUN chmod +x /usr/local/bin/entrypoint-merge.sh
