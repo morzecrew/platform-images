@@ -38,7 +38,42 @@ The image uses a custom entrypoint (`rootfs/entrypoint.sh` → `/usr/local/bin/e
 | `PG_CONF_ALLOWLIST_PATH` | `/etc/postgresql/allowlist.conf` | Path to the allowlist file (e.g. if you mount your own). |
 | `PG_CONF_STRICT_MODE` | `fail` | `fail` = container fails to start if an override is not in the allowlist; `ignore` = skip with a warning. |
 
-Some parameters are **denylisted** (e.g. `shared_preload_libraries`, `data_directory`, `config_file`, `allow_alter_system`) and cannot be overridden via env for safety and consistency.
+`PG_CONF_STRICT` and `PG_CONF_ALLOWLIST` are accepted as aliases for the two
+control variables above, because they are the names the shared contract uses and
+the ones the helper's own messages name (RFC 0001 decision 10 keeps the longer
+spellings as this image's published surface). Setting both spellings of one
+control to **different** values refuses at startup rather than picking a winner.
+
+Some parameters are **denylisted** and cannot be set through `PG_CONF__*` in
+either strict mode. The list is `/etc/postgresql/denylist.conf` in the image
+(`rootfs/denylist.conf` in this directory), which is also where the reasoning
+per group lives; it covers the generated preload line, the include and file-path
+settings this image's precedence rule depends on, the SQL-compatibility
+switches, and `allow_alter_system`.
+
+### The startup summary
+
+Before the server starts, the entrypoint prints every setting any layer assigns,
+with the layer that supplied it, to **stderr**:
+
+```text
+[envconf] postgres: effective non-default settings
+[envconf]   source=baked        shared_buffers = 1GB                 (/etc/postgresql.conf)
+[envconf]   source=baked        pg_stat_statements.max = 10000       (/etc/postgresql/conf.d/11-pg_stat_statements.conf)
+[envconf]   source=mounted      temp_buffers = 12MB                  (/etc/postgresql/conf.d/50-tuning.conf)
+[envconf]   source=env          work_mem = 64MB                      (PG_CONF__work_mem)
+[envconf] precedence: baked < mounted < env
+```
+
+One row per setting: where a key is set by more than one layer, the row is the
+value the server will use and the layer it came from. `source=baked` covers both
+the bundled `postgresql.conf` and the fragments this image ships in `conf.d`;
+`source=mounted` is anything else found there, which is how a fragment you
+mounted is distinguished from one the build installed.
+
+A `PG_*` variable that is neither a `PG_CONF__*` override nor one of the controls
+above produces a warning naming it — a misspelled override that silently does
+nothing is the failure this is here to prevent.
 
 ## Layout
 
