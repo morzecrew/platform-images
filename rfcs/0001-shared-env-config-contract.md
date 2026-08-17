@@ -1,6 +1,6 @@
 # RFC 0001 — Shared env-config contract
 
-- **Status:** 🚧 In progress — **P1 shipped 2026-08-16** (the contract in
+- **Status:** ✅ Complete — all four phases shipped. **P1 2026-08-16** (the contract in
   [images/README.md](../images/README.md)); **P2 shipped 2026-08-16** — the
   helper is [shared/rootfs/lib/envconf.sh](../shared/rootfs/lib/envconf.sh),
   distributed by a bake named context and exercised by the new `valkey` image,
@@ -9,8 +9,19 @@
   consumer: the source map needs the effective value (EXECUTION-LOG D-014),
   §5.1's normalization is lossy and must not be used for output (D-015), and
   §5.2's `*KEY*` redaction pattern hides legitimate directives (D-018).
-  **P3 (`caddy` summary) and P4 (`postgres` retrofit) not started** — until P4,
-  the contract is implemented twice in this repo.
+  **P3 shipped 2026-08-16** — `caddy` prints the summary, and its curated names
+  became `CADDY_*` with the nine unprefixed names kept as warning aliases
+  (D-022, decision 20). **P4 shipped 2026-08-17** — `postgres` runs on the
+  helper, the `pgconf` renderer exists (D-033), its denylist is a file, and it
+  is the one image that attributes every value to the file or variable behind it
+  (D-034). The contract is now implemented **once** in this repo.
+
+  P4 found a defect older than this RFC: a fragment mounted read-only aborted
+  the container, so the mounted layer decision 3 requires had never worked
+  (D-036). Nothing tested it until §6's battery was written.
+- **Status note:** this block said "P3 and P4 not started" until 2026-08-17,
+  after P3 had shipped. Left as its own line rather than quietly corrected,
+  because a status field that lags the work is the failure a status field has.
 - **Scope:** One written contract for how every image in this repo takes runtime
   configuration from the environment: variable naming, allowlist semantics,
   precedence, failure mode, and a startup summary. Covers a shared entrypoint
@@ -464,6 +475,9 @@ RFC 0002 §on rootless CI covers running these under rootless Podman.
 | 20 | `LOCKED` | **Decided by the author at the plan gate 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-022.** `caddy`'s curated names are the `CADDY_*` spellings decision 1 requires; the unprefixed names it published first (`EDGE_ADDRESS`, `CONFIG_DIR` and seven others) keep working as **deprecated aliases** that warn and are attributed in the summary. This **supersedes §4's "renaming existing variables" non-goal**, which was written to protect exactly those names and is answered instead by keeping them working. Consequence: two spellings to maintain until the aliases are dropped, which is a separate decision with its own deprecation window. |
 | 21 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-025.** Decision 11's collision rule extends to **two spellings of one curated name**: setting both aborts naming both and their values. One case cannot be caught — a canonical value equal to the image's baked default is indistinguishable from unset (decision 13) — and there the alias wins and the warning names the value it started with, rather than choosing silently. |
 | 22 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-027.** `caddy` has **no passthrough channel**, answering §10's first unresolved question with its stated leaning: Caddy's config is not key-value, so `CADDY_CONF__<directive>` would be a fiction. A `CADDY_CONF__*` variable is reported at startup rather than ignored, because the helper skips that prefix for every other image and silence is the failure decision 9 exists to prevent. Consequence: RFC 0005 decides its own channel on its own grounds rather than copying this. |
+
+| 23 | `ASSUMED` | **Added by execution 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-034.** Decision 13 says *which* images must attribute; this says *how*, for the two cases P4 met. An image whose baked layer is a config file reports **every directive that file assigns** (35 for `postgres`), because reporting only contested keys hides the image's tuning from an operator who set nothing, and reporting none of it makes `source=baked` unreachable on the one image that can compute it. An image that reads an include directory **records at build time which fragments it shipped**, so anything else found there is `mounted`: a filename convention is wrong the moment an operator mounts a file whose name looks baked, and the build is the only place that knows. Settled with the author at this wave's plan gate. |
+| 24 | `ASSUMED` | **Added by execution 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-035.** Where an image publishes its own spelling of a contract control (decision 10), **both spellings are accepted and a conflicting pair refuses** naming both — the same rule as decisions 11 and 21, for the same reason: the helper reads the contract's name, so translation makes both names live whether or not that is admitted, and an operator who sets both cannot tell which the code reads. Consequence: `PG_CONF_STRICT` and `PG_CONF_ALLOWLIST` work on `postgres` and are documented in its README, since the helper's own messages name them. |
 
 ## 12. Phasing
 

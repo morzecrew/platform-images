@@ -1474,3 +1474,79 @@ cannot become untagged and cannot be collected. `9934cb32` had no dated tag
 because it predates the policy. This wave's equivalence check used the dated
 tag's digest and needed no registry write — which is the shape RFC 0004 §6
 should ask for.
+
+## Findings against earlier units — wave 5
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| W-1 | `rfcs/0001` status block | Said "**P3 and P4 not started**" and "until P4, the contract is implemented twice" after wave 4 had shipped P3. Wave 4 wrote decision rows 20–22 from `caddy`'s execution and left the status field describing the state before it. A reader checking whether the summary exists would have been told it does not. | `drift` | Fixed, and the lag is recorded in the block itself rather than quietly overwritten |
+| W-2 | `images/README.md` §Startup summary | The normative example showed `source=env  <redacted>  (PG_CONF__log_line_prefix)` — the key replaced by `<redacted>` rather than the value, and on a key that matches none of the redaction patterns. Both halves are wrong about behaviour that has shipped since wave 3, in the document images are told to link to instead of restating. | `drift` | Fixed, with `valkey`'s measured line as the example |
+
+W-1 and W-2 are the same shape as wave 1's R-4 and are why that entry is worth
+re-reading: **prose that describes the state of the work goes stale one wave
+later, and the wave that stales it is never the wave that notices.** Neither is
+counted in this wave's drift count — they are findings against waves 1–4 — but
+both would have been caught by a pass over "every claim about what is shipped"
+at the end of any of them.
+
+## Rules distilled
+
+- A config-format parser has to be written against the *server's* grammar, not
+  the shape the file happens to have. `=` optional, `#` inside quotes literal,
+  `''` an escaped quote — three rules, all of which a naive `key = value` split
+  gets wrong, and none of which the RFC mentioned (D-033).
+- When a runtime cannot tell two layers apart, have the **build** write down what
+  it knows. A filename convention is a guess evaluated at the wrong time
+  (D-034).
+- An alias is two live names whether or not the document admits it. Translating
+  a published name onto a contract name makes both work, so both need
+  documenting and a conflicting pair needs refusing (D-035).
+- `$( )` strips trailing newlines, so any NUL-delimited stream read through
+  command substitution loses a trailing empty field. The second time this
+  pattern has produced a defect in this repo (D-037, after A-10).
+- **Three consecutive red runs were the test's fault, not the code's.** When an
+  assertion fails, check what the code actually printed before changing it:
+  each of the three was written against a remembered output shape (D-038).
+- A `chown -R` over a directory an operator can mount into is a startup failure
+  waiting for its first read-only mount. Take ownership of what the image
+  created, warn about the rest (D-036).
+- The durable reference to an image is a **dated tag**, not a digest. Untagged
+  digests are what garbage collection is for, so a bare digest is a reference
+  with a deletion date nobody wrote down (this wave's facts table).
+
+## Carried into the next unit
+
+- **RFC 0004 P2** — the first real variant, and the question of which extension
+  has a consumer (pgvector or pgmq) is the author's. It still carries wave 1's
+  R-7: a `POSTGRES_EXTENSIONS` override publishes onto the default tags.
+- **RFC 0004 §6's equivalence reference is gone** and the check is now only the
+  log entry that recorded it. Row 15 says so, and says a dated tag is what a
+  future reference should name.
+- **`keyvalue` renderer** still ships with RFC 0005 (D-019). `pgconf` and
+  `valkeyconf` both exist now, so the next renderer has two shapes to follow.
+- **`caddy`'s aliases have no sunset date**, recorded deliberately at this
+  wave's gate: nine table rows and one warning line is cheaper than breaking
+  working compose files. Revisit only if the table stops being nine rows.
+- ~~RFC 0001 P3, P4~~ — shipped; **RFC 0001 is complete**.
+- ~~The weekly rebuild has never run on a schedule~~ — it has, successfully.
+- ~~`postgres@sha256:9934cb32…` will be deleted unless tagged~~ — it was.
+
+## Reconciliation — 2026-08-17 (wave 5)
+
+| RFC | Row | Outcome | Grade | Decision | From |
+|---|---|---|---|---|---|
+| 0001 | 23 | **Proposed** | `ASSUMED` | How an image attributes a config-file layer and an include directory | D-034 |
+| 0001 | 24 | **Proposed** | `ASSUMED` | A published control alias and the contract name both work; a conflict refuses | D-035 |
+| 0004 | 15 | **Amended** | `ASSUMED` | The reference was deleted; a dated tag is the durable form | D-029, this wave |
+| 0002 | §6 | **Amended** | — | "Zero deletions" narrowed to "of what the gate published" | D-029 |
+| 0001 | — | **Status corrected** | — | P3 and P4 marked shipped; RFC 0001 closed as complete | W-1 |
+
+Wave 4's sixteen rows were ratified by merging PR #31; none was struck, so no
+refusal is recorded against them. D-033, D-036, D-037 and D-038 propose no row:
+the first is a shape decision 19 delegates outright, and the other three are
+defects rather than decisions.
+
+**Two amendments here are corrections to rows this practice itself produced**
+(0004 row 15, 0002 §6), which is the reconciliation half doing what it is for —
+a row written from a prediction gets corrected by the measurement, in the same
+table, instead of standing as a claim nobody rechecked.
