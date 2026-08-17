@@ -1,16 +1,21 @@
 # RFC 0004 — Postgres extensions as a build argument
 
-- **Status:** 📝 Draft — **demand measured 2026-08-12** (§3.1): pgvector has two
-  live consumers on a *different base image*, pgmq has none. The first variant is
-  `vector`, and RFC 0006 no longer waits on this RFC.
+- **Status:** 🚧 In progress — **P1 shipped 2026-08-16** (manifest, build-time generation, the default image produced by the new mechanism, equivalence proven in EXECUTION-LOG D-006). **P2 and P3 shipped 2026-08-17**: the `pgvector` and `cron` variants, the build-mechanism tests §6 asked for, and the variant documentation. This field read **Draft** until 2026-08-17, five days after P1 merged — recorded rather than quietly corrected, because a status that lags the work is the failure a status field has.
+  The 2026-08-12 demand measurement (§3.1) stands: pgvector had two live
+  consumers on a *different base image* and pgmq none, which is why P2 shipped
+  `pgvector` and the cron-only subset rather than a queue.
 - **Scope:** Turn the `postgres` image's hardcoded extension set into a
   `PG_EXTENSIONS` build argument backed by a manifest, so a second extension
   combination is a bake target rather than a second directory. Covers the
   extension manifest, generated `shared_preload_libraries`, per-extension config
   snippets, variant tag naming, and an image label recording the installed set.
-  Does **not** add any specific extension — pgvector and pgmq are named as the
-  motivating cases and neither is admitted here — and does not change the
-  `PG_CONF__*` runtime surface.
+  Does not change the `PG_CONF__*` runtime surface.
+
+  This scope originally said the RFC adds **no specific extension**, pgvector and
+  pgmq included. P2 added pgvector, under decision 7 — which pre-authorised
+  exactly the two variants §3.1 measured demand for, and is the later text.
+  Recorded rather than rewritten: the original scope is what the mechanism was
+  designed against.
 - **Related:** [images/postgres/Dockerfile](../images/postgres/Dockerfile),
   [images/postgres/rootfs/postgresql.conf](../images/postgres/rootfs/postgresql.conf),
   [images/postgres/rootfs/entrypoint.sh](../images/postgres/rootfs/entrypoint.sh),
@@ -425,11 +430,21 @@ Two consequences worth stating rather than discovering:
 
 ## 10. Unresolved questions
 
-- **Is pgmq available as an apt package for the pinned major**, or does it need a
-  source build? This determines whether RFC 0006's gate can be answered with a
-  two-line change, which is this RFC's stated purpose. Measure before RFC 0006 is
-  decided.
-- Same question for pgvector, which is the more likely first real consumer.
+- ~~**Is pgmq available as an apt package for the pinned major**, or does it need
+  a source build?~~ **Answered by measurement 2026-08-17:** PGDG carries **no
+  pgmq package for any major**. It would need a source build, which decision 5
+  pre-authorises as a new manifest column — but §3.1 already found zero
+  consumers, and RFC 0006 shipped in wave 3 without it, so the question this was
+  gating no longer exists.
+- ~~Same question for pgvector, which is the more likely first real consumer.~~
+  **Answered by measurement 2026-08-17:** `postgresql-18-pgvector`
+  **0.8.6-1.pgdg13+1** is in `trixie-pgdg`, for majors 12 through 19. No source
+  build, no new column: one ordinary manifest row, shipped as P2.
+
+  The first measurement said otherwise and was wrong. Run inside a container
+  whose apt indexes had all failed to fetch, `apt-cache` answered from stale
+  baked lists and reported the package missing — a broken measurement whose
+  failure mode looks exactly like a result. See EXECUTION-LOG D-039.
 - Whether dotted extension GUCs left in the base config (`cron.database_name`
   with pg_cron absent) are accepted as placeholders or refused at startup. §5.2
   moves them regardless, so the answer changes nothing here — but it determines
@@ -459,6 +474,10 @@ Two consequences worth stating rather than discovering:
 | 13 | `LOCKED` | The manifest ships only extensions the image actually installs; unadmitted ones are not rows and do not appear in executable examples. Decision 4 makes manifest membership the definition of a valid input, so a speculative row advertises a build that fails. |
 | 14 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-001.** Supersedes the column set in row 5, under the departure row 5 pre-authorised ("a new column, not a second mechanism"). The manifest is **five** columns: `name : package : sql_name : preload : snippet`. The SQL name is explicit because it is not derivable from the preload library — `pgroonga` has a control file and no preload, `cron` has both and they differ from its logical name — and §5.2's control-file gate and §5.4's label mapping each require it. Consequence: adding an extension means filling five fields, and a row with an empty SQL name fails the build rather than skipping the availability check. |
 | 15 | `ASSUMED` | **Added by execution 2026-08-16 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-006.** §6's equivalence check is a **one-shot merge gate**, and its result is recorded in the execution log rather than kept runnable. The reference it compares against is the last `:18.6` published before the refactor, **by digest**. Two consequences, the second found while verifying the first: that reference fixes the base image and package versions as they were, so a later difference may be an upstream change rather than a regression; and **an untagged digest is not durable in this registry** — `cleanup-images.yaml` deletes untagged versions weekly, and a dry run on 2026-08-16 listed `sha256:9934cb32…` among them. A digest reference survives a repointed tag; it does not survive this repo's own garbage collection. Keeping one means giving it a tag. **Superseded in part by execution 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-036's group.** `sha256:9934cb32…` was deleted by the 04:49 UTC cleanup that morning, before it could be tagged, so this reference is gone and §6's result stands only as the log entry that recorded it. The durable form was already available and this row asked for the wrong thing: **a dated tag** from decision 12's tag policy is immutable and never repointed, so it cannot become untagged and cannot be collected. `9934cb32` had none because it predates the policy. An equivalence reference is therefore named as `postgres:<version>-<stamp>`, and RFC 0001 P4's own check used one — needing no registry write at all. |
+
+| 16 | `ASSUMED` | **Added by execution 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-040.** The extensions label is written by the **Dockerfile** from the `PG_EXTENSIONS` build arg, not by `docker-bake.hcl` beside the tags as §5.3's sketch has it. Two literals — one for `args`, one for `labels` — can disagree, and measurably did: `--set postgres.args.PG_EXTENSIONS=pgroonga` produced an image containing pgroonga alone that still claimed `cron pgroonga`, which decision 10 forbids. One string, read where the install reads it, and build-extensions' canonical-order refusal makes that string the canonical one. This is decision 1's rule — generated from the same input that drives the install, never hand-written — applied to the label as well as the preload line. |
+| 17 | `ASSUMED` | **Added by execution 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-041.** Extension sets are written **literally per target** and there is no `POSTGRES_EXTENSIONS` bake variable. A bake variable is settable from the environment, so anything exporting that name changed what `postgres:<version>` contained while its tags stayed put — wave 1's R-7. Consequence: a local experiment is `--set postgres.args.PG_EXTENSIONS=...`, which is explicit about being a one-off, and row 16 keeps its label honest. |
+| 18 | `ASSUMED` | **Added by execution 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-042.** CI resolves a target's smoke script from its **bake context** (`<context>/smoke.sh`), in both workflows. Iterating `images/*/smoke.sh` tests one image per directory, which silently skipped every variant — built by CI, never smoked, then refused at publish for having no script of its own. §6's build-mechanism tests live in `images/postgres/test-extensions.sh` for the same reason: they assert what a bad `PG_EXTENSIONS` does to a *build*, which no per-image smoke script can see. |
 
 ## 12. Phasing
 
