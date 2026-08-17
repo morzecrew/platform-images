@@ -39,7 +39,7 @@ Tags follow bake defaults. The image name carries what is inside; bake variables
 
 | Directory | Description |
 |-----------|-------------|
-| [postgres](./images/postgres) | PostgreSQL with pg_cron and pgroonga, allowlist-based config overrides via env. Extension variants share this package as tag suffixes: `-pgvector`, `-cron`. |
+| [postgres](./images/postgres) | PostgreSQL with allowlist-based config overrides via env. Three tags in one package: `18.6` (pg_cron + pgroonga), `18.6-pgvector`, `18.6-cron`. |
 | [caddy](./images/caddy) | Caddy with Coraza WAF and OWASP CRS; env-templated base, `CADDY_CONFIG_DIR` / `CADDY_SERVERS_DIR`, top-level snippet imports (`CADDY_BUILTIN_SNIPPETS_DIR`, `CADDY_SNIPPET_DEFS_DIR`). |
 | [flyway](./images/flyway) | Flyway with essential JDBC drivers, pinned versions. |
 | [uv-builder](./images/uv-builder) | uv-based Python build stage: sync, wheel, slim venv (`build-uv-app`). |

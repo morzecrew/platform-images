@@ -1878,3 +1878,30 @@ refusal branch that had never fired.
 - **No variant omits `cron`,** so the §6 trap test depends entirely on the
   harness's throwaway build. If that step is ever skipped, the test §6 calls
   unskippable is skipped with it.
+
+## Review findings — PR #33, 2026-08-17
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| R-25 | `docker-bake.hcl` `DESCRIPTIONS` | **The OCI description contradicted two of the three images.** All three carried `PostgreSQL with pg_cron and pgroonga…`: `:18.6-pgvector` omitted the extension it exists for, and `:18.6-cron` advertised pgroonga it does not have. This is D-040 again one label along — the extensions label was fixed in this wave and the description beside it was left saying the same wrong thing. The self-audit missed it too. | `drift` | Fixed |
+| R-26 | `rfcs/0004`, `rfcs/INDEX.md` | Status read **In progress** with all three of §12's phases shipped. Correcting a stale `Draft` earlier in this wave and stopping one notch short is the same failure the field keeps having (W-1, and this wave's own status entry). Now ✅ Complete in both places. | — | Fixed |
+| R-27 | `rfcs/0004` §5.1, §5.3 | Two design passages overtaken by what shipped: §5.1 used pgvector as its example of a row that must **not** exist, "whose packaging §10 records as unverified" — §10 now records it verified — and §5.3's snippets still write the extensions label in `docker-bake.hcl`, which row 16 moved to the Dockerfile. Both carry amendment notes rather than being rewritten. | `spec-gap` | Fixed |
+
+**R-25 makes the wave's drift count 2** — D-040 and R-25, the same defect class
+twice: metadata written by hand beside metadata generated from the build input.
+
+**The fix deliberately does not give each variant its own description.** Three
+hand-written descriptions that must agree with three `PG_EXTENSIONS` values is
+this wave's own distilled rule broken three times over. The description no longer
+names extensions at all; it points at the label, which is generated. One place
+names the set.
+
+**Round 1 was collected through GraphQL, because REST was returning 500.**
+`GET /repos/…/pulls/33/reviews` answered `HTTP 500` with `Content-Length: 0` for
+every page size, while `pulls/33/comments`, `issues/33/comments` and
+`pulls/33` were all `200` and GitHub's status page reported all systems normal.
+An earlier `401 Bad credentials` on the same endpoint was the same instability,
+not an auth failure — `gh auth status` and `/rate_limit` were healthy throughout.
+The loop's own tooling reads that surface over REST, so without the GraphQL
+detour this round would have looked empty, which is the failure mode wave 5's
+`--since` bug already demonstrated once.

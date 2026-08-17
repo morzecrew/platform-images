@@ -28,7 +28,14 @@ variable "DESCRIPTIONS" {
   default = {
     "flyway"            = "Flyway with PostgreSQL and ClickHouse JDBC drivers, pinned."
     "caddy"             = "Caddy with Coraza WAF and OWASP CRS, env-configured with snippet and config directories."
-    "postgres"          = "PostgreSQL with pg_cron and pgroonga, allowlist-based config overrides via env."
+    # Deliberately does not list extensions. Three tags share this package and
+    # each installs a different set, so any list here is wrong for two of them --
+    # measured: `:18.6-cron` advertised pgroonga it does not have and
+    # `:18.6-pgvector` omitted the extension it exists for. The set each image
+    # actually has is the `io.morze.postgres.extensions` label, generated from the
+    # build arg (RFC 0004 row 16), and images/postgres/README.md has the
+    # per-tag table for humans.
+    "postgres"          = "PostgreSQL with allowlist-based config overrides via env; the installed extension set is in the io.morze.postgres.extensions label."
     "uv-builder"        = "uv-based Python build stage: sync, wheel, slim venv via build-uv-app."
     "python-distroless" = "Distroless Python runtime with libmagic and CA bundle."
     "valkey"            = "Valkey with a finite maxmemory, one persistence switch, file-first secrets, and env-generated config."

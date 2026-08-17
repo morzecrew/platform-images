@@ -1,6 +1,6 @@
 # RFC 0004 — Postgres extensions as a build argument
 
-- **Status:** 🚧 In progress — **P1 shipped 2026-08-16** (manifest, build-time generation, the default image produced by the new mechanism, equivalence proven in EXECUTION-LOG D-006). **P2 and P3 shipped 2026-08-17**: the `pgvector` and `cron` variants, the build-mechanism tests §6 asked for, and the variant documentation. This field read **Draft** until 2026-08-17, five days after P1 merged — recorded rather than quietly corrected, because a status that lags the work is the failure a status field has.
+- **Status:** ✅ Complete — all three phases shipped. **P1 2026-08-16** (manifest, build-time generation, the default image produced by the new mechanism, equivalence proven in EXECUTION-LOG D-006). **P2 and P3 shipped 2026-08-17**: the `pgvector` and `cron` variants, the build-mechanism tests §6 asked for, and the variant documentation. This field read **Draft** until 2026-08-17, five days after P1 merged — recorded rather than quietly corrected, because a status that lags the work is the failure a status field has.
   The 2026-08-12 demand measurement (§3.1) stands: pgvector had two live
   consumers on a *different base image* and pgmq none, which is why P2 shipped
   `pgvector` and the cron-only subset rather than a queue.
@@ -186,13 +186,19 @@ pgroonga : postgresql-%M-pgdg-pgroonga   : pgroonga :         :
 its SQL name are both `pg_cron`. `pgroonga` is the row that shows it is not:
 its control file is `pgroonga.control` and it has no preload at all.
 
-**The manifest ships with exactly the two extensions the image installs today.**
-Every example below uses only those two. An unadmitted extension must not appear
-as a manifest row, because decision 4 makes manifest membership the definition of
-a valid `PG_EXTENSIONS` value — a `vector` row would advertise a build input
-whose packaging §10 records as unverified. pgvector and pgmq are added by the
-one-line change this RFC exists to make possible, each when it has a consumer and
-a verified package, not before.
+**The manifest ships with exactly the extensions the image installs.** An
+unadmitted extension must not appear as a manifest row, because decision 4 makes
+manifest membership the definition of a valid `PG_EXTENSIONS` value — a row for
+something unpackaged would advertise a build input that fails.
+
+**Amendment (2026-08-17, P2):** this section said "exactly the two extensions"
+and used pgvector as the example of a row that must *not* exist yet, "whose
+packaging §10 records as unverified". §10 has since recorded it as verified —
+`postgresql-18-pgvector` 0.8.6 — and pgvector has two deployed consumers (§3.1),
+so it is now the third row, added by exactly the one-line change this RFC exists
+to make possible. pgmq is still not a row: PGDG packages it for no major. The
+rule is unchanged; the count is three, and the example of an inadmissible row is
+now pgmq rather than pgvector.
 
 `pg_stat_statements` is not listed either, on different grounds: it ships with
 the server, needs no package, and is preloaded unconditionally. It stays a
@@ -282,6 +288,13 @@ target "postgres-search" {
   args = { PG_EXTENSIONS = "cron pgroonga" }
 }
 ```
+
+**Amendment (2026-08-17, P2 — see decision row 16):** both snippets above write
+`io.morze.postgres.extensions` in `docker-bake.hcl`. The shipped build does not:
+the label is written by the Dockerfile from the `PG_EXTENSIONS` build arg,
+because two literals — one for `args`, one for `labels` — can disagree, and
+measurably did. The tags, the OCI label set and the `inherits` shape in these
+snippets are unchanged and still normative.
 
 The second target is **illustrative**: it shows the shape, using only manifest
 rows that exist. A snippet naming `pgmq` would not build — decision 4 fails on
