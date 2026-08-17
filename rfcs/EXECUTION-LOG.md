@@ -1676,3 +1676,232 @@ finding whose only record is a PR comment is a finding nobody will count.
   expression was used on PR #31, which is already merged: its "round 2 empty"
   rests on zero unresolved threads and a possibly-false-green check, not on a
   correct sweep.
+
+---
+
+# Wave 6 · Postgres extension variants
+
+Branch `feat/wave-6-postgres-variants`. RFC 0004 P2 and P3.
+
+**Drift count: 1** — D-040, introduced and caught inside this wave.
+
+Three tags where there was one: `postgres:18.6` unchanged, `:18.6-pgvector`, and
+`:18.6-cron`. Decision 7's ceiling of three including the default is now reached
+exactly.
+
+## D-039 — pgvector's availability, measured twice because the first answer was an artefact
+
+- **Touches:** RFC 0004 §10 questions 1 and 2, decision 5
+- **Measured (wrong):** `apt-cache policy postgresql-18-pgvector` inside the
+  built image reported `<not found>`, and only three `postgresql-18-*` packages
+  existed at all.
+- **Why it was wrong:** every apt index in that container had failed to fetch — a
+  host proxy on `127.0.0.1:7890` is unreachable from a container — so `apt-cache`
+  answered from the stale lists baked into the image. Suppressing `apt-get
+  update`'s output with `-qq` is what hid it. Three packages from a repository
+  that carries hundreds was the tell.
+- **Measured (right), from the host against the PGDG index:**
+  `postgresql-18-pgvector` **0.8.6-1.pgdg13+1** exists, for majors 12–19. **pgmq
+  exists for no major.**
+- **Class:** `discovery`, and the entry is here because the near-miss is the
+  finding: it was one commit away from being written into an RFC as "pgvector
+  needs a source build", which would have justified a new manifest column and a
+  build stage nobody needed.
+- **Rule:** a measurement whose failure mode looks like a result has to be
+  checked for having run at all. `<not found>` and "could not look" are the same
+  string.
+
+## D-040 — The extensions label moves into the Dockerfile
+
+- **Touches:** RFC 0004 decision 10 (`LOCKED`), decision 1 (`LOCKED`), §5.3
+- **RFC said:** §5.3's sketch sets `io.morze.postgres.extensions` in
+  `docker-bake.hcl`, beside the tags
+- **Built first, in this wave:** the label and the install list as two separate
+  literals per target, replacing the single `POSTGRES_EXTENSIONS` variable that
+  had fed both
+- **Found:** `--set postgres.args.PG_EXTENSIONS=pgroonga` produced an image
+  containing pgroonga alone that went on claiming `cron pgroonga`. Decision 10 is
+  `LOCKED` on the label **being** the canonicalized selection, and wave 1's
+  canonical-order refusal cannot catch this because the build never sees the
+  label.
+- **Built now:** `LABEL io.morze.postgres.extensions="${PG_EXTENSIONS}"` in the
+  Dockerfile; bake writes only the OCI label set. One string, read where the
+  install reads it, and the canonical-order refusal makes it the canonical
+  spelling.
+- **Class:** `drift`, against a `LOCKED` row, introduced by this wave's own first
+  attempt. Splitting one variable into two literals looked like a simplification
+  and was a way for contents and label to disagree.
+- **This is decision 1 generalised.** That row says the preload line is generated
+  from the same input that drives the install and never hand-written. The label
+  has the same property and the same failure mode, and §5.3 put it somewhere the
+  input cannot reach.
+- **Proposed row (RFC 0004):** row 16.
+
+## D-041 — No `POSTGRES_EXTENSIONS` variable; sets are literal per target
+
+- **Touches:** wave 1's R-7, RFC 0004 §5.3
+- **RFC said:** §5.3's sketch hardcodes `PG_EXTENSIONS` per target and declares no
+  variable. Wave 1 introduced one.
+- **Built:** the sketch's shape — literal per target, no variable.
+- **Because:** bake reads HCL variables from the environment, so anything that
+  exported `POSTGRES_EXTENSIONS` changed what `postgres:18.6` contained while its
+  tags stayed put. That is R-7's remaining bite after wave 2's D-012 closed the
+  local-publish route.
+- **Class:** `drift` against wave 1, fixed here. Not counted in this wave's drift
+  number, which counts what this wave introduced.
+- **Proposed row (RFC 0004):** row 17.
+
+## D-042 — CI resolves a smoke script from the target's context, and §6's build tests get their own harness
+
+- **Touches:** RFC 0002 §5.5, decision 20; RFC 0004 §6
+- **Found:** the two workflows disagreed about what "smoke every image" means.
+  `bake.yaml` iterated `images/*/smoke.sh` — one per directory — while
+  `publish.yaml` iterated targets and required `images/<target>/smoke.sh`. A
+  variant is a target sharing the base image's directory, so it would have been
+  **built and never smoked** in CI, then refused at publish.
+- **Built:** both workflows resolve `<context>/smoke.sh` from `bake --print`. A
+  target's context already is its image directory and a variant inherits it, so
+  there is no naming convention and nothing new to forget; a target whose context
+  has no script is still refused, which is the property decision 20 wants.
+- **Also built:** `images/postgres/test-extensions.sh`, because three of §6's
+  tests cannot run against a built image. Two assert that a bad `PG_EXTENSIONS`
+  **fails the build**; the third needs an image without `cron`, and no shipped
+  variant is one. §6 calls that third test the one that must never be skipped,
+  and until this wave it had never run.
+- **Class:** `spec-gap`. §6 listed tests that P1 could not run and P2 makes
+  runnable; §5.5 described a per-image smoke stage before targets could
+  outnumber directories.
+- **Departure from this wave's own plan gate:** the answer chosen was a declared
+  label (`io.morze.smoke`). The context field carries the same information, is
+  already correct for all eight targets, needs no new field per target and adds
+  no ninth image label. Same source of truth, one less thing to forget — flagged
+  here rather than silently substituted.
+- **Proposed row (RFC 0004):** row 18.
+
+## Facts measured this wave
+
+| What | Result |
+|---|---|
+| `postgresql-18-pgvector` in PGDG `trixie-pgdg` | 0.8.6-1.pgdg13+1, majors 12–19 |
+| pgmq in PGDG, any major | absent |
+| pgvector end to end | `CREATE EXTENSION vector`, `vector(3)` column, `<->` nearest-neighbour query returns the right row, `extversion` 0.8.6 |
+| `postgres:18.6-cron` | `absent as expected: pgroonga` **and** `absent as expected: vector` — wave 1's R-8 negative direction with something real to catch |
+| An image built without `cron` | starts; preload line is `pg_stat_statements` alone; no `cron.*` setting anywhere under `/etc/postgresql/` |
+| All three shipped labels | `cron pgroonga`, `cron pgroonga pgvector`, `cron` |
+
+## Rules distilled
+
+- A measurement that can fail silently must be checked for having run. An apt
+  cache with no network answers from stale lists, and `<not found>` is what both
+  "absent" and "could not look" print (D-039).
+- Two literals that must agree will disagree. If one of them is derivable from
+  the other, derive it — and derive it where the authority is, not where it is
+  convenient to write (D-040).
+- A bake variable is an environment variable. Anything settable from outside the
+  file can change what a tag contains without changing the tag (D-041).
+- When a test list names a test that cannot run against the artefact under test,
+  that is not a gap in the tests — it is a missing harness (D-042).
+- Iterating directories to test targets works until a target does not own a
+  directory. Ask what the loop is actually enumerating (D-042).
+
+## Carried into the next unit
+
+- **`keyvalue` renderer** still ships with RFC 0005 (D-019). `pgconf` and
+  `valkeyconf` both exist, so a third has two shapes to follow.
+- **RFC 0004 has no P4**; with P2 and P3 shipped the RFC is complete except for
+  the decision-7 ceiling being a standing constraint rather than a task.
+- **Two author decisions are still open**, both carried from wave 5: narrowing
+  RFC 0001 decision 4 to image-owned secrets (A-21), and whether `postgres`
+  should ship `-c allow_alter_system=off` (W-3).
+- ~~RFC 0004 P2, P3~~ — shipped.
+- ~~R-7~~ — closed, by removing the variable (D-041).
+- ~~§10 questions 1 and 2~~ — answered by measurement (D-039).
+
+## Reconciliation — 2026-08-17 (wave 6)
+
+| RFC | Row | Outcome | Grade | Decision | From |
+|---|---|---|---|---|---|
+| 0004 | 16 | **Proposed** | `ASSUMED` | The extensions label is written by the Dockerfile from the build arg | D-040 |
+| 0004 | 17 | **Proposed** | `ASSUMED` | Extension sets are literal per target; no bake variable | D-041 |
+| 0004 | 18 | **Proposed** | `ASSUMED` | CI resolves a smoke script from the target's context; §6's build tests get a harness | D-042 |
+| 0004 | §10 | **Answered** | — | pgvector packaged for 18; pgmq packaged for nothing | D-039 |
+| 0004 | status | **Corrected twice** | — | `Draft` → `In progress` (five days late) → **`Complete`**: §12 has three phases and all shipped. The intermediate step was itself wrong, caught by PR #33's review (R-26). Scope's "no specific extension" reconciled against decision 7 | this wave, R-26 |
+
+Wave 5's rows 23 and 24 (RFC 0001) were ratified by merging PR #32. The two
+`LOCKED`-row questions it raised are still open and are the author's.
+
+## Self-audit findings — wave 6, 2026-08-17
+
+Scope: the whole branch, 2 commits, 11 files, +458/−44 — the manifest row, the
+bake targets, both workflows, the new build-mechanism harness, and the docs.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-27 | `test-extensions.sh` | `cleanup()` reads `${TEST_TAG}`, and `trap cleanup EXIT` is installed **before** that variable is assigned. A failure in between would make cleanup itself die on an unbound variable under `set -u`, taking the `rm -rf "${WORK}"` after it. An advisory cleanup outranking the outcome it trails. | — | Fixed (`${TEST_TAG:-}`) |
+| A-28 | `bake.yaml`, `publish.yaml` | The context→script resolution had only ever run on the happy path: all eight targets resolve, so nothing exercised the refusal. Tested against a doctored plan whose target names a nonexistent context — it refuses by name and the loop exits 1. | — | Verified |
+| A-29 | RFC 0004 §8's empty set | `PG_EXTENSIONS=""` is where wave 1's A-1 defect lived, and nothing had exercised it since that fix. Measured: builds, starts, preload is `pg_stat_statements` alone, label is empty, and `conf.d` holds only the unconditional fragments. **Deliberately not automated** — it is a full build for a case with no shipped tag, and the harness already pays for one. Recorded so the omission is visible rather than assumed. | — | Verified, not automated |
+| A-30 | decisions 3 and 6 | Both verified by measurement rather than read: every variant carries `POSTGRES_IMAGE_TAG=18.6`, so `inherits` merged args per key (D-006 warned this fails as a build against the wrong major, not as an error); `PACKAGES` still lists `postgres` once, so variants cost no new GHCR package. | — | Conformant |
+
+**The wave's real finding is D-040 and it was found by the harness, not by this
+pass.** Writing the tests §6 had asked for since wave 1 exposed a defect this
+wave had just introduced, within minutes of the harness existing. The audit's own
+findings here are smaller: a cleanup path that could outrank its outcome, and a
+refusal branch that had never fired.
+
+### Verified
+
+| Check | Result |
+|---|---|
+| Helper suite | 139 passed / 0 failed (bash), 136 / 0 (busybox ash) |
+| `postgres`, `:18.6-pgvector`, `:18.6-cron` smoke | all exit 0; labels `cron pgroonga`, `cron pgroonga pgvector`, `cron` |
+| Extension mechanism harness | 6 assertions, PASS |
+| Tag shapes with `BUILD_STAMP` set | `18.6-pgvector` and `18.6-pgvector-<stamp>`; the mutable tag is a strict prefix of the immutable one for every variant |
+| Label set per image | 9 — the eight OCI labels plus the extensions label; the Dockerfile `LABEL` merges with bake's rather than displacing them |
+
+### Residue — what I would still distrust
+
+- **pgvector is unpinned, like every other extension package (decision 8), and it
+  is the first extension where that matters differently.** A weekly `--no-cache`
+  rebuild can move pgvector across a minor release, and vector index formats are
+  not guaranteed stable across those; a stateful database may need a `REINDEX`
+  that nothing here would announce. Decision 8 accepted unpinned packages when
+  the set was cron and pgroonga, where the equivalent risk is much lower. **This
+  is the author's call** and is carried, not fixed.
+- **CI now runs three extra builds** for the harness — two are `type=cacheonly`
+  and cheap, the third is a full build. If the job gets slow, the full one is what
+  to gate on paths.
+- **`test-extensions.sh` does not follow `smoke.sh`'s assertion helpers**
+  (`expect_in`/`expect_not_in`); it uses `fail` plus `case`. Both are bash under
+  `set -euo pipefail`, and the harness is testing builds rather than a running
+  image, so the shapes differ for a reason — but a reader moving between the two
+  files will notice.
+- **No variant omits `cron`,** so the §6 trap test depends entirely on the
+  harness's throwaway build. If that step is ever skipped, the test §6 calls
+  unskippable is skipped with it.
+
+## Review findings — PR #33, 2026-08-17
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| R-25 | `docker-bake.hcl` `DESCRIPTIONS` | **The OCI description contradicted two of the three images.** All three carried `PostgreSQL with pg_cron and pgroonga…`: `:18.6-pgvector` omitted the extension it exists for, and `:18.6-cron` advertised pgroonga it does not have. This is D-040 again one label along — the extensions label was fixed in this wave and the description beside it was left saying the same wrong thing. The self-audit missed it too. | `drift` | Fixed |
+| R-26 | `rfcs/0004`, `rfcs/INDEX.md` | Status read **In progress** with all three of §12's phases shipped. Correcting a stale `Draft` earlier in this wave and stopping one notch short is the same failure the field keeps having (W-1, and this wave's own status entry). Now ✅ Complete in both places. | — | Fixed |
+| R-27 | `rfcs/0004` §5.1, §5.3 | Two design passages overtaken by what shipped: §5.1 used pgvector as its example of a row that must **not** exist, "whose packaging §10 records as unverified" — §10 now records it verified — and §5.3's snippets still write the extensions label in `docker-bake.hcl`, which row 16 moved to the Dockerfile. Both carry amendment notes rather than being rewritten. | `spec-gap` | Fixed |
+
+**R-25 makes the wave's drift count 2** — D-040 and R-25, the same defect class
+twice: metadata written by hand beside metadata generated from the build input.
+
+**The fix deliberately does not give each variant its own description.** Three
+hand-written descriptions that must agree with three `PG_EXTENSIONS` values is
+this wave's own distilled rule broken three times over. The description no longer
+names extensions at all; it points at the label, which is generated. One place
+names the set.
+
+**Round 1 was collected through GraphQL, because REST was returning 500.**
+`GET /repos/…/pulls/33/reviews` answered `HTTP 500` with `Content-Length: 0` for
+every page size, while `pulls/33/comments`, `issues/33/comments` and
+`pulls/33` were all `200` and GitHub's status page reported all systems normal.
+An earlier `401 Bad credentials` on the same endpoint was the same instability,
+not an auth failure — `gh auth status` and `/rate_limit` were healthy throughout.
+The loop's own tooling reads that surface over REST, so without the GraphQL
+detour this round would have looked empty, which is the failure mode wave 5's
+`--since` bug already demonstrated once.

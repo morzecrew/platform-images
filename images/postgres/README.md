@@ -4,11 +4,29 @@ Custom PostgreSQL Docker images for the Morze platform. Based on official `postg
 
 ## Contents
 
-**Tag `18.4`** — extends official `postgres:18.4` with:
+Every tag is the same PostgreSQL, the same base config
+(`rootfs/postgresql.conf`) and the same **allowlist-based overrides** via
+environment variables. They differ only in which extensions are installed, and
+each image records its own set in the `io.morze.postgres.extensions` label:
+
+| Tag | Extensions | For |
+|---|---|---|
+| `18.6` | pg_cron, pgroonga | The default. Unchanged meaning since before variants existed — pinning it gets you both, as it always did. |
+| `18.6-pgvector` | pg_cron, pgroonga, **pgvector** | Vector search *as well as* cron and full-text, which no single image offered before: the choice used to be this image or `pgvector/pgvector`. |
+| `18.6-cron` | pg_cron | Cron without pgroonga, for a service that was paying for the groonga apt source, package and image size to get scheduling. |
 
 - [pg_cron](https://github.com/citusdata/pg_cron) — cron-style job scheduling inside Postgres
 - [pgroonga](https://pgroonga.github.io/) — full-text search via Groonga
-- Base config in the image (`rootfs/postgresql.conf`) plus **allowlist-based overrides** via environment variables.
+- [pgvector](https://github.com/pgvector/pgvector) — vector similarity search; `CREATE EXTENSION vector`
+
+`pg_stat_statements` is in every tag and is not listed in the label: it ships
+with the server rather than being selected (RFC 0004 decision 10).
+
+Which extensions are selectable is [`rootfs/extensions.manifest`](./rootfs/extensions.manifest),
+and a name absent from it fails the build rather than quietly producing a smaller
+image. Three variants including the default is the ceiling (RFC 0004 decision 7)
+— each is a full uncached rebuild every week, so a fourth request is a
+conversation, not a line.
 
 `POSTGRES_VERSION` in [`docker-bake.hcl`](../../docker-bake.hcl) sets the registry tag and `POSTGRES_IMAGE_TAG` in [`Dockerfile`](./Dockerfile).
 
@@ -17,10 +35,12 @@ Custom PostgreSQL Docker images for the Morze platform. Based on official `postg
 From the repo root (see [images/README.md](../README.md)):
 
 ```bash
-just bake postgres
+just bake postgres            # the default set
+just bake postgres-pgvector   # one variant
+just bake                     # every image, variants included
 ```
 
-Image: `ghcr.io/morzecrew/postgres:18.4`.
+Images: `ghcr.io/morzecrew/postgres:18.6`, `:18.6-pgvector`, `:18.6-cron`.
 
 ## Configuration overrides
 

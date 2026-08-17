@@ -42,6 +42,18 @@ jobs:
       - name: Test the shared env-config helper
         run: sh shared/test/run.sh -v
 
+      # RFC 0004 §6's build-mechanism tests. They cannot live in smoke.sh, which
+      # gets one built image: two assert that a bad PG_EXTENSIONS *fails the
+      # build*, and the third needs an image without cron, which no shipped
+      # variant is. §6 calls that one the test that must never be skipped, and
+      # until this step it had never run.
+      #
+      # Two of the three cost nothing -- the validation they exercise happens in
+      # the first RUN layer, so they build with type=cacheonly and no exporter.
+      # The third is a full build.
+      - name: Test the extension mechanism
+        run: bash images/postgres/test-extensions.sh
+
       # One job, one build. A separate smoke job would have to build again --
       # images do not cross job boundaries without an artifact upload -- so the
       # thing smoke-tested would not be the thing the build step verified, and
@@ -82,13 +94,31 @@ jobs:
       # ownership and sub-1024 port binds actually fail, and those are the
       # assumptions Docker hides until a customer's air-gapped install finds
       # them. Podman is present on ubuntu-latest without setup.
+      #
+      # Driven by targets, not by directories. Iterating images/*/smoke.sh tests
+      # one image per directory, which silently skips any target sharing a
+      # directory with another -- every RFC 0004 extension variant. Those would be
+      # built by the step above and never smoke-tested here, then refused by
+      # publish.yaml for having no script of their own: built, untested, unpublished.
+      #
+      # A target's context *is* its image directory, and a variant inherits it, so
+      # `bake --print` already answers "which script tests this target" with no
+      # naming convention to get wrong. publish.yaml resolves it the same way.
       - name: Smoke test each image
         run: |
           set -euo pipefail
           failed=0
-          for script in images/*/smoke.sh; do
-            name="$(basename "$(dirname "${script}")")"
-            ref="$(docker buildx bake --print "${name}" \
+          plan="$(docker buildx bake --print)"
+          targets=$(echo "${plan}" \
+            | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')
+          for name in ${targets}; do
+            script="$(echo "${plan}" | python3 -c "import json,sys,pathlib; print(pathlib.PurePath(json.load(sys.stdin)['target']['${name}']['context'], 'smoke.sh'))")"
+            [ -f "${script}" ] || {
+              echo "::error title=No smoke test::${name} has no ${script}"
+              failed=1
+              continue
+            }
+            ref="$(echo "${plan}" \
               | python3 -c "import json,sys; print(json.load(sys.stdin)['target']['${name}']['tags'][0])")"
             echo "::group::smoke ${name} (${ref})"
             if bash "${script}" "${ref}"; then

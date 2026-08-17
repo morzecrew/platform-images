@@ -16,3 +16,4 @@
 # name     : package                     : sql_name : preload : snippet
 cron       : postgresql-%M-cron          : pg_cron  : pg_cron : cron.conf
 pgroonga   : postgresql-%M-pgdg-pgroonga : pgroonga :         :
+pgvector   : postgresql-%M-pgvector      : vector   :         :

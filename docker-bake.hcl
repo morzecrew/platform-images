@@ -28,7 +28,14 @@ variable "DESCRIPTIONS" {
   default = {
     "flyway"            = "Flyway with PostgreSQL and ClickHouse JDBC drivers, pinned."
     "caddy"             = "Caddy with Coraza WAF and OWASP CRS, env-configured with snippet and config directories."
-    "postgres"          = "PostgreSQL with pg_cron and pgroonga, allowlist-based config overrides via env."
+    # Deliberately does not list extensions. Three tags share this package and
+    # each installs a different set, so any list here is wrong for two of them --
+    # measured: `:18.6-cron` advertised pgroonga it does not have and
+    # `:18.6-pgvector` omitted the extension it exists for. The set each image
+    # actually has is the `io.morze.postgres.extensions` label, generated from the
+    # build arg (RFC 0004 row 16), and images/postgres/README.md has the
+    # per-tag table for humans.
+    "postgres"          = "PostgreSQL with allowlist-based config overrides via env; the installed extension set is in the io.morze.postgres.extensions label."
     "uv-builder"        = "uv-based Python build stage: sync, wheel, slim venv via build-uv-app."
     "python-distroless" = "Distroless Python runtime with libmagic and CA bundle."
     "valkey"            = "Valkey with a finite maxmemory, one persistence switch, file-first secrets, and env-generated config."
@@ -154,29 +161,58 @@ variable "POSTGRES_VERSION" {
   default = "18.6"
 }
 
-# Extension set for the default target. Variants override PG_EXTENSIONS and
-# their own label; `inherits` merges args per key, so a variant declares only
-# what it changes (verified on buildx 0.35 -- RFC 0004 decision 6).
+# Three extension sets, three targets, one registry name (RFC 0004 decision 3).
+# The unsuffixed tag keeps its published meaning -- cron + pgroonga -- so nobody
+# pinning `postgres:18.6` sees a change; variants take a suffix.
 #
-# Ceiling is three variants including this one (decision 7): each costs a full
-# --no-cache slot in the weekly rebuild.
-variable "POSTGRES_EXTENSIONS" {
-  default = "cron pgroonga"
-}
-
+# The sets are written literally rather than through a bake variable. A variable
+# is settable from the environment, so anything that exported
+# POSTGRES_EXTENSIONS changed what `postgres:18.6` contained while the tag stayed
+# put -- wave 1's R-7, whose remaining bite this removes. Experimenting locally
+# still works with `--set postgres.args.PG_EXTENSIONS=...`, which is explicit
+# about being a one-off.
+#
+# `inherits` merges args per key with the child's value winning, so a variant
+# declares only what it changes (decision 6, measured on buildx 0.35).
+#
+# Ceiling is three including the default (decision 7), and this reaches it: each
+# is a full --no-cache slot in the weekly rebuild, so a fourth request is the
+# prompt to ask whether the answer is no.
 target "postgres" {
   inherits   = ["_attested"]
   context    = "./images/postgres"
   contexts   = { shared = "./shared" }
   dockerfile = "Dockerfile"
   tags       = tag("postgres", POSTGRES_VERSION)
-  labels = merge(label("postgres", POSTGRES_VERSION), {
-    "io.morze.postgres.extensions" = POSTGRES_EXTENSIONS
-  })
+  labels     = label("postgres", POSTGRES_VERSION)
   args = {
     POSTGRES_IMAGE_TAG = POSTGRES_VERSION
-    PG_EXTENSIONS      = POSTGRES_EXTENSIONS
+    PG_EXTENSIONS      = "cron pgroonga"
   }
+}
+
+# The default set plus pgvector. §3.1's measured demand is not "vector instead of
+# what this image has" but "vector as well": two projects left for
+# pgvector/pgvector and gave up cron and pgroonga to get it.
+#
+# `image.version` stays the base version, as §5.3's sketch has it -- a variant is
+# the same Postgres with a different extension set, and the tag is what says
+# which set.
+target "postgres-pgvector" {
+  inherits = ["postgres"]
+  tags     = tag("postgres", "${POSTGRES_VERSION}-pgvector")
+  labels   = label("postgres", POSTGRES_VERSION)
+  args     = { PG_EXTENSIONS = "cron pgroonga pgvector" }
+}
+
+# The default set minus pgroonga, for a consumer that wants cron and was paying
+# for the groonga apt source, the package and the image size to get it (§3.1,
+# morze-erp-backend-v2). Needs no manifest row: omitting is subtraction.
+target "postgres-cron" {
+  inherits = ["postgres"]
+  tags     = tag("postgres", "${POSTGRES_VERSION}-cron")
+  labels   = label("postgres", POSTGRES_VERSION)
+  args     = { PG_EXTENSIONS = "cron" }
 }
 
 # ....................... #
@@ -275,5 +311,8 @@ target "python-distroless" {
 # ....................... #
 
 group "default" {
-  targets = ["flyway", "caddy", "postgres", "uv-builder", "python-distroless", "valkey"]
+  targets = [
+    "flyway", "caddy", "postgres", "postgres-pgvector", "postgres-cron",
+    "uv-builder", "python-distroless", "valkey",
+  ]
 }

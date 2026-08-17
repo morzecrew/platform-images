@@ -15,7 +15,7 @@ From the **repo root**. Requires [just](https://github.com/casey/just) and [Dock
 ```bash
 just bake                 # all images (default group)
 just bake postgres        # single image
-just push postgres 18.4   # push an already-built local tag
+just push postgres 18.6   # push an already-built local tag
 just push uv-builder 3.14
 ```
 
@@ -39,7 +39,7 @@ Tags follow bake defaults. The image name carries what is inside; bake variables
 
 | Directory | Description |
 |-----------|-------------|
-| [postgres](./images/postgres) | PostgreSQL with pg_cron and pgroonga, allowlist-based config overrides via env. |
+| [postgres](./images/postgres) | PostgreSQL with allowlist-based config overrides via env. Three tags in one package: `18.6` (pg_cron + pgroonga), `18.6-pgvector`, `18.6-cron`. |
 | [caddy](./images/caddy) | Caddy with Coraza WAF and OWASP CRS; env-templated base, `CADDY_CONFIG_DIR` / `CADDY_SERVERS_DIR`, top-level snippet imports (`CADDY_BUILTIN_SNIPPETS_DIR`, `CADDY_SNIPPET_DEFS_DIR`). |
 | [flyway](./images/flyway) | Flyway with essential JDBC drivers, pinned versions. |
 | [uv-builder](./images/uv-builder) | uv-based Python build stage: sync, wheel, slim venv (`build-uv-app`). |
