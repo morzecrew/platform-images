@@ -1,6 +1,14 @@
 # RFC 0001 — Shared env-config contract
 
-- **Status:** ✅ Complete — all four phases shipped. **P1 2026-08-16** (the contract in
+- **Status:** ✅ Complete (**one decision under review**) — all four phases
+  shipped, and **decision 4 is known to conflict with decision 1** for
+  upstream-owned secrets: `POSTGRES_PASSWORD_FILE` does not take precedence over
+  `POSTGRES_PASSWORD`, because upstream refuses when both are set and decision 1
+  forbids intercepting an upstream name. Measured both ways in EXECUTION-LOG
+  A-21, which proposes narrowing decision 4 to image-owned secrets. That edit is
+  a `LOCKED` row change and is the author's, so the phases are marked shipped and
+  the conflict is named here rather than resolved by the executor. **P1
+  2026-08-16** (the contract in
   [images/README.md](../images/README.md)); **P2 shipped 2026-08-16** — the
   helper is [shared/rootfs/lib/envconf.sh](../shared/rootfs/lib/envconf.sh),
   distributed by a bake named context and exercised by the new `valkey` image,

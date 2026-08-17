@@ -92,7 +92,16 @@ envconf_collect PG >"${COLLECTED}"
 # and the move leaves the previous overrides rather than half a file. The
 # generated header is unchanged from the bash version: an operator who diffs
 # the file across an upgrade should see only their own settings move.
-tmp_overrides=$(mktemp)
+#
+# The template has to be **inside CONF_D** for that to be true. `mktemp` with no
+# template writes to /tmp, which is the same overlay filesystem by default and a
+# separate one as soon as anybody runs with `--tmpfs /tmp` -- measured, device
+# ids 1048775 vs 1048655. Across filesystems `mv` copies and then unlinks, so an
+# interruption leaves exactly the truncated file this pattern exists to prevent.
+#
+# The dot prefix keeps a leftover out of Postgres's `include_dir`, which reads
+# `*.conf`, and out of the attribution loop below, which globs the same.
+tmp_overrides=$(mktemp "${CONF_D}/.99-overrides.XXXXXX")
 {
 	echo "# Auto-generated overrides. Do not edit."
 	echo "# Generated at: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"

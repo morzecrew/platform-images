@@ -75,6 +75,12 @@ A `PG_*` variable that is neither a `PG_CONF__*` override nor one of the control
 above produces a warning naming it — a misspelled override that silently does
 nothing is the failure this is here to prevent.
 
+Two names are excluded because the base image sets them on every start:
+`PG_MAJOR` and `PG_VERSION`. They belong to upstream, this image never reads
+them as configuration, and a warning that fires on every container is how an
+operator learns to ignore all of them. `PGDATA` is also upstream's and never
+matches in the first place — the prefix checked is `PG_`, with the underscore.
+
 ## Layout
 
 - `Dockerfile` — image build
