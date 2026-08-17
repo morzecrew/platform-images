@@ -1912,14 +1912,15 @@ Branch `docs/wave-7-rfc-close-out`. RFC 0002 §6's verification against GHCR,
 RFC 0006's close-out, and RFC 0009's evidence and open decisions. No image
 changed; the only executable change is one `smoke.sh` section.
 
-**Drift count: 3** — A-31, A-32 and A-33, all introduced by this wave and all
-caught by its own audit. D-044 is `drift` against wave 3, found here, and is not
-counted in this wave's number.
+**Drift count: 4** — A-31, A-32, A-33 and A-35, all introduced by this wave and
+all caught by its own audit or the PR that followed it. D-044 is `drift` against
+wave 3, found here, and is not counted in this wave's number.
 
-This number was written as **0** when the group was drafted, before the audit
-ran, and is corrected here rather than in place — a drift count written before
-the audit is a prediction, and this one was wrong. The three are one failure
-repeated: a correction that stopped short of the places it implicated.
+This number was written as **0** when the group was drafted, then **3** after the
+audit, and is corrected in place each time rather than rewritten — a drift count
+written before the audit is a prediction, and this one was wrong twice. The four
+are one failure repeated: a claim that overshoots the measurement or the fix
+behind it.
 
 The wave exists because three RFCs were finished, or wrong, in ways nobody had
 checked. Two of them turned out to be finished.
@@ -2177,6 +2178,7 @@ produced, and prose is the thing nothing else checks.
 | A-32 | RFC 0006 §10, status | I wrote a completion criterion — "every §12 phase shipped **and §10's questions answered or struck**" — and then flipped the status while questions 2 and 3 were neither. Question 3's answer existed only in the status block, which is the same "answered somewhere else" defect R-26 caught on RFC 0004. A criterion the document does not visibly satisfy is worse than no criterion, because it invites the reader to stop checking. | `drift` | Fixed — both struck with their evidence |
 | A-33 | RFC 0009 §5.1, §4 | New decision 10 supersedes §5.1's `packageManager` requirement, and I left §5.1 stating it with no pointer — exactly the defect R-27 raised against RFC 0004 §5.3 one wave earlier. The same sweep found two more instances of D-046's corrected count still live in §5.1 and §4 ("the measurable win for four of five", "not one of five"). | `drift` | Fixed — amendment notes on all three |
 | A-34 | `smoke.sh` §18 | A redundant `"${ENGINE}" rm -f "${CTR}"` immediately after §17's own, and immediately before a `start` that does it a third time. Harmless, and duplication I introduced. | — | Fixed |
+| A-35 | This section's own residue | "**No CI covers any of this wave**" — contradicted by the rest of its own sentence, which correctly says `smoke.sh` §18 runs in CI. `bake.yaml`'s filter matches `images/**`. Found while opening the PR, after this table was written, and recorded rather than quietly fixed because it is A-31's shape a fourth time: an overstated headline over an accurate detail. | `drift` | Fixed |
 
 **Three of the four findings are the same failure: a correction that stopped one
 step short of the places it implicated.** A-31 corrected a claim and overshot,
@@ -2211,6 +2213,6 @@ writing.
 - **RFC 0009 §10 question 3 is still a read rather than a measurement.**
   `react-scripts` 5.0.1 on webpack 5 suggests `morze-landing` can leave Node 16,
   but nothing was built to confirm it, and it is another project's repository.
-- **No CI covers any of this wave.** `bake.yaml` ignores `rfcs/**`, so the only
-  executable change — `smoke.sh` §18 — runs in CI while every document here is
-  checked by review alone.
+- **No CI covers the documents**, which are most of this wave. `bake.yaml`'s path
+  filter matches `images/**`, so `smoke.sh` §18 *is* built and run in CI; every
+  RFC and the log itself are checked by review alone.
