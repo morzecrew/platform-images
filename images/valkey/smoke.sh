@@ -430,7 +430,6 @@ esac
 # which is a mounted volume the entrypoint must not overwrite. The difference is
 # where the file lives, not what either RFC decided.
 
-"${ENGINE}" rm -f "${CTR}" >/dev/null
 start "${CTR}" -e VALKEY_MAXMEMORY=100mb
 wait_ready "${CTR}"
 [ "$(cfg "${CTR}" maxmemory)" = "104857600" ] ||

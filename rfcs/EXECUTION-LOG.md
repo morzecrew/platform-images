@@ -2004,8 +2004,14 @@ checked. Two of them turned out to be finished.
   recommends it as the first migration *because* of both.
 - **Measured, against the default branch of each of the five repositories:**
   neither holds. `erp-frontend` has no `--mount=type=cache` anywhere, and its
-  runtime is `caddy:2.11.1-alpine` from Docker Hub. **No Morze project consumes
+  runtime is `caddy:2.11.1-alpine` from Docker Hub. **None of the five consumes
   this repo's caddy image.** Cache mounts across all five: **zero**, not one.
+- **Corrected during this wave's own audit (A-31):** the first version of this
+  entry said *no Morze project* consumes this repo's caddy image, which is false
+  and is a broader claim than the measurement supported. An org-wide code search
+  finds `eis-backend` and `erp-backend` building `containers/gateway` from
+  `ghcr.io/morzecrew/caddy:2.11.2`. The image is adopted as a reverse-proxy
+  gateway and unadopted as a static-asset runtime.
 - **Not drift in the projects:** `erp-frontend`'s `Dockerfile` is unchanged since
   2026-05-09, three months before the RFC measured it, so it was in this state
   when the claims were written.
@@ -2084,7 +2090,8 @@ checked. Two of them turned out to be finished.
 | Valkey restart | conf regenerated from the environment; 100mb restored on disk and in the server |
 | `valkey/smoke.sh` | 29 assertions, PASS; §18 verified red against a sabotaged image |
 | Cache mounts across the five JS projects | **zero** (RFC 0009 §2 said one) |
-| Morze projects consuming `ghcr.io/morzecrew/caddy` | **zero** (RFC 0009 §2 said one) |
+| Of the five JS projects, consumers of `ghcr.io/morzecrew/caddy` | **zero** (RFC 0009 §2 said one) |
+| Org-wide consumers of `ghcr.io/morzecrew/caddy` | **two** — `eis-backend`, `erp-backend`, both `containers/gateway`, both `:2.11.2`. Found by the audit after the first draft of D-046 overstated the zero (A-31) |
 | Package manager the two landings actually run | `npm ci`, by the detect chain's order |
 
 ## Rules distilled
@@ -2151,3 +2158,53 @@ checked. Two of them turned out to be finished.
 | 0009 | §12 P1 | **Amended** | — | The cross-repo migration no longer gates the phase | D-047 |
 
 Wave 6's rows 16, 17 and 18 (RFC 0004) were ratified by merging PR #33.
+
+## Self-audit findings — wave 7, 2026-08-17
+
+Scope: the whole branch, 4 commits — one `smoke.sh` section and five documents.
+The audit's centre of gravity is prose, because that is nearly all this wave
+produced, and prose is the thing nothing else checks.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-31 | D-046, RFC 0009 §2, facts table | **My own correction overstated its own measurement.** I wrote "**No Morze project** consumes this repo's caddy image" having measured five JS repositories. An org-wide code search finds two consumers — `eis-backend` and `erp-backend`, both `containers/gateway`, both `ghcr.io/morzecrew/caddy:2.11.2`. The image is adopted as a reverse-proxy gateway and unadopted as a static-asset runtime, which are different claims. Correcting a false claim with a broader false claim is the worst outcome available, and it happened inside the entry whose whole subject is unverified measurements. | `drift` | Fixed in three places |
+| A-32 | RFC 0006 §10, status | I wrote a completion criterion — "every §12 phase shipped **and §10's questions answered or struck**" — and then flipped the status while questions 2 and 3 were neither. Question 3's answer existed only in the status block, which is the same "answered somewhere else" defect R-26 caught on RFC 0004. A criterion the document does not visibly satisfy is worse than no criterion, because it invites the reader to stop checking. | `drift` | Fixed — both struck with their evidence |
+| A-33 | RFC 0009 §5.1, §4 | New decision 10 supersedes §5.1's `packageManager` requirement, and I left §5.1 stating it with no pointer — exactly the defect R-27 raised against RFC 0004 §5.3 one wave earlier. The same sweep found two more instances of D-046's corrected count still live in §5.1 and §4 ("the measurable win for four of five", "not one of five"). | `drift` | Fixed — amendment notes on all three |
+| A-34 | `smoke.sh` §18 | A redundant `"${ENGINE}" rm -f "${CTR}"` immediately after §17's own, and immediately before a `start` that does it a third time. Harmless, and duplication I introduced. | — | Fixed |
+
+**Three of the four findings are the same failure: a correction that stopped one
+step short of the places it implicated.** A-31 corrected a claim and overshot,
+A-32 stated a criterion without satisfying it, A-33 added a superseding row and
+left the superseded prose unmarked. This wave's subject was other people's stale
+documents, and it produced stale documents of its own at the same rate — which is
+the argument for the audit being a separate pass rather than care taken while
+writing.
+
+### Verified
+
+| Check | Result |
+|---|---|
+| `valkey/smoke.sh` | 29 assertions PASS against `ghcr.io/morzecrew/valkey:9.0`, re-run after the A-34 edit |
+| `smoke.sh` §18 verified red | Against an image whose conf regeneration was made conditional: fails at the restart assertion, with the preceding "does reach the generated conf" assertion still passing. Red proof predates A-34's cleanup, which removed a `rm -f` that `start` performs anyway, leaving the assertion path unchanged |
+| Cache-mount claim | Re-measured across all five repositories, not the four I had read: zero |
+| Relative links in all five edited documents | All resolve |
+| RFC 0002, RFC 0006 live `OPEN` rows | Zero in each — the oracle for the two ✅ flips |
+| RFC 0009 decision table | 11 rows, all four-column; no `LOCKED` row contradicted by this wave |
+
+### Residue — what I would still distrust
+
+- **Decision 9 picks Node `22` without checking its LTS phase.** The row is
+  deliberately argued on migration distance rather than support status, so it
+  does not rest on a fact I did not verify — but §9 frames the release valve as
+  "current LTS and previous", and if `24` is Active LTS while `22` is in
+  maintenance, wave 8 is shipping a builder on a maintenance-phase major. Check
+  against nodejs.org before the Dockerfile exists, not after.
+- **"Two org-wide consumers" is a floor, not a count.** GitHub code search
+  indexes default branches and can lag; it is evidence that "zero" was wrong,
+  not proof that "two" is right.
+- **RFC 0009 §10 question 3 is still a read rather than a measurement.**
+  `react-scripts` 5.0.1 on webpack 5 suggests `morze-landing` can leave Node 16,
+  but nothing was built to confirm it, and it is another project's repository.
+- **No CI covers any of this wave.** `bake.yaml` ignores `rfcs/**`, so the only
+  executable change — `smoke.sh` §18 — runs in CI while every document here is
+  checked by review alone.

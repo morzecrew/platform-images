@@ -360,12 +360,21 @@ come away knowing the image evicts by default.
    not exist as a package. The gate reached the same conclusion on 2026-08-12 by
    a different route — zero repositories use pgmq — and this is the supply-side
    confirmation of it.
-2. **Is there a cache requirement distinct from the queue one?** The two are
+2. ~~**Is there a cache requirement distinct from the queue one?** The two are
    usually conflated and §5.3 shows they want opposite settings. If only one
-   exists, the answer is likely "not this image".
-3. **Is RFC 0001's helper genuinely shareable**, or is it Postgres-specific in
+   exists, the answer is likely "not this image".~~
+   **Answered 2026-08-12 by the admission measurement in §3.1.** The cache
+   requirement exists on its own evidence — 14 projects, four distinct upstream
+   references — and the queue half was moot rather than merged into it, because
+   pgmq is packaged nowhere (question 1). The two were never in competition.
+3. ~~**Is RFC 0001's helper genuinely shareable**, or is it Postgres-specific in
    ways only a second consumer reveals? This image is how that gets answered,
-   which is an argument for building it that has nothing to do with Valkey.
+   which is an argument for building it that has nothing to do with Valkey.~~
+   **Answered 2026-08-16 — yes, with three defects found in the answering.** The
+   helper is shared unchanged, but `valkey` as the second consumer exposed three
+   contract defects that a single consumer had hidden (EXECUTION-LOG D-014,
+   D-015, D-018). Both halves matter: shareable, and not demonstrably so until
+   something other than `postgres` used it.
 4. ~~Whether Valkey's runtime `CONFIG SET` can drift from the generated conf, and
    whether that matters for restart semantics — a `CONFIG SET maxmemory` survives
    until restart and then silently reverts.~~

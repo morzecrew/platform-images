@@ -79,15 +79,22 @@ wrong, both about `erp-frontend`, and both load-bearing for decision 8, which
 names it as the first migration *because* of them. Measured against the
 repository's default branch, unchanged since 2026-05-09 and therefore in this
 state when the RFC was written: it runs `npm ci` with **no** cache mount, and its
-runtime is `caddy:2.11.1-alpine` from Docker Hub, not
-`ghcr.io/morzecrew/caddy`. **No Morze project consumes this repo's caddy image.**
+runtime is `caddy:2.11.1-alpine` from Docker Hub, not `ghcr.io/morzecrew/caddy`.
+**None of the five consumes this repo's caddy image.**
+
+It is consumed elsewhere, in a different role: an org-wide code search finds
+`eis-backend` and `erp-backend` both building `containers/gateway` from
+`ghcr.io/morzecrew/caddy:2.11.2`, using the `config.d` overlay and, in one case,
+the Coraza overrides. So the image is proven in production as a reverse-proxy
+gateway and unadopted as a static-asset runtime, which are different claims about
+different halves of it.
 
 Neither error weakens the RFC — both strengthen it. The performance argument is
-unrealised across all five rather than four, and the runtime handoff of §5.4 is
-an unadopted proposal rather than an established practice, which makes the first
-migration worth more than the RFC credited it: it introduces the cache mount and
-becomes the first consumer of this repo's caddy image at the same time. What it
-does invalidate is the reasoning behind decision 8, which §11 now records.
+unrealised across all five rather than four, and §5.4's runtime handoff is an
+untried path rather than an established one, which makes the first migration
+worth more than the RFC credited it: it introduces the cache mount and becomes
+the first static-asset consumer of this repo's caddy image at the same time. What
+it does invalidate is the reasoning behind decision 8, which §11 now records.
 
 ## 3. Current state
 
@@ -122,7 +129,8 @@ four; the evidence says npm, with pnpm as the only real second.
 - One Node major to bump, not five.
 - Frozen-lockfile installs everywhere, including the two projects that do not do
   it today.
-- A warm dependency cache in every build, not one of five.
+- A warm dependency cache in every build, ~~not one of five~~ **where today none
+  of the five has one** (corrected 2026-08-17, D-046).
 - A stated handoff to `caddy` so the runtime stops being re-invented.
 
 **Non-goals**
@@ -143,11 +151,15 @@ four; the evidence says npm, with pnpm as the only real second.
 
 `npm-builder`, mirroring `uv-builder`:
 
-- `FROM node:<major>-<suite>`, one bake variable for the major, per RFC 0008
+- `FROM node:<major>-<suite>`, one bake variable for the major, ~~per RFC 0008
   decision 10's pinning discipline (exact, integrity-checked `packageManager`;
-  no reliance on Corepack's mutable Known Good Releases).
-- A cache mount on the npm store, which is the measurable win for four of five
-  projects.
+  no reliance on Corepack's mutable Known Good Releases)~~ — **the pinning half
+  is superseded by decision 10 (2026-08-17, EXECUTION-LOG D-047): Corepack is
+  never in the path for npm, so the pin is the base image tag. The requirement is
+  retained verbatim for a future `pnpm-builder`.** Major and suite are fixed by
+  decision 9: `22`, Debian.
+- A cache mount on the npm store, which is the measurable win for ~~four~~
+  **five** of five projects (corrected 2026-08-17, D-046 — none of them has one).
 - `build-js-app`, mirroring `build-uv-app`.
 
 Named for the manager, per RFC 0008 decision 1, which survives supersession: npm
