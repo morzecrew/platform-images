@@ -2537,9 +2537,10 @@ environment was not.
 Branch `feat/wave-9-annual-image-review`. RFC 0003 decision 6 — the scheduled
 workflow that opens the annual review issue. No image changed.
 
-**Drift count: 0** — pending the audit, which has been the wrong number four
-waves running, so read it as a prediction until the audit section below says
-otherwise.
+**Drift count: 3** — A-45, A-46 and A-47, all introduced by this wave and all
+caught by its own audit. Written as 0 when the group was drafted, which is the
+fifth consecutive wave the pre-audit number has been wrong; the practice of
+writing it before the audit is what is wrong, not the arithmetic.
 
 RFC 0003's rule shipped on 2026-08-12 and its `LOCKED` decision 6 specified a
 mechanism that was never built: for six days the annual review has been a
@@ -2687,3 +2688,62 @@ to answer that; the scan cannot.
 | 0003 | 11 | **Added** | `ASSUMED` | The issue pre-fills a consumer scan, with this repo excluded and three distinct evidence states | D-053 |
 | 0003 | 12 | **Added** | `ASSUMED` | Assignee from `REVIEW_ASSIGNEE`, applied after creation | D-054 |
 | 0003 | §6 | **Risk recorded** | — | An annual cron is disabled by repository inactivity, the case it exists for | D-055 |
+
+## Self-audit findings — wave 9, 2026-08-18
+
+Scope: one new workflow and four documents. Almost all of the risk is in a file
+that **cannot be run here** — its scheduled path fires in January and its issue
+creation needs the default branch — so the audit leaned on reading it against
+the rows it implements, and on running every piece that could be run in
+isolation.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-45 | `annual-image-review.yaml` | The scan step interpolated `${{ steps.images.outputs.targets }}` straight into its `run:` block while the compose step two steps below passed the same value through `env:`. Inconsistent within one file, and the raw form is the shape that becomes a script-injection bug the moment the interpolated value stops being repo-controlled. Moved to `env:`. | `drift` | Fixed |
+| A-46 | this log | The duplicate-issue check was **decided in the plan and never logged**. It is a real behaviour — a manual dispatch while last year's review is open opens nothing — and identifying prior reviews *by title prefix rather than by label* was a deliberate choice to avoid the workflow maintaining a label as a side effect. An unlisted decision is not an open one; it should have had an entry. Recorded here as D-056. | `drift` | Fixed |
+| A-47 | `annual-image-review.yaml` | The header asserted GitHub's cron-disabling behaviour as flat fact while D-055 in this log marks the same claim unverified. The file a reader reaches first was the more confident of the two. Reworded to say it is quoted from documentation and not measured here. | `drift` | Fixed |
+
+## D-056 — Duplicate reviews are suppressed by title, not by label
+
+- **Touches:** RFC 0003 decision 6 (`LOCKED`)
+- **RFC is silent on:** what a second trigger should do while a review is open
+- **Built:** the workflow lists open issues and skips if any title starts with
+  "Annual image review". `workflow_dispatch` makes a second trigger easy, and an
+  annual review that opens twice is a review nobody trusts to be the current one.
+- **By title rather than by label**, so the workflow does not have to create and
+  maintain a label as a side effect of running — `gh issue create --label` fails
+  outright when the label does not exist, which would make first-run success
+  depend on repository state nobody set up.
+- **Class:** unlisted decision filled; logged at departure weight.
+- **Consequence, stated plainly:** a review issue that is closed without the work
+  being done is invisible to this check, and the next dispatch opens a fresh one.
+  That is the intended direction — the check prevents duplicates, not amnesia.
+
+### Verified
+
+| Check | Result |
+|---|---|
+| Workflow YAML | Parses; 6 steps, `contents: read` + `issues: write`, cron `0 9 8 1 *` |
+| Issue composer | Extracted and run in both modes — scanned and unscanned — rendering all three evidence states distinctly |
+| Consumer scan query | Run end to end against the live API for all nine images; results in the table above |
+| Self-exclusion | Verified by contrast: unfiltered, all nine rows return `platform-images`; filtered, four return nothing |
+| Duplicate-detection query | Run against this repository; returns empty, which is correct — no review issue is open |
+| Decision 5 (no pull counts) | `grep` finds two mentions of the packages API, both prose asserting its absence. No call |
+| RFC 0003 decision table | 12 rows, contiguous, four columns |
+
+### Residue — what I would still distrust
+
+- **The workflow has never run.** Issue creation, assignment and the
+  `dry_run` branch are unexercised, and cannot be exercised until the file is on
+  the default branch. The first real proof is a manual dispatch after merge, and
+  I would do that before trusting January.
+- **`ORG_READ_TOKEN` does not exist**, so the first run — whenever it happens —
+  produces the unscanned form of the issue. That path is tested; the scanned path
+  is the one the January issue should carry, and it needs a secret only you can
+  create.
+- **The cron-disabling limitation is quoted, not measured.** It is the single
+  thing most likely to make this workflow silently never fire, and I have not
+  confirmed the window.
+- **The scan cannot read variants.** `postgres-pgvector` and `postgres-cron`
+  return nothing, which may mean nobody wants them or may mean everyone uses
+  plain `postgres`. A reviewer answers that; the table only asks.

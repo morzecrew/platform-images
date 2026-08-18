@@ -9,10 +9,15 @@ name: Annual Image Review
 # February. The RFC says the month matters, not the day.
 #
 # KNOWN LIMITATION, and it is the one that would silently defeat this workflow:
-# GitHub disables scheduled workflows in repositories that have gone inactive,
-# so an annual cron is exactly the schedule most at risk of never firing -- and
+# GitHub is documented to disable scheduled workflows in repositories that have
+# gone inactive. That makes an annual cron the schedule most exposed to it -- and
 # a repository quiet for a year is precisely when an unused-image review matters
-# most. There is no in-repo fix; the mitigation is that this file says so.
+# most, so the mechanism is weakest in the case it exists for. There is no
+# in-repo fix; the mitigation is that this file says so.
+#
+# Not measured here: the exact inactivity window is quoted from GitHub's docs,
+# not something this repo has observed. Confirm it before relying on the number
+# (EXECUTION-LOG D-055).
 
 on:
   schedule:
@@ -93,6 +98,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
           SELF: ${{ github.repository }}
+          TARGETS: ${{ steps.images.outputs.targets }}
         run: |
           set -euo pipefail
           : >evidence.tsv
@@ -101,7 +107,7 @@ jobs:
             echo "::warning title=Consumer scan skipped::ORG_READ_TOKEN is not set; the issue will say so"
             exit 0
           fi
-          for name in ${{ steps.images.outputs.targets }}; do
+          for name in ${TARGETS}; do
             # Code search is rate-limited well below the REST API; pace it
             # rather than losing the tail of the list to a 403.
             sleep 7
