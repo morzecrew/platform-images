@@ -6,14 +6,16 @@
 # build, several need a build that must *fail*, and one needs a second image to
 # serve the result. Same split as images/postgres/test-extensions.sh.
 #
-# docker rather than podman throughout, unlike every other test in this repo:
-# `--mount=type=cache` is a BuildKit feature and the cache assertion is the one
-# that cannot be expressed without it. The rootless assertions RFC 0002 §5.5
-# cares about belong to the runtime images and are made in their own smoke
-# tests; nothing here depends on rootless behaviour.
+# Rootless Podman throughout, like every other test in this repo (RFC 0002
+# §5.5). An earlier revision used `docker buildx` on the belief that
+# `--mount=type=cache` was BuildKit-only; Podman supports it, and the buildx
+# route was actively wrong here -- CI's buildx builder uses the docker-container
+# driver, which cannot resolve a locally built image in `FROM` and tried to pull
+# `localhost/npm-builder:scratch` from a registry on port 80.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENGINE="${ENGINE:-podman}"
 # Fixed, and deliberately not overridable. This harness *builds* the image it
 # tests, so an override would name an image that gets overwritten and then
 # deleted on cleanup -- pointing it at a real tag would silently destroy the
@@ -22,12 +24,13 @@ BUILDER="localhost/npm-builder:scratch"
 CADDY="${CADDY_REF:-ghcr.io/morzecrew/caddy:2.11.4}"
 WORK="$(mktemp -d)"
 CTR="njs-test-$$"
+FIXTURE="localhost/njs-fixture:$$"
 pass=0
 
 cleanup() {
-	docker rm -f "${CTR}" >/dev/null 2>&1 || true
-	docker rmi -f "${BUILDER}" >/dev/null 2>&1 || true
-	docker rmi -f "localhost/njs-fixture:$$" >/dev/null 2>&1 || true
+	"${ENGINE}" rm -f "${CTR}" >/dev/null 2>&1 || true
+	"${ENGINE}" rmi -f "${FIXTURE}" >/dev/null 2>&1 || true
+	"${ENGINE}" rmi -f "${BUILDER}" >/dev/null 2>&1 || true
 	rm -rf "${WORK}"
 }
 trap cleanup EXIT
@@ -54,7 +57,7 @@ lockfile_empty() {
 	JSON
 }
 
-# fixture <name> <build-script>
+# fixture <name> <build-script-json>
 fixture() {
 	local dir="${WORK}/$1"
 	mkdir -p "${dir}"
@@ -77,12 +80,12 @@ fixture() {
 	printf '%s' "${dir}"
 }
 
-# expect_build_fails <label> <dir> <needle> [--build-arg ...]
+# expect_build_fails <label> <dir> <needle> [build args...]
 expect_build_fails() {
 	local label="$1" dir="$2" needle="$3"
 	shift 3
 	local out
-	if out=$(docker buildx build --output=type=cacheonly "$@" "${dir}" 2>&1); then
+	if out=$("${ENGINE}" build "$@" -t "${FIXTURE}" "${dir}" 2>&1); then
 		echo "${out}" | tail -5
 		die "${label}: the build succeeded, but it must fail"
 	fi
@@ -96,16 +99,16 @@ expect_build_fails() {
 }
 
 echo "=== building the builder ==="
-docker buildx build --load -t "${BUILDER}" "${HERE}" >/dev/null ||
+"${ENGINE}" build -t "${BUILDER}" "${HERE}" >/dev/null ||
 	die "the builder image itself did not build"
 echo "built ${BUILDER}"
 
 echo
 echo "=== 1. a fixture project builds and /srv/index.html exists ==="
 d=$(fixture happy '"mkdir -p dist && echo ok > dist/index.html"')
-docker buildx build --load -t "localhost/njs-fixture:$$" "${d}" >/dev/null ||
+"${ENGINE}" build -t "${FIXTURE}" "${d}" >/dev/null ||
 	die "the happy path did not build"
-got=$(docker run --rm "localhost/njs-fixture:$$" cat /srv/index.html | tr -d '\r\n')
+got=$("${ENGINE}" run --rm "${FIXTURE}" cat /srv/index.html | tr -d '\r\n')
 [ "${got}" = "ok" ] || die "/srv/index.html is '${got}', expected 'ok'"
 ok "assets land in /srv"
 
@@ -115,7 +118,7 @@ echo "=== 2. a build emitting nothing fails (§6: must never be skipped) ==="
 d=$(fixture empty '"mkdir -p dist"')
 expect_build_fails "empty output dir refused" "${d}" "which exists but is empty"
 # Decision 7 requires the message to name the variable and the resolved path.
-out=$(docker buildx build --output=type=cacheonly "${d}" 2>&1 || true)
+out=$("${ENGINE}" build -t "${FIXTURE}" "${d}" 2>&1 || true)
 case "${out}" in
 *"BUILD_OUTPUT_DIR='dist'"*"/app/dist"*) ok "the refusal names the variable and the path" ;;
 *) die "the refusal does not name BUILD_OUTPUT_DIR and the resolved path (decision 7)" ;;
@@ -137,10 +140,9 @@ echo
 echo "=== 5. BUILD_OUTPUT_DIR=out and =build both work (the three conventions) ==="
 for conv in out build; do
 	d=$(fixture "conv-${conv}" "\"mkdir -p ${conv} && echo ${conv} > ${conv}/index.html\"")
-	docker buildx build --load -t "localhost/njs-fixture:$$" \
-		--build-arg "BUILD_OUTPUT_DIR=${conv}" "${d}" >/dev/null ||
+	"${ENGINE}" build --build-arg "BUILD_OUTPUT_DIR=${conv}" -t "${FIXTURE}" "${d}" >/dev/null ||
 		die "BUILD_OUTPUT_DIR=${conv} did not build"
-	got=$(docker run --rm "localhost/njs-fixture:$$" cat /srv/index.html | tr -d '\r\n')
+	got=$("${ENGINE}" run --rm "${FIXTURE}" cat /srv/index.html | tr -d '\r\n')
 	[ "${got}" = "${conv}" ] || die "BUILD_OUTPUT_DIR=${conv} served '${got}'"
 	ok "BUILD_OUTPUT_DIR=${conv}"
 done
@@ -182,26 +184,26 @@ cat >"${d}/package.json" <<'JSON'
 JSON
 # Generated rather than hand-written: a lockfile carries integrity hashes, and
 # one invented here would be a hash nobody verified.
-docker run --rm -v "${d}:/w" -w /w "${BUILDER}" \
+"${ENGINE}" run --rm -v "${d}:/w:Z" -w /w "${BUILDER}" \
 	npm install --package-lock-only --no-audit --no-fund >/dev/null 2>&1 ||
 	die "could not generate the fixture lockfile"
 [ -f "${d}/package-lock.json" ] || die "no lockfile was generated"
 
 cat >"${d}/Dockerfile" <<DOCKER
 FROM ${BUILDER}
-ARG BUST
 ARG OFFLINE=false
 ENV npm_config_offline=\${OFFLINE}
 COPY . .
 RUN --mount=type=cache,target=/cache,sharing=locked build-js-app
 DOCKER
 
-docker buildx build --output=type=cacheonly --build-arg BUST=1 "${d}" >/dev/null ||
+# --no-cache so the RUN really re-executes; the cache *mount* is independent of
+# the layer cache and persists across both builds, which is the thing under test.
+"${ENGINE}" build --no-cache -t "${FIXTURE}" "${d}" >/dev/null ||
 	die "the cache-warming build failed"
 ok "first build populates /cache"
 
-if out=$(docker buildx build --output=type=cacheonly \
-	--build-arg BUST=2 --build-arg OFFLINE=true "${d}" 2>&1); then
+if out=$("${ENGINE}" build --no-cache --build-arg OFFLINE=true -t "${FIXTURE}" "${d}" 2>&1); then
 	ok "second build installs offline from the mounted cache"
 else
 	echo "${out}" | tail -15
@@ -209,10 +211,31 @@ else
 fi
 
 echo
-echo "=== 9. the runtime handoff: caddy serves it, deep paths get index.html ==="
-if ! docker pull -q "${CADDY}" >/dev/null 2>&1; then
-	echo "  SKIP: ${CADDY} could not be pulled"
-else
+echo "=== 9. a stale output directory in the context is refused ==="
+# The subtler half of decision 2: a project that commits its output directory,
+# or copies one in with `COPY . .`, hands build-js-app a complete-looking bundle
+# the build never touched. Every other check here passes on last release's
+# assets. Reported by review on PR #37 and reproduced before fixing.
+d=$(fixture stale '"true"')
+mkdir -p "${d}/dist"
+echo "STALE-FROM-LAST-YEAR" >"${d}/dist/index.html"
+expect_build_fails "stale output refused" "${d}" "is older than this build"
+
+echo
+echo "=== 10. an output directory overlapping APP_DIST is refused ==="
+d=$(fixture overlap '"mkdir -p /srv && echo ok > /srv/index.html"')
+expect_build_fails "overlapping output refused" "${d}" "which is APP_DIST" \
+	--build-arg BUILD_OUTPUT_DIR=/srv
+
+echo
+echo "=== 11. the runtime handoff: caddy serves it, deep paths get index.html ==="
+# Not a skip. The package is public and anonymously pullable, so a failure here
+# is an infrastructure problem, not an optional test -- and a skip would leave
+# the battery green with §6's handoff assertion never run, which is exactly the
+# silent gap this image exists to remove.
+"${ENGINE}" pull -q "${CADDY}" >/dev/null 2>&1 ||
+	die "could not pull ${CADDY}; the handoff assertion cannot be skipped (set CADDY_REF to override)"
+if true; then
 	d="${WORK}/handoff"
 	mkdir -p "${d}"
 	cat >"${d}/package.json" <<'JSON'
@@ -232,10 +255,10 @@ FROM ${CADDY}
 COPY --from=build /srv /srv
 COPY spa.caddy /etc/caddy/config.d/
 DOCKER
-	docker buildx build --load -t "localhost/njs-fixture:$$" "${d}" >/dev/null ||
+	"${ENGINE}" build -t "${FIXTURE}" "${d}" >/dev/null ||
 		die "the two-stage handoff did not build"
-	docker rm -f "${CTR}" >/dev/null 2>&1 || true
-	docker run -d --name "${CTR}" -p 18080:8080 "localhost/njs-fixture:$$" >/dev/null
+	"${ENGINE}" rm -f "${CTR}" >/dev/null 2>&1 || true
+	"${ENGINE}" run -d --name "${CTR}" -p 18080:8080 "${FIXTURE}" >/dev/null
 	for _ in $(seq 1 40); do
 		curl -fsS "http://127.0.0.1:18080/__platform_healthz" >/dev/null 2>&1 && break
 		sleep 0.5
@@ -249,7 +272,7 @@ DOCKER
 		die "a deep path returned a non-200 -- try_files is not in effect"
 	[ "${deep}" = "spa-root" ] || die "a deep path served '${deep}', expected index.html"
 	ok "a deep path falls back to index.html rather than 404"
-	docker rm -f "${CTR}" >/dev/null 2>&1 || true
+	"${ENGINE}" rm -f "${CTR}" >/dev/null 2>&1 || true
 fi
 
 echo

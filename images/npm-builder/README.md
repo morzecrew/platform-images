@@ -29,7 +29,7 @@ Image: `ghcr.io/morzecrew/npm-builder:24`.
 1. Refuses to run without a `package-lock.json`.
 2. `npm ci` — a frozen install. A lockfile that disagrees with `package.json` fails rather than resolving a fresh tree.
 3. `npm run build` (or `${BUILD_SCRIPT}`).
-4. **Verifies the output**, then copies it to `/srv`.
+4. **Verifies the output**, then copies it to `/srv`. The output must exist, be non-empty, contain an `index.html`, and **have been written by this build** — see below.
 
 A build that emits nothing — wrong output directory, or a build script that exited `0` without writing anything — currently produces a container that serves **404 for every path**, and is diagnosed in a browser after deploy. Here it fails the build, and the message names `BUILD_OUTPUT_DIR`, the path that was checked, and what the build emitted instead:
 
@@ -38,6 +38,24 @@ build-js-app: BUILD_OUTPUT_DIR='dist' resolved to '/app/dist', which does not ex
 The build emitted these directories: out. Set BUILD_OUTPUT_DIR to whichever one
 your framework writes.
 ```
+
+### A committed output directory is refused
+
+If `dist/` (or whatever `BUILD_OUTPUT_DIR` names) is **already in the build context** — committed to the repository, or swept in by `COPY . .` — then a build script that silently does nothing leaves a complete-looking bundle in place, and every other check above passes on **last release's assets**. That is worse than the 404 case, because it ships and looks fine.
+
+So `index.html` must be newer than the moment the build started:
+
+```
+build-js-app: '/app/dist/index.html' is older than this build, so the build script
+'build' did not write it. The directory was already in the build context — committed
+to the repository, or copied in by 'COPY . .' — and shipping it would publish
+whatever it held rather than what this build produced. Add 'dist' to .dockerignore,
+or fix the build script so it regenerates the bundle.
+```
+
+The fix is almost always a `.dockerignore` containing your output directory, which you want anyway — it keeps a stale bundle out of the build context and off the layer that invalidates your cache.
+
+`BUILD_OUTPUT_DIR` also may not be `/srv` or a directory inside it: the source and destination would be the same tree. That is refused before the install runs, rather than failing inside `cp`.
 
 ### Environment variables (build)
 
@@ -92,9 +110,10 @@ If a value must stay secret, it cannot be a build-time variable of a static site
 | This repo's `caddy`, or upstream Caddy | Delete the hand-written Caddyfile, add `import spa`. The builder replaces your `node:*` build stage. |
 | nginx | Keep your nginx config and its runtime stage; only the build stage changes. You lose nothing and gain the frozen install and the empty-output check. |
 
-Two things worth checking before you migrate:
+Three things worth checking before you migrate:
 
 - **`npm install` → `npm ci`.** If your lockfile is stale, `npm ci` fails where `npm install` quietly resolved something else. That failure is the point, but it is a real change, and it is the one most likely to surprise on the first build.
+- **A committed output directory now fails the build.** If your repository tracks `dist/`, `out/` or `build/`, add it to `.dockerignore`. Previously a no-op build would have shipped it silently.
 - **`NODE_ENV` and `CI` are deliberately unset** in this image. Setting `NODE_ENV=production` makes `npm ci` skip the devDependencies that hold your build tool; `CI=true` makes react-scripts treat warnings as errors. If your current Dockerfile sets either, decide whether you meant to.
 
 ## Tests

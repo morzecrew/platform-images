@@ -31,6 +31,8 @@ emitted() {
 	printf '%s' "${found:-<none>}"
 }
 
+canon() { readlink -f -- "$1" 2>/dev/null || printf '%s' "$1"; }
+
 cd "${APP_ROOT}"
 
 [ -f package.json ] || die "no package.json in ${APP_ROOT}. Is the project copied in before this runs?"
@@ -42,9 +44,6 @@ cd "${APP_ROOT}"
 # has changed between majors.
 [ -f package-lock.json ] || die "no package-lock.json in ${APP_ROOT}. This builder installs with 'npm ci', which requires a lockfile; 'npm install' is not used because it can silently resolve a different tree than the one committed."
 
-npm ci
-npm run "${BUILD_SCRIPT}"
-
 # BUILD_OUTPUT_DIR is documented as relative to APP_ROOT. An absolute path is
 # accepted rather than mangled into ${APP_ROOT}//abs, so the diagnostics below
 # print something the operator can act on.
@@ -52,6 +51,35 @@ case "${BUILD_OUTPUT_DIR}" in
 /*) out="${BUILD_OUTPUT_DIR}" ;;
 *) out="${APP_ROOT}/${BUILD_OUTPUT_DIR}" ;;
 esac
+
+# Resolved before the install, not after: an overlap is a configuration error
+# that no amount of building will fix, and finding it first saves the operator
+# a full `npm ci` before the refusal.
+out_c="$(canon "${out}")"
+dist_c="$(canon "${APP_DIST}")"
+case "${out_c}" in
+"${dist_c}" | "${dist_c}"/*)
+	die "BUILD_OUTPUT_DIR='${BUILD_OUTPUT_DIR}' resolves to '${out_c}', which is APP_DIST ('${APP_DIST}') or inside it. The build output and the destination would be the same tree, so copying it would be copying a directory into itself. Point BUILD_OUTPUT_DIR at the directory your framework writes inside the project."
+	;;
+esac
+case "${dist_c}" in
+"${out_c}"/*)
+	die "BUILD_OUTPUT_DIR='${BUILD_OUTPUT_DIR}' resolves to '${out_c}', which contains APP_DIST ('${APP_DIST}'). Copying it into APP_DIST would copy the destination into itself."
+	;;
+esac
+
+# A reference point for "did this build actually write the bundle?". A project
+# that commits its output directory, or copies one in with `COPY . .`, hands
+# build-js-app a complete-looking bundle that the build never touched -- so
+# every check below would pass on last release's assets. Compared by mtime
+# rather than by clearing the directory first, because deleting a path derived
+# from a caller-supplied variable is a much worse failure than the one it
+# prevents.
+STARTED_AT="$(mktemp)"
+trap 'rm -f "${STARTED_AT}"' EXIT
+
+npm ci
+npm run "${BUILD_SCRIPT}"
 
 [ -d "${out}" ] ||
 	die "BUILD_OUTPUT_DIR='${BUILD_OUTPUT_DIR}' resolved to '${out}', which does not exist. The build emitted these directories: $(emitted). Set BUILD_OUTPUT_DIR to whichever one your framework writes."
@@ -61,6 +89,9 @@ esac
 
 [ -f "${out}/index.html" ] ||
 	die "BUILD_OUTPUT_DIR='${BUILD_OUTPUT_DIR}' resolved to '${out}', which has no index.html. It contains: $(ls -A "${out}" | head -20 | tr '\n' ' '). A static bundle without an index.html serves 404 for every path."
+
+[ "${out}/index.html" -nt "${STARTED_AT}" ] ||
+	die "'${out}/index.html' is older than this build, so the build script '${BUILD_SCRIPT}' did not write it. The directory was already in the build context -- committed to the repository, or copied in by 'COPY . .' -- and shipping it would publish whatever it held rather than what this build produced. Add '${BUILD_OUTPUT_DIR}' to .dockerignore, or fix the build script so it regenerates the bundle."
 
 mkdir -p "${APP_DIST}"
 # The trailing /. copies the directory's contents rather than the directory, so

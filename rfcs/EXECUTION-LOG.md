@@ -2285,7 +2285,7 @@ to stop writing it before the audit: it is a prediction dressed as a measurement
   passing case is not passing vacuously.
 - **Proposed row (RFC 0009):** 12, `ASSUMED`.
 
-## D-050 — The §6 harness uses docker, not rootless podman
+## D-050 — ~~The §6 harness uses docker, not rootless podman~~ **Withdrawn**
 
 - **Touches:** RFC 0002 §5.5, RFC 0009 §6
 - **Convention says:** tests run under rootless Podman, because rootless is where
@@ -2305,6 +2305,16 @@ to stop writing it before the audit: it is a prediction dressed as a measurement
 - **Deliberately not applied:** running the battery twice, once per engine.
   Doubles CI time for a build-stage image to assert something no consumer
   depends on.
+- **WITHDRAWN 2026-08-18, same day — the premise was false and the departure was
+  a defect (R-31).** Podman supports `--mount=type=cache` and persists it across
+  builds; this was asserted from memory rather than measured, and one probe
+  disproved it. Worse, the buildx route did not merely differ from convention,
+  it **broke CI**: `setup-buildx-action` makes a `docker-container` driver
+  current, which cannot resolve a locally built image in `FROM`, so the harness
+  tried to pull `localhost/npm-builder:scratch` from a registry on port 80. It
+  passed locally only because the default `docker` driver reads the local image
+  store. The harness now runs entirely under rootless Podman, RFC 0002 §5.5
+  needs no departure, and §6's "under rootless Podman" was true all along.
 
 ## D-051 — Two unlisted decisions, one of which is a real footgun
 
@@ -2349,7 +2359,9 @@ to stop writing it before the audit: it is a prediction dressed as a measurement
 |---|---|
 | Node 22 | Maintenance, EOL 2027-04-30 |
 | Node 24 | **Active LTS**, EOL 2028-04-30 |
-| Node 26, 27 | Current |
+| Node 26 | Current — becomes Active LTS 2026-10-28 |
+| Node 27 | **Not released**; starts 2027-04-22. An earlier draft of this table called it Current, which was wrong — see A-43 |
+| Node 24's own horizon | Active LTS **until 2026-10-20**, two months out, then Maintenance until EOL 2028-04-30. Still the right choice today (20 months of support against `22`'s 8), but `26` is the natural next bump once it reaches LTS, not `27` |
 | `node:22-trixie`, `node:24-trixie` | both exist on Docker Hub |
 | `ghcr.io/morzecrew/caddy` visibility | public, anonymously pullable — so §6's handoff test runs in CI rather than skipping |
 | Latest published caddy tag | `2.11.4` (RFC §5.4 said `2.11`, which does not exist) |
@@ -2411,7 +2423,7 @@ to stop writing it before the audit: it is a prediction dressed as a measurement
 | 0009 | 13 | **Added** | `ASSUMED` | `BUILD_SCRIPT=build`; `NODE_ENV` and `CI` deliberately unset | D-051 |
 | 0009 | §5.1, §6 | **Amended** | — | The cache claim and its test, per decision 12 | D-049 |
 | 0009 | §5.4 | **Corrected** | — | Wrong builder major, non-existent caddy tag, missing cache mount | D-052 |
-| 0002 | §5.5 | **Departed** | — | The §6 battery runs under docker, not rootless podman, and why | D-050 |
+| 0002 | §5.5 | ~~**Departed**~~ **No departure** | — | Withdrawn the same day: Podman does support cache mounts, and the buildx route broke CI outright | D-050, R-31 |
 
 ## Self-audit findings — wave 8, 2026-08-18
 
@@ -2465,3 +2477,57 @@ assertion rather than a line in this file.
   `BUILDER_NODE_VERSION`. A bake-file comment is the only guard; a
   `matchUpdateTypes` rule would be real enforcement.~~ **Wrong, and fixed — see
   A-41.** With `automerge: true` there is no PR for a comment to inform.
+
+## Review round 1 — PR #37, 2026-08-18
+
+Six findings, **all six valid**, plus one CI failure the review did not raise.
+Two were reproduced before being fixed; none were accepted on the reviewer's
+word alone.
+
+| # | Finding | Verdict |
+|---|---|---|
+| R-28 | **A stale output directory in the build context is accepted.** A project that commits `dist/`, or sweeps one in with `COPY . .`, hands `build-js-app` a complete-looking bundle the build never touched — so every check passes on last release's assets. Reproduced: a committed `dist/index.html` plus a `true` build script shipped `STALE-FROM-LAST-YEAR` and the build **succeeded**. This is the image's central promise failing in a subtler way than decision 2's empty case, and worse in effect: it ships and looks fine, where the empty case at least 404s. Fixed by requiring `index.html` to be newer than a marker taken before `npm run` — mtime rather than clearing the directory first, because deleting a caller-supplied path is a worse failure than the one it prevents. | fixed |
+| R-29 | **`BUILD_OUTPUT_DIR` overlapping `APP_DIST`.** `BUILD_OUTPUT_DIR=/srv` made source and destination the same tree. Reproduced: `cp: '/srv/.' and '/srv/.' are the same file`. It already failed, so the severity is diagnosis, not corruption — but a `cp` error is not a message anyone can act on. Now refused before the install, naming both paths. | fixed |
+| R-30 | **A failed Caddy pull skipped §6's handoff assertion while the battery still reported PASS.** My own "no silent caps" rule, broken in the wave that restated it. The package is public and anonymously pullable, so a pull failure is infrastructure, not an optional test. Now fatal. | fixed |
+| R-31 | **§6 says rootless Podman; the harness required `docker buildx`.** True when reviewed, and the underlying choice was worse than inconsistent — see below. | fixed |
+| R-32 | **§5.1 still said decision 9 fixes the major at `22`** after D-048 amended the row to `24`. This is A-33's exact shape — superseded prose left unmarked — one wave after I distilled the rule against it, and this time review caught it rather than the audit. | fixed |
+| R-33 | **Node 27 recorded as Current.** It starts 2027-04-22 and is unreleased. My classifier inferred phase from the absence of a maintenance date without checking whether `start` had passed, so an unreleased major came out looking shipped. Corrected, and the table now also records that **Node 24 enters Maintenance on 2026-10-20** — two months out — which the original measurement never surfaced. | fixed |
+
+### The CI failure the review did not raise
+
+`Bake and smoke` went red on the first push, and the cause is the one that makes
+R-31 more than a style point. `setup-buildx-action` makes a **`docker-container`
+driver** builder current; that driver cannot resolve a locally built image in
+`FROM`, so the harness tried to pull `localhost/npm-builder:scratch` over HTTP
+from port 80 and every fixture build failed. It passed locally only because the
+default `docker` driver reads the local image store — **the harness was green on
+my machine for a reason that does not exist in CI.**
+
+The premise underneath it was never measured: I recorded in D-050 that
+`--mount=type=cache` was BuildKit-only and Podman could not express the cache
+assertion. One probe disproved it — Podman supports cache mounts and persists
+them across builds. So the departure bought nothing, cost a red CI run, and is
+withdrawn; the harness now runs entirely under rootless Podman and RFC 0002 §5.5
+needs no exception.
+
+**A local environment note that cost real time.** The desync assertion failed
+locally under Podman with `ECONNREFUSED 127.0.0.1:7890` — a dead proxy in my
+shell, which Podman forwards into builds and buildx did not. That is D-039's
+trap exactly: "could not look" and "looked and found nothing" print different
+strings, but both just say the test failed. The test was correct; the
+environment was not.
+
+### Rules distilled
+
+- A build stage must prove the artefact is *fresh*, not merely present. "Exists,
+  non-empty, well-formed" is satisfied by last release's output (R-28).
+- Prefer proving freshness over clearing state: a marker comparison cannot delete
+  the wrong directory, and a path derived from a caller-supplied variable is
+  exactly the wrong thing to `rm -rf` (R-28).
+- A test that skips on infrastructure failure and still reports PASS is a test
+  that will be absent precisely when something is broken (R-30).
+- "Works locally" and "works in CI" diverge most where the *builder*, not the
+  code, differs. A locally built image in `FROM` is a docker-driver privilege
+  (R-31).
+- Do not infer a release phase from the absence of a field. Check the date that
+  says it shipped (R-33).
