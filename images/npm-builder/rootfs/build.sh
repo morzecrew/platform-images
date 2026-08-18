@@ -21,9 +21,14 @@ die() {
 # *did* emit to know what to set it to (RFC 0009 decision 7).
 emitted() {
 	local found
+	# Sorted so the message is the same on every run -- find walks the
+	# filesystem in whatever order it gets, and a diagnostic that reshuffles
+	# between builds is one nobody trusts.
 	found=$(find "${APP_ROOT}" -maxdepth 1 -mindepth 1 -type d \
-		-not -name node_modules -not -name '.*' -printf '%f ' 2>/dev/null || true)
-	printf '%s' "${found:-<no directories>}"
+		-not -name node_modules -not -name '.*' -printf '%f\n' 2>/dev/null |
+		sort | tr '\n' ' ' || true)
+	found="${found% }"
+	printf '%s' "${found:-<none>}"
 }
 
 cd "${APP_ROOT}"

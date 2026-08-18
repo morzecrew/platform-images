@@ -2222,8 +2222,13 @@ writing.
 Branch `feat/wave-8-npm-builder`. RFC 0009 P1 — `npm-builder`, `build-js-app`,
 and §6's battery. The first new image since wave 3.
 
-**Drift count: 0** — this wave introduced none. D-048 is `drift` against wave 7,
-found here, and is not counted in this wave's number.
+**Drift count: 2** — A-36 and A-38, both introduced by this wave and both caught
+by its own audit. D-048 is `drift` against wave 7, found here, and is not counted
+in this wave's number.
+
+Written as **0** when the group was drafted, before the audit ran. That is the
+third consecutive wave whose pre-audit count was wrong, which is enough evidence
+to stop writing it before the audit: it is a prediction dressed as a measurement.
 
 ## D-048 — Node 24, not 22: the ratified premise was false
 
@@ -2401,3 +2406,53 @@ found here, and is not counted in this wave's number.
 | 0009 | §5.1, §6 | **Amended** | — | The cache claim and its test, per decision 12 | D-049 |
 | 0009 | §5.4 | **Corrected** | — | Wrong builder major, non-existent caddy tag, missing cache mount | D-052 |
 | 0002 | §5.5 | **Departed** | — | The §6 battery runs under docker, not rootless podman, and why | D-050 |
+
+## Self-audit findings — wave 8, 2026-08-18
+
+Scope: the whole branch — one new image (Dockerfile, `build-js-app`, two test
+scripts, README), the bake/CI/cleanup wiring, and RFC 0009's reconciliation.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-36 | `build.sh`, `README.md` | `emitted()` built its list with `-printf '%f '`, leaving a trailing space, so the real message read `…these directories: out . Set…` while the README quoted it without the space. The one diagnostic this image exists to produce did not match its own documentation. `find` also emitted in filesystem order, so the list could reshuffle between builds — a diagnostic that changes shape is one nobody trusts. Now sorted and trimmed. | `drift` | Fixed |
+| A-37 | `test-build-js-app.sh` | `BUILDER_TAG` was overridable and `cleanup()` runs `docker rmi -f` on it. `BUILDER_TAG=ghcr.io/morzecrew/npm-builder:24 ./test-build-js-app.sh` would have overwritten *and then deleted* the local copy of the published image. The override was never useful either — the harness builds the image it tests, so an override only renames the thing it is about to overwrite. Removed. | — | Fixed |
+| A-38 | `images/README.md` | The image shipped with no row in **Admissions on record**, and the refused Node runtime had none either. That table is not one of the nine numbered touchpoints, so nothing prompts for it, and its own text says a refusal is recorded "rather than left implicit". Both rows added. | `drift` | Fixed |
+| A-39 | RFC 0009 §11 | New rows 12 and 13 were appended next to row 9 rather than at the end, leaving the table numbered 1–9, 12, 13, 10, 11. Reordered. | — | Fixed |
+| A-40 | `smoke.sh` | **Nothing asserted that the image's Node major matches the major it advertises.** The tag is the only thing telling a consumer which major they pin; if `BUILDER_NODE_VERSION` and the base image disagree — a bake edit missing the Dockerfile default, a hand-built image — every consumer pins a major they are not getting, with no error anywhere. This is exactly the tag/content divergence wave 6 shipped in the postgres extensions label (D-040), in the wave that distilled the rule against it. Added, verified red against an image labelled `24` that ships `v22.23.2`. | — | Fixed |
+
+**A-40 is the one worth reading twice.** Wave 6 found this class, wrote the rule
+down, and wave 8 built a new image with the same hole — a tag asserting something
+about contents that nothing checks. A distilled rule does not transfer by having
+been written; it transfers when a test enforces it, which is why it is now an
+assertion rather than a line in this file.
+
+### Verified
+
+| Check | Result |
+|---|---|
+| `test-build-js-app.sh` | 13 assertions PASS, re-run after every fix |
+| `smoke.sh` against the baked, attested image | PASS — loaded into Podman from an OCI tar exactly as CI does |
+| Offline enforcement (D-049) | the same build offline *without* the mount fails `ENOTCACHED`, so the cache assertion is not vacuous |
+| `NODE_ENV` assertion | verified red against an image presetting `NODE_ENV=production` |
+| npm cache path assertion | verified red against an image moving it to `/somewhere-else` |
+| Node major assertion (A-40) | verified red against an image declaring `24` while shipping `v22.23.2` |
+| Refusal tests | inherently red-verified: each asserts a build *fails*, so a removed check turns the test red rather than green |
+| RFC 0009 §11 | 13 rows, contiguous, all four-column; links resolve |
+| Indentation | tabs throughout, matching every other shell file in the repo |
+| RFC 0009 §6 coverage | all six bullets have a corresponding assertion — the criterion decision 11 (`LOCKED`) sets for P1 |
+
+### Residue — what I would still distrust
+
+- **Nothing here has built a real project.** Every fixture is a `package.json`
+  whose build script is `mkdir && echo`. That is the right shape for testing
+  *this image's* contract, but it means no Vite, Next or react-scripts build has
+  run through `build-js-app`. The first migration is where that gets tested, and
+  it is in another repository.
+- **`morze-landing`'s `react-scripts` 5.0.1 on Node 24 is untested and is the
+  RFC's largest unknown.** Decision 9 now puts two majors between them.
+- **The handoff test binds host port 18080.** Occupied, it fails as a confusing
+  connection error rather than a clear one. Left alone: CI runners are clean, and
+  a port-probe helper is more machinery than the failure justifies.
+- **Renovate will propose Current-phase majors** against `BUILDER_NODE_VERSION`.
+  A bake-file comment is the only guard; a `matchUpdateTypes` rule would be real
+  enforcement.

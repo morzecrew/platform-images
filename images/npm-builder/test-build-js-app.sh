@@ -14,7 +14,11 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUILDER="${BUILDER_TAG:-localhost/npm-builder:scratch}"
+# Fixed, and deliberately not overridable. This harness *builds* the image it
+# tests, so an override would name an image that gets overwritten and then
+# deleted on cleanup -- pointing it at a real tag would silently destroy the
+# local copy of a published image.
+BUILDER="localhost/npm-builder:scratch"
 CADDY="${CADDY_REF:-ghcr.io/morzecrew/caddy:2.11.4}"
 WORK="$(mktemp -d)"
 CTR="njs-test-$$"

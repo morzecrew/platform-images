@@ -24,6 +24,36 @@ echo "node: ok"
 	{ echo "FAIL: npm missing"; exit 1; }
 echo "npm: ok"
 
+# The tag is the only thing telling a consumer which Node major they pin, and
+# nothing else in the image restates it. If BUILDER_NODE_VERSION and the base
+# image ever disagree -- a bake edit that misses the Dockerfile default, a
+# hand-built image -- every consumer pins a major they are not getting, with no
+# error anywhere. Wave 6 shipped exactly this divergence in the postgres
+# extensions label (D-040); it is cheap to pin and invisible when it breaks.
+want="$("${ENGINE}" image inspect "${IMAGE}" \
+	--format '{{ index .Config.Labels "org.opencontainers.image.version" }}' 2>/dev/null | tr -d '\r')"
+case "${want}" in
+'' | '<no value>')
+	# A plain `docker build` carries no bake labels; fall back to the tag.
+	want="${IMAGE##*:}"
+	case "${want}" in
+	*[!0-9]* | '') want="" ;;
+	esac
+	;;
+esac
+if [ -n "${want}" ]; then
+	got="$("${ENGINE}" run --rm "${IMAGE}" node --version | tr -d '\r')"
+	case "${got}" in
+	"v${want}."*) echo "node major: ${got} matches the declared ${want}" ;;
+	*)
+		echo "FAIL: image declares Node ${want} but ships ${got}"
+		exit 1
+		;;
+	esac
+else
+	echo "node major: SKIP (image declares no version label and the ref has no numeric tag)"
+fi
+
 "${ENGINE}" run --rm "${IMAGE}" test -x /usr/local/bin/build-js-app ||
 	{ echo "FAIL: build-js-app missing or not executable"; exit 1; }
 echo "build-js-app: present and executable"
