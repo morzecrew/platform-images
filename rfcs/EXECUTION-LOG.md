@@ -2222,8 +2222,10 @@ writing.
 Branch `feat/wave-8-npm-builder`. RFC 0009 P1 — `npm-builder`, `build-js-app`,
 and §6's battery. The first new image since wave 3.
 
-**Drift count: 2** — A-36 and A-38, both introduced by this wave and both caught
-by its own audit. D-048 is `drift` against wave 7, found here, and is not counted
+**Drift count: 3** — A-36, A-38 and A-41, all introduced by this wave and all
+caught by its own audit. A-42 is `drift` against the wave that added the
+`python-distroless` annotation, found here, and is not counted in this wave's
+number. D-048 is `drift` against wave 7, found here, and is not counted
 in this wave's number.
 
 Written as **0** when the group was drafted, before the audit ran. That is the
@@ -2383,10 +2385,14 @@ to stop writing it before the audit: it is a prediction dressed as a measurement
 - **RFC 0009 §10 question 3 is still open** — whether `morze-landing` can leave
   Node 16, now a jump to 24. It gates P3 only. Its `react-scripts` 5.0.1 is the
   single largest compatibility unknown in the whole RFC.
-- **Renovate will propose Node 26/27** against `BUILDER_NODE_VERSION`, both
+- ~~**Renovate will propose Node 26/27** against `BUILDER_NODE_VERSION`, both
   Current-phase rather than LTS. The bake file carries a comment saying so; that
   comment is the only thing standing between a green Renovate PR and a support
-  downgrade. A `matchUpdateTypes` rule would be sturdier.
+  downgrade. A `matchUpdateTypes` rule would be sturdier.~~ **Corrected and fixed
+  during the audit — see A-41.** The comment guarded nothing: this repo sets
+  `automerge: true` with `platformAutomerge: true`, and the custom manager is not
+  excluded, so a Node major bump merges itself and no human ever sees the PR.
+  `.github/renovate.json` now carries a rule holding `node` back from automerge.
 - **Two author decisions still open**, carried since wave 5: narrowing RFC 0001
   decision 4 (A-21), and whether `postgres` ships `-c allow_alter_system=off`
   (W-3).
@@ -2418,6 +2424,8 @@ scripts, README), the bake/CI/cleanup wiring, and RFC 0009's reconciliation.
 | A-37 | `test-build-js-app.sh` | `BUILDER_TAG` was overridable and `cleanup()` runs `docker rmi -f` on it. `BUILDER_TAG=ghcr.io/morzecrew/npm-builder:24 ./test-build-js-app.sh` would have overwritten *and then deleted* the local copy of the published image. The override was never useful either — the harness builds the image it tests, so an override only renames the thing it is about to overwrite. Removed. | — | Fixed |
 | A-38 | `images/README.md` | The image shipped with no row in **Admissions on record**, and the refused Node runtime had none either. That table is not one of the nine numbered touchpoints, so nothing prompts for it, and its own text says a refusal is recorded "rather than left implicit". Both rows added. | `drift` | Fixed |
 | A-39 | RFC 0009 §11 | New rows 12 and 13 were appended next to row 9 rather than at the end, leaving the table numbered 1–9, 12, 13, 10, 11. Reordered. | — | Fixed |
+| A-41 | this log, `.github/renovate.json` | My own residue claimed a bake-file comment was "the only thing standing between a green Renovate PR and a support downgrade". **There is no PR to review**: the repo sets `automerge: true` and `platformAutomerge: true`, and the `packageRules` exclusion covers only the `dockerfile` manager, not the custom regex manager that reads `docker-bake.hcl`. A Node major bump would have merged itself, moving the builder off Active LTS with nobody in the loop. Added a `packageRules` entry holding `node` back from automerge. | `drift` | Fixed |
+| A-42 | `docker-bake.hcl` | Checking my own annotation against the custom manager's regex showed **11 annotations but only 10 tracked dependencies**. The unmatched one is `al3xos/python-distroless`: its `# renovate:` line sits above a ten-line explanatory comment, and the manager matches `# renovate: …\s+variable`, so a comment in the gap unhooks it. **That base image has never been bumped by Renovate.** The comment in the gap is itself about automerge risk between the builder and the runtime — so the guard it describes has been protecting against an event that could not occur, while the runtime base quietly went unupdated. Annotation moved directly above its `variable`, with a note saying why it must stay there. | `drift` (against the wave that added it, not counted here) | Fixed |
 | A-40 | `smoke.sh` | **Nothing asserted that the image's Node major matches the major it advertises.** The tag is the only thing telling a consumer which major they pin; if `BUILDER_NODE_VERSION` and the base image disagree — a bake edit missing the Dockerfile default, a hand-built image — every consumer pins a major they are not getting, with no error anywhere. This is exactly the tag/content divergence wave 6 shipped in the postgres extensions label (D-040), in the wave that distilled the rule against it. Added, verified red against an image labelled `24` that ships `v22.23.2`. | — | Fixed |
 
 **A-40 is the one worth reading twice.** Wave 6 found this class, wrote the rule
@@ -2453,6 +2461,7 @@ assertion rather than a line in this file.
 - **The handoff test binds host port 18080.** Occupied, it fails as a confusing
   connection error rather than a clear one. Left alone: CI runners are clean, and
   a port-probe helper is more machinery than the failure justifies.
-- **Renovate will propose Current-phase majors** against `BUILDER_NODE_VERSION`.
-  A bake-file comment is the only guard; a `matchUpdateTypes` rule would be real
-  enforcement.
+- ~~**Renovate will propose Current-phase majors** against
+  `BUILDER_NODE_VERSION`. A bake-file comment is the only guard; a
+  `matchUpdateTypes` rule would be real enforcement.~~ **Wrong, and fixed — see
+  A-41.** With `automerge: true` there is no PR for a comment to inform.

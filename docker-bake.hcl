@@ -295,8 +295,6 @@ target "valkey" {
 
 # ....................... #
 
-# renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
-#
 # Coupled to BUILDER_PYTHON_VERSION: uv-builder produces /opt/venv and
 # python-distroless executes it, so a venv built for one minor and run by
 # another gives native-module ABI failures at runtime, not at build. The two
@@ -305,6 +303,13 @@ target "valkey" {
 # bump that lands before the distroless base catches up ships a broken pair
 # with no human in the loop. Compares major.minor only; the builder pins a
 # minor (3.14) and the runtime a patch (3.14.6). See RFC 0008 sec 5.4.
+#
+# The annotation below must stay directly above `variable`, with nothing but
+# whitespace between: the custom manager in .github/renovate.json matches
+# `# renovate: ...\s+variable "..."`, so a comment in the gap silently unhooks
+# the variable from Renovate entirely. This one sat above these lines until
+# 2026-08-18 and had never produced a bump (EXECUTION-LOG A-42).
+# renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
 variable "DISTROLESS_PYTHON_VERSION" {
   default = "3.14.6"
 

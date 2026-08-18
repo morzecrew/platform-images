@@ -26,6 +26,13 @@
                 "docker/dockerfile"
             ],
             "enabled": true
+        },
+        {
+            "description": "Node major bumps are a judgement this repo makes against the release schedule, not by recency. The value is major-only, so every update is a major, and an automerged one can move the builder off Active LTS onto a Current-phase major -- shortening its support window with no human in the loop. See RFC 0009 decision 9 and EXECUTION-LOG A-41.",
+            "matchPackageNames": [
+                "node"
+            ],
+            "automerge": false
         }
     ],
     "customManagers": [
