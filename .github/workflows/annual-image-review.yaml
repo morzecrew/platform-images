@@ -9,15 +9,15 @@ name: Annual Image Review
 # February. The RFC says the month matters, not the day.
 #
 # KNOWN LIMITATION, and it is the one that would silently defeat this workflow:
-# GitHub is documented to disable scheduled workflows in repositories that have
-# gone inactive. That makes an annual cron the schedule most exposed to it -- and
-# a repository quiet for a year is precisely when an unused-image review matters
-# most, so the mechanism is weakest in the case it exists for. There is no
-# in-repo fix; the mitigation is that this file says so.
+# GitHub disables scheduled workflows in public repositories after 60 days
+# without repository activity. An *annual* cron is the schedule most exposed to
+# that -- and a repository quiet for a year is precisely when an unused-image
+# review matters most, so the mechanism is weakest in the case it exists for.
 #
-# Not measured here: the exact inactivity window is quoted from GitHub's docs,
-# not something this repo has observed. Confirm it before relying on the number
-# (EXECUTION-LOG D-055).
+# The mitigation is manual and worth knowing before January: re-enable with
+# `gh workflow enable "Annual Image Review"` (or the Actions UI), then run the
+# review immediately with the workflow_dispatch trigger below rather than
+# waiting another year. See EXECUTION-LOG D-055 and R-36.
 
 on:
   schedule:
@@ -50,8 +50,9 @@ jobs:
           persist-credentials: false
 
       # Identified by title rather than by label, so the workflow does not have
-      # to create and maintain a label as a side effect. A manual dispatch while
-      # last year's review is still open should not open a second one.
+      # to create and maintain a label as a side effect -- `gh issue create
+      # --label` fails outright when the label does not exist, which would make
+      # a first run depend on repository state nobody set up (D-056).
       - name: Refuse to open a duplicate
         id: dupe
         env:
@@ -70,25 +71,61 @@ jobs:
 
       # Derived from the bake file, never hand-written. A hand-maintained list
       # would drift from what is actually published, and an image missing from
-      # the review is an image that is never retired -- the failure this whole
-      # rule exists to prevent (RFC 0004 row 16's lesson, EXECUTION-LOG D-040).
-      - name: Collect the current image list
+      # the review is an image that is never retired (D-040's lesson).
+      #
+      # What gets searched is the *published reference*, not the target name.
+      # `postgres-cron` publishes as `ghcr.io/morzecrew/postgres:18.6-cron`, so
+      # searching for `ghcr.io/morzecrew/postgres-cron` searches a string that
+      # has never existed and reports "none found" no matter who uses it (R-35).
+      #
+      # stderr is NOT suppressed: with `set -euo pipefail` a failing bake aborts
+      # the step at the assignment, so a guard below it never runs, and hiding
+      # stderr would remove the only explanation from the log (R-34).
+      - name: Collect the published references
         if: steps.dupe.outputs.skip == 'false'
         id: images
         run: |
           set -euo pipefail
-          targets="$(docker buildx bake --print 2>/dev/null \
-            | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')"
-          [ -n "${targets}" ] || { echo "::error title=No targets::bake --print produced nothing"; exit 1; }
-          echo "targets: ${targets}"
-          echo "targets=${targets}" >>"${GITHUB_OUTPUT}"
+          docker buildx bake --print >plan.json || {
+            echo "::error title=Bake failed::docker buildx bake --print failed; see the log above"
+            exit 1
+          }
+          python3 - <<'PY' >plan.tsv
+          import collections, json
+
+          targets = json.load(open("plan.json"))["target"]
+          refs = {n: (t.get("tags") or [None])[0] for n, t in targets.items()}
+          refs = {n: r for n, r in refs.items() if r}
+
+          # Two searches, because one cannot answer both questions.
+          #
+          # The PACKAGE path answers the retirement question -- is this image
+          # used at all -- and it matches every tag a consumer might pin. It has
+          # to: three projects reference `postgres` on tags older than the
+          # current one, so searching only the current tag reports "none found"
+          # for an image with consumers.
+          #
+          # The exact TAG is what separates targets sharing one package (the
+          # RFC 0004 variants all publish under `postgres`), where the package
+          # path would credit every variant with the base image's consumers.
+          # Emitted only for those, since elsewhere it adds a column of noise.
+          shared = collections.Counter(r.split(":")[0] for r in refs.values())
+
+          for name in sorted(refs):
+              ref = refs[name]
+              image = ref.split(":")[0]
+              tag = ref if shared[image] > 1 else ""
+              print(f"{name}\t{image}\t{tag}")
+          PY
+          [ -s plan.tsv ] || { echo "::error title=No targets::bake produced no tagged targets"; exit 1; }
+          cat plan.tsv
 
       # RFC 0003 decision 5 (ASSUMED): the review reads consuming repositories,
       # NOT GHCR pull counts -- a scheduled CI job pulling an image is a pull
       # count, not a user. So this searches code, and there is deliberately no
       # call to the packages API anywhere in this file.
       #
-      # GITHUB_TOKEN cannot see other repositories, so the scan needs a token
+      # GITHUB_TOKEN cannot search other repositories, so the scan needs a token
       # with org-wide read. When that secret is absent the issue says the scan
       # did not run and names the secret, rather than opening a blank checklist
       # that reads as "no consumers found".
@@ -98,7 +135,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
           SELF: ${{ github.repository }}
-          TARGETS: ${{ steps.images.outputs.targets }}
         run: |
           set -euo pipefail
           : >evidence.tsv
@@ -107,29 +143,35 @@ jobs:
             echo "::warning title=Consumer scan skipped::ORG_READ_TOKEN is not set; the issue will say so"
             exit 0
           fi
-          for name in ${TARGETS}; do
+          # search <query> -> repositories, "__error__", or "__truncated__"
+          search() {
+            local raw
+            raw="$(gh api -X GET search/code \
+              -f q="\"$1\" org:morzecrew" -f per_page=100 2>/dev/null)" || raw=""
+            if [ -z "${raw}" ]; then
+              printf '__error__'
+              return
+            fi
+            printf '%s' "${raw}" | jq -r --arg self "${SELF}" '
+              (.total_count // 0) as $n
+              | ([.items[].repository.full_name] | unique | map(select(. != $self))) as $repos
+              | if $n > 100 then "__truncated__" else ($repos | join(", ")) end'
+          }
+
+          while IFS=$'\t' read -r name image tag; do
+            [ -n "${name}" ] || continue
             # Code search is rate-limited well below the REST API; pace it
             # rather than losing the tail of the list to a 403.
             sleep 7
-            # This repository is excluded from its own results. Every image is
-            # referenced here -- by the bake file, the READMEs, the RFCs -- so
-            # without this every row reads "referenced by platform-images" and
-            # the one signal §4.2 asks for ("an image whose *only* consumer is
-            # this repo is retired") is buried under noise that looks like use.
-            # Piped through jq rather than `gh --jq`, which takes a single
-            # expression and has no --arg. A failed request is kept distinct
-            # from an empty result: "could not look" and "looked and found
-            # nothing" must not print the same string (EXECUTION-LOG D-039).
-            raw="$(gh api -X GET search/code \
-              -f q="\"ghcr.io/morzecrew/${name}\" org:morzecrew" 2>/dev/null)" || raw=""
-            if [ -z "${raw}" ]; then
-              hits="__error__"
-            else
-              hits="$(printf '%s' "${raw}" | jq -r --arg self "${SELF}" \
-                '[.items[].repository.full_name] | unique | map(select(. != $self)) | join(", ")')"
+            image_hits="$(search "${image}")"
+            tag_hits=""
+            if [ -n "${tag}" ]; then
+              sleep 7
+              tag_hits="$(search "${tag}")"
             fi
-            printf '%s\t%s\n' "${name}" "${hits}" >>evidence.tsv
-          done
+            printf '%s\t%s\t%s\t%s\t%s\n' \
+              "${name}" "${image}" "${tag}" "${image_hits}" "${tag_hits}" >>evidence.tsv
+          done <plan.tsv
           echo "scanned=true" >>"${GITHUB_OUTPUT}"
           cat evidence.tsv
 
@@ -137,34 +179,48 @@ jobs:
         if: steps.dupe.outputs.skip == 'false'
         id: compose
         env:
-          TARGETS: ${{ steps.images.outputs.targets }}
           SCANNED: ${{ steps.scan.outputs.scanned }}
         run: |
           set -euo pipefail
           python3 - <<'PY' >body.md
           import os, pathlib
 
-          targets = os.environ["TARGETS"].split()
           scanned = os.environ["SCANNED"] == "true"
+
+          plan = []
+          for line in pathlib.Path("plan.tsv").read_text().splitlines():
+              if line.strip():
+                  name, image, tag = line.split("\t")
+                  plan.append((name, image, tag))
 
           evidence = {}
           p = pathlib.Path("evidence.tsv")
           if p.exists():
               for line in p.read_text().splitlines():
-                  if "\t" in line:
-                      name, hits = line.split("\t", 1)
-                      evidence[name] = hits
+                  if line.strip():
+                      name, _image, _tag, image_hits, tag_hits = line.split("\t")
+                      evidence[name] = (image_hits, tag_hits)
+
+          def cell(hits, scanned):
+              if not scanned:
+                  return "_not scanned_"
+              if hits == "__error__":
+                  return "⚠️ scan failed"
+              if hits == "__truncated__":
+                  return "⚠️ >100 hits, truncated — check by hand"
+              return hits if hits else "**none found**"
 
           print("Opened automatically. RFC 0003 decision 6.\n")
           print("Two questions, and the second is easy to forget:\n")
-          print("1. **Does a live project reference this tag?** An image whose only")
+          print("1. **Does a live project reference this image?** One whose only")
           print("   consumer is this repository -- a builder used by no downstream")
           print("   project -- is retired even if it builds cleanly (RFC 0003 §4.2).")
           print("2. **Does a live project reimplement an image we already publish?**")
           print("   A hit is feedback about the image, not a violation by the project.")
           print("   The useful output is *why* they did not adopt it (decision 10).\n")
-          print("**Outcomes are keep or retire.** There is no \"keep for now\" -- that")
-          print("is the state that produces images nobody has used since 2024.\n")
+          print("**The bar is one year without a project consumer** (§4.1). Outcomes")
+          print("are keep or retire; there is no \"keep for now\", which is the state")
+          print("that produces images nobody has used since 2024.\n")
           print("Evidence is consuming repositories, **not GHCR pull counts**: a")
           print("scheduled CI job pulling an image is a pull count, not a user")
           print("(decision 5). Nothing here queries the packages API.\n")
@@ -172,32 +228,33 @@ jobs:
 
           if scanned:
               print("### Images, with a starting-point scan\n")
-              print("The scan greps the org for `ghcr.io/morzecrew/<image>`. **It is a")
-              print("starting point, not the answer** -- it misses consumers that pull")
-              print("by digest, build from a variable, or live outside the org, and it")
-              print("cannot tell a live project from an abandoned one.\n")
-              print("| Image | Referenced by | Keep or retire? |")
-              print("|---|---|---|")
-              for t in targets:
-                  hits = evidence.get(t, "")
-                  if hits == "__error__":
-                      cell = "⚠️ scan failed for this image"
-                  elif hits:
-                      cell = hits
-                  else:
-                      cell = "**none found**"
-                  print(f"| `{t}` | {cell} | |")
+              print("**It is a starting point, not the answer.** It greps the org for")
+              print("each published reference, so it misses consumers that pull by")
+              print("digest or build the reference from a variable, it cannot see")
+              print("outside the organisation, and it cannot tell a live project from")
+              print("an abandoned one.\n")
           else:
               print("### Images\n")
               print("> [!WARNING]")
               print("> **The consumer scan did not run.** `ORG_READ_TOKEN` is not set,")
-              print("> and `GITHUB_TOKEN` cannot search other repositories. The list")
-              print("> below is therefore unmeasured -- an empty column here means")
-              print("> *nobody looked*, not *nobody uses it*.\n")
-              print("| Image | Referenced by | Keep or retire? |")
-              print("|---|---|---|")
-              for t in targets:
-                  print(f"| `{t}` | _not scanned_ | |")
+              print("> and `GITHUB_TOKEN` cannot search other repositories. The column")
+              print("> below is unmeasured -- it means *nobody looked*, not *nobody")
+              print("> uses it*.\n")
+
+          print("| Image | Package | Package referenced by | This variant's tag | Keep or retire? |")
+          print("|---|---|---|---|---|")
+          for name, image, tag in plan:
+              image_hits, tag_hits = evidence.get(name, ("", ""))
+              variant = cell(tag_hits, scanned) if tag else "—"
+              print(f"| `{name}` | `{image}` | {cell(image_hits, scanned)} | {variant} | |")
+
+          if any(t for _n, _i, t in plan):
+              print("\n**Two columns, because one cannot answer both questions.** The")
+              print("package column is the retirement signal -- it matches every tag a")
+              print("consumer might pin, including versions older than the current one.")
+              print("The variant column appears only where several targets share one")
+              print("package, and it says whether *that specific tag* is referenced; a")
+              print("package with consumers can still have a variant nobody picked.\n")
 
           print("\n---\n")
           print("### If anything is retired\n")
@@ -217,9 +274,6 @@ jobs:
           print("See [RFC 0003](../blob/main/rfcs/0003-image-admission-and-retirement-rule.md)")
           print("and [images/README.md](../blob/main/images/README.md).")
           PY
-          echo "body<<EOF" >>"${GITHUB_OUTPUT}"
-          cat body.md >>"${GITHUB_OUTPUT}"
-          echo "EOF" >>"${GITHUB_OUTPUT}"
           echo "--- issue body ---"
           cat body.md
 
@@ -229,7 +283,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Decision 6 says the owner is whoever the issue is assigned to at open
           # time, which presumes an assignee it never names. This makes that true
-          # rather than aspirational.
+          # rather than aspirational; RFC 0003 row 12 records the literal default
+          # and the post-creation timing.
           ASSIGNEE: ${{ vars.REVIEW_ASSIGNEE || 'Misery7100' }}
         run: |
           set -euo pipefail

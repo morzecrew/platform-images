@@ -2537,8 +2537,9 @@ environment was not.
 Branch `feat/wave-9-annual-image-review`. RFC 0003 decision 6 — the scheduled
 workflow that opens the annual review issue. No image changed.
 
-**Drift count: 3** — A-45, A-46 and A-47, all introduced by this wave and all
-caught by its own audit. Written as 0 when the group was drafted, which is the
+**Drift count: 4** — A-45, A-46, A-47 and A-48, all introduced by this wave.
+Three were caught by its own audit; A-48 was introduced *by* a review fix and
+caught by re-running the measurement it changed. Written as 0 when the group was drafted, which is the
 fifth consecutive wave the pre-audit number has been wrong; the practice of
 writing it before the audit is what is wrong, not the arithmetic.
 
@@ -2616,22 +2617,33 @@ happens and a calendar promise that does not."*
 
 Run by hand with the workflow's own query, this repository excluded:
 
-| Image | Repositories referencing it |
-|---|---|
-| `flyway` | 6 |
-| `python-distroless` | 5 |
-| `uv-builder` | 5 |
-| `postgres` | 3 |
-| `caddy` | 2 |
-| `npm-builder` | **none** |
-| `postgres-cron` | **none** |
-| `postgres-pgvector` | **none** |
-| `valkey` | **none** |
+~~An earlier version of this table searched the bake *target* name and reported
+four images with no consumer. Two of those were an artefact of searching a string
+that never existed — see R-35, and A-48 for the false negative the first fix
+introduced.~~ **Corrected, searching the published reference:**
 
-**No image is a retirement candidate**, because all four zero-consumer images
-shipped within the last three days — `valkey` on 2026-08-16, the two postgres
-variants on 2026-08-17, `npm-builder` on 2026-08-18. The clock starts now rather
-than having run out.
+| Image | Package referenced by | This variant's tag |
+|---|---|---|
+| `flyway` | 6 repositories | — |
+| `python-distroless` | 5 | — |
+| `uv-builder` | 5 | — |
+| `postgres` | 3 | none reference `:18.6` |
+| `postgres-cron` | 3 (the package) | **none** |
+| `postgres-pgvector` | 3 (the package) | **none** |
+| `caddy` | 2 | — |
+| `npm-builder` | **none** | — |
+| `valkey` | **none** | — |
+
+**Only `npm-builder` and `valkey` have no consumer at all.** The two postgres
+variants publish into a package three projects already use; what nobody
+references is their specific tags, which is a different and much weaker
+statement than the first version of this table made.
+
+**Neither is a retirement candidate.** The bar is **one year without a project
+consumer** (§4.1) — `valkey` shipped 2026-08-16 and `npm-builder` 2026-08-18, so
+the clock has barely started rather than run out. An earlier draft justified this
+by their being "three days old", which reads as a threshold this repo does not
+have (R-39).
 
 **`valkey` is the one to watch, and the reason is its own admission.** It was
 admitted under route 2 — 14 projects running upstream Redis or Valkey with
@@ -2640,10 +2652,11 @@ shared image. Two days in, none has. That is not yet a failure; it is the
 premise being unproven, and it is exactly what the annual review exists to
 notice. `npm-builder` is in the same position by design (RFC 0009 decision 11).
 
-The two postgres variants are a case the scan cannot read: they are variants of
-an image with three consumers, so "nobody references `postgres-pgvector`" may
-mean nobody wants it, or may mean everyone uses plain `postgres`. A reviewer has
-to answer that; the scan cannot.
+The two postgres variants are the case that forced the two-column design. Their
+package has three consumers and their own tags have none, which the scan can now
+state precisely — but it still cannot say whether that means nobody wants a
+variant or everyone is simply on an older tag. A reviewer answers that; the table
+only stops the question being asked wrongly.
 
 ## Rules distilled
 
@@ -2747,3 +2760,51 @@ isolation.
 - **The scan cannot read variants.** `postgres-pgvector` and `postgres-cron`
   return nothing, which may mean nobody wants them or may mean everyone uses
   plain `postgres`. A reviewer answers that; the table only asks.
+
+## Review round 1 — PR #38, 2026-08-18
+
+Six findings, **all six valid**. Two were defects in the evidence the workflow
+produces, which is the one thing it exists to produce.
+
+| # | Finding | Verdict |
+|---|---|---|
+| R-34 | **The bake guard was unreachable and its explanation discarded.** `targets="$(docker buildx bake --print 2>/dev/null \| …)"` under `set -euo pipefail`: a failing bake aborts the step at the assignment, so the `[ -n "${targets}" ] \|\| { echo "::error…"; exit 1; }` below it never runs — and `2>/dev/null` removed the only account of why. The sibling step in `bake.yaml` does not suppress stderr. This is the unreachable-branch case my own audit pass 5 exists for, and the audit missed it. Now `bake --print` writes to a file with stderr flowing to the log, and failure is caught by `\|\|` rather than by a guard that cannot run. | fixed |
+| R-35 | **The scan searched strings that have never existed.** `TARGETS` held bake *target* names, but `postgres-cron` publishes as `ghcr.io/morzecrew/postgres:18.6-cron` — so the query `ghcr.io/morzecrew/postgres-cron` was guaranteed to return nothing whoever used it. Two of the four "none found" rows in this wave's own table, and in the PR body, were that artefact. **This is D-039's failure mode, committed inside the workflow built to prevent it**: "could not look" printed as "nobody uses it". Now derived from `target.<name>.tags` in `bake --print`. | fixed |
+| R-36 | **The scheduled-workflow limitation was vague and had no mitigation.** Verified against GitHub's documentation rather than the reviewer's word: *"In a public repository, scheduled workflows are automatically disabled when no repository activity has occurred in 60 days."* The number and the public-repository qualifier are now stated, together with the mitigation that matters more than either — `gh workflow enable`, then `workflow_dispatch` rather than waiting another year. | fixed |
+| R-37 | **Image-level evidence against a tag-level question.** Related to R-35 and the reason its first fix was wrong on its own — see A-48. Resolved by searching both and reporting both. | fixed |
+| R-38 | **The assignee contract was documented in one place and implemented in another.** Row 12 described post-creation assignment; it did not name the literal fallback, and decision 6's "at open time" was left unreconciled. Both now in row 12. | fixed |
+| R-39 | **An invented three-day threshold.** This log justified "no retirement candidates" by the images being three days old, where the rule is **one year without a project consumer** (§4.1). The conclusion was right and the stated reason was a criterion this repo does not have — which is how undocumented rules get born. Reworded to cite §4.1. | fixed |
+
+### A-48 — the first fix for R-35 traded one wrong answer for another
+
+Deriving the search string from `tags[0]` gave `ghcr.io/morzecrew/postgres:18.6`
+for the base target — and **three projects reference `postgres` on older tags**,
+so the corrected scan reported `postgres` as having no consumers. A false
+"nobody uses it" for an image with three users is worse than the artefact it
+replaced, and it was caught only by running the scan and reading a result that
+disagreed with what I already knew.
+
+The fix is two searches, because one cannot answer both questions:
+
+- the **package path** is the retirement signal, matching every tag a consumer
+  might pin, including versions older than the current one;
+- the **exact tag** separates targets sharing a package, and is emitted only for
+  those, since elsewhere it is a column of noise.
+
+**Class:** `drift` — introduced by this wave, in the fix for a review finding.
+
+### Rules distilled
+
+- A guard placed after a command that `set -e` will abort on is not a guard.
+  Check whether the failure path can reach the code written to handle it (R-34).
+- Search for what is *published*, not for what the build calls it. A target name
+  and a registry reference are different strings, and the difference is silent
+  (R-35).
+- When a fix changes a measurement, re-run the measurement and read it against
+  what you already know. A result that surprises you is the fix telling you it is
+  wrong (A-48).
+- One query cannot answer two questions. "Is this image used" and "is this tag
+  used" have different right answers, and picking either alone produces a
+  confident falsehood (R-37, A-48).
+- A stated reason that is not the documented rule invents a second rule. Cite the
+  criterion, not the circumstance that happens to satisfy it (R-39).
