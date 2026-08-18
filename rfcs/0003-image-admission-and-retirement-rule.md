@@ -1,9 +1,18 @@
 # RFC 0003 — Image admission and retirement rule
 
-- **Status:** 🚧 In progress — the rule shipped to
-  [images/README.md](../images/README.md) on 2026-08-12. **Execution surfaced a
-  conflict with decision 1, which is `LOCKED` and therefore not for the executor
-  to resolve** — see decision 7. The rule as written is what shipped.
+- **Status:** ✅ Complete — the rule shipped to
+  [images/README.md](../images/README.md) on 2026-08-12, and **decision 6's
+  mechanism shipped 2026-08-18** in wave 9
+  ([`annual-image-review.yaml`](../.github/workflows/annual-image-review.yaml)).
+  The completion criterion is that §8's PR has landed and every `LOCKED` row has
+  a mechanism rather than an intention; both now hold. Execution surfaced a
+  conflict with decision 1, which is `LOCKED` and was resolved by the author by
+  adding a second admission route rather than widening it — see decisions 7
+  and 9. The rule as written is what shipped.
+  **The first review fires January 2027 and has never run**; the workflow's
+  scheduled path is the one thing here that cannot be exercised before then, and
+  GitHub disables scheduled workflows in repositories that go inactive — which
+  an annual cron is uniquely exposed to (EXECUTION-LOG D-055).
 - **Scope:** The rule that decides whether an image belongs in this repo, and the
   rule that removes one. Covers the two-project admission bar, the annual
   unused-image review, the mechanical retirement checklist (including what
@@ -222,6 +231,8 @@ carrying our vendor label, which is why the README wording is not optional.
 | 8 | ~~`OPEN`~~ **Resolved by the author 2026-08-12** | Reimplementation of a published image belongs in the annual review, as a question rather than an enforcement — see row 10. |
 | 9 | `LOCKED` | **Route 2, drift.** An image is also admitted when two or more projects run the same upstream image without a Dockerfile *and* their pinned versions or configuration have diverged. Route 1 measures duplicated work; route 2 measures the absence of a shared default. Consequence: RFC 0006's gate opens — 14 projects, four pinned images — while RFC 0005's stays shut, since zero projects cannot diverge. That asymmetry is the test working, not a loophole. |
 | 10 | `LOCKED` | The annual review asks a second question: **does a live project reimplement an image we already publish?** A hit is treated as feedback about the image, not a violation by the project — the useful output is *why* they did not adopt it. §3.1's `morze-erp-backend-v2` is the worked example: it wants pg_cron without pgroonga, which is a `PG_EXTENSIONS` variant (RFC 0004), not an adoption failure. |
+| 11 | `ASSUMED` | **The review issue pre-fills a consumer scan, not just a checklist.** Decision 6 specifies "both questions and the current image list pre-filled"; execution added per-image evidence, because a review that opens with "go and grep forty repositories" is the kind that gets closed unread. The scan greps the org for `ghcr.io/morzecrew/<image>` and **excludes this repository from its own results** — every image is referenced here by the bake file, the READMEs and the RFCs, so without that exclusion every row reads "referenced by platform-images" and buries the one signal §4.2 asks for. Three states are kept distinct — consumers found, none found, scan failed — because "could not look" and "looked and found nothing" must not print the same string. The issue states in its own body that the scan is a starting point, not the answer: it misses digest pins, references built from variables, and anything outside the organisation, and it cannot tell a live project from an abandoned one. Depart if the scan starts being trusted as the verdict rather than the draft. **Added by execution 2026-08-18 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-053.** |
+| 12 | `ASSUMED` | **The issue is assigned from a `REVIEW_ASSIGNEE` repository variable, defaulting to the repo owner.** Decision 6 says the owner is "whoever the issue is assigned to at open time", which presumes an assignee it never names — and an unassigned issue leaves the rule's owner undefined. Assignment happens *after* creation, deliberately: an assignee who is no longer a collaborator would otherwise fail the create call and lose the issue entirely, which is a worse outcome than an unassigned one. A failed assignment warns and leaves the issue standing. **Added by execution 2026-08-18 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-054.** |
 
 ## 8. Phasing
 

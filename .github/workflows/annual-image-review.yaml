@@ -1,0 +1,239 @@
+name: Annual Image Review
+
+# RFC 0003 decision 6 (LOCKED): the annual review is opened by a scheduled
+# workflow, not by a calendar promise. Its own words -- "a self-opening issue is
+# the difference between a review that happens and a calendar promise that does
+# not" -- are the reason this file exists.
+#
+# 8 January rather than the 1st: an issue opened on a public holiday is read in
+# February. The RFC says the month matters, not the day.
+#
+# KNOWN LIMITATION, and it is the one that would silently defeat this workflow:
+# GitHub disables scheduled workflows in repositories that have gone inactive,
+# so an annual cron is exactly the schedule most at risk of never firing -- and
+# a repository quiet for a year is precisely when an unused-image review matters
+# most. There is no in-repo fix; the mitigation is that this file says so.
+
+on:
+  schedule:
+    - cron: "0 9 8 1 *"
+
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print the issue body to the log instead of opening it
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: annual-image-review
+  cancel-in-progress: false
+
+jobs:
+  open-review:
+    runs-on: ubuntu-latest
+    name: Open the review issue
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # Identified by title rather than by label, so the workflow does not have
+      # to create and maintain a label as a side effect. A manual dispatch while
+      # last year's review is still open should not open a second one.
+      - name: Refuse to open a duplicate
+        id: dupe
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          existing="$(gh issue list --state open --limit 50 \
+            --json number,title \
+            --jq '[.[] | select(.title | startswith("Annual image review"))] | .[0].number // ""')"
+          if [ -n "${existing}" ]; then
+            echo "::notice title=Review already open::#${existing} is open; not opening another"
+            echo "skip=true" >>"${GITHUB_OUTPUT}"
+          else
+            echo "skip=false" >>"${GITHUB_OUTPUT}"
+          fi
+
+      # Derived from the bake file, never hand-written. A hand-maintained list
+      # would drift from what is actually published, and an image missing from
+      # the review is an image that is never retired -- the failure this whole
+      # rule exists to prevent (RFC 0004 row 16's lesson, EXECUTION-LOG D-040).
+      - name: Collect the current image list
+        if: steps.dupe.outputs.skip == 'false'
+        id: images
+        run: |
+          set -euo pipefail
+          targets="$(docker buildx bake --print 2>/dev/null \
+            | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')"
+          [ -n "${targets}" ] || { echo "::error title=No targets::bake --print produced nothing"; exit 1; }
+          echo "targets: ${targets}"
+          echo "targets=${targets}" >>"${GITHUB_OUTPUT}"
+
+      # RFC 0003 decision 5 (ASSUMED): the review reads consuming repositories,
+      # NOT GHCR pull counts -- a scheduled CI job pulling an image is a pull
+      # count, not a user. So this searches code, and there is deliberately no
+      # call to the packages API anywhere in this file.
+      #
+      # GITHUB_TOKEN cannot see other repositories, so the scan needs a token
+      # with org-wide read. When that secret is absent the issue says the scan
+      # did not run and names the secret, rather than opening a blank checklist
+      # that reads as "no consumers found".
+      - name: Scan consuming repositories
+        if: steps.dupe.outputs.skip == 'false'
+        id: scan
+        env:
+          GH_TOKEN: ${{ secrets.ORG_READ_TOKEN }}
+          SELF: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          : >evidence.tsv
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "scanned=false" >>"${GITHUB_OUTPUT}"
+            echo "::warning title=Consumer scan skipped::ORG_READ_TOKEN is not set; the issue will say so"
+            exit 0
+          fi
+          for name in ${{ steps.images.outputs.targets }}; do
+            # Code search is rate-limited well below the REST API; pace it
+            # rather than losing the tail of the list to a 403.
+            sleep 7
+            # This repository is excluded from its own results. Every image is
+            # referenced here -- by the bake file, the READMEs, the RFCs -- so
+            # without this every row reads "referenced by platform-images" and
+            # the one signal §4.2 asks for ("an image whose *only* consumer is
+            # this repo is retired") is buried under noise that looks like use.
+            # Piped through jq rather than `gh --jq`, which takes a single
+            # expression and has no --arg. A failed request is kept distinct
+            # from an empty result: "could not look" and "looked and found
+            # nothing" must not print the same string (EXECUTION-LOG D-039).
+            raw="$(gh api -X GET search/code \
+              -f q="\"ghcr.io/morzecrew/${name}\" org:morzecrew" 2>/dev/null)" || raw=""
+            if [ -z "${raw}" ]; then
+              hits="__error__"
+            else
+              hits="$(printf '%s' "${raw}" | jq -r --arg self "${SELF}" \
+                '[.items[].repository.full_name] | unique | map(select(. != $self)) | join(", ")')"
+            fi
+            printf '%s\t%s\n' "${name}" "${hits}" >>evidence.tsv
+          done
+          echo "scanned=true" >>"${GITHUB_OUTPUT}"
+          cat evidence.tsv
+
+      - name: Compose the issue
+        if: steps.dupe.outputs.skip == 'false'
+        id: compose
+        env:
+          TARGETS: ${{ steps.images.outputs.targets }}
+          SCANNED: ${{ steps.scan.outputs.scanned }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >body.md
+          import os, pathlib
+
+          targets = os.environ["TARGETS"].split()
+          scanned = os.environ["SCANNED"] == "true"
+
+          evidence = {}
+          p = pathlib.Path("evidence.tsv")
+          if p.exists():
+              for line in p.read_text().splitlines():
+                  if "\t" in line:
+                      name, hits = line.split("\t", 1)
+                      evidence[name] = hits
+
+          print("Opened automatically. RFC 0003 decision 6.\n")
+          print("Two questions, and the second is easy to forget:\n")
+          print("1. **Does a live project reference this tag?** An image whose only")
+          print("   consumer is this repository -- a builder used by no downstream")
+          print("   project -- is retired even if it builds cleanly (RFC 0003 §4.2).")
+          print("2. **Does a live project reimplement an image we already publish?**")
+          print("   A hit is feedback about the image, not a violation by the project.")
+          print("   The useful output is *why* they did not adopt it (decision 10).\n")
+          print("**Outcomes are keep or retire.** There is no \"keep for now\" -- that")
+          print("is the state that produces images nobody has used since 2024.\n")
+          print("Evidence is consuming repositories, **not GHCR pull counts**: a")
+          print("scheduled CI job pulling an image is a pull count, not a user")
+          print("(decision 5). Nothing here queries the packages API.\n")
+          print("---\n")
+
+          if scanned:
+              print("### Images, with a starting-point scan\n")
+              print("The scan greps the org for `ghcr.io/morzecrew/<image>`. **It is a")
+              print("starting point, not the answer** -- it misses consumers that pull")
+              print("by digest, build from a variable, or live outside the org, and it")
+              print("cannot tell a live project from an abandoned one.\n")
+              print("| Image | Referenced by | Keep or retire? |")
+              print("|---|---|---|")
+              for t in targets:
+                  hits = evidence.get(t, "")
+                  if hits == "__error__":
+                      cell = "⚠️ scan failed for this image"
+                  elif hits:
+                      cell = hits
+                  else:
+                      cell = "**none found**"
+                  print(f"| `{t}` | {cell} | |")
+          else:
+              print("### Images\n")
+              print("> [!WARNING]")
+              print("> **The consumer scan did not run.** `ORG_READ_TOKEN` is not set,")
+              print("> and `GITHUB_TOKEN` cannot search other repositories. The list")
+              print("> below is therefore unmeasured -- an empty column here means")
+              print("> *nobody looked*, not *nobody uses it*.\n")
+              print("| Image | Referenced by | Keep or retire? |")
+              print("|---|---|---|")
+              for t in targets:
+                  print(f"| `{t}` | _not scanned_ | |")
+
+          print("\n---\n")
+          print("### If anything is retired\n")
+          print("The checklist is RFC 0003 §4.3, and step 5 is the one that gets missed:\n")
+          print("1. Announce in the image's README that the tag is frozen, with a date.")
+          print("2. Remove the bake target, its variable, and its `default` group entry.")
+          print("3. Remove the row from the root README images table.")
+          print("4. Delete `images/<name>/`.")
+          print("5. **Leave `<name>` in `cleanup-images.yaml`'s `PACKAGES`** -- the")
+          print("   published package still exists and its untagged children still need")
+          print("   collecting.")
+          print("6. Decide the published package's fate explicitly: **freeze** (default)")
+          print("   or **delete**, recorded in the PR (§4.4).\n")
+          print("Steps 2-4 are one PR. Git history keeps the Dockerfile, so retirement")
+          print("costs nothing irreversible -- which is the argument that makes it easy")
+          print("to agree to.\n")
+          print("See [RFC 0003](../blob/main/rfcs/0003-image-admission-and-retirement-rule.md)")
+          print("and [images/README.md](../blob/main/images/README.md).")
+          PY
+          echo "body<<EOF" >>"${GITHUB_OUTPUT}"
+          cat body.md >>"${GITHUB_OUTPUT}"
+          echo "EOF" >>"${GITHUB_OUTPUT}"
+          echo "--- issue body ---"
+          cat body.md
+
+      - name: Open the issue
+        if: steps.dupe.outputs.skip == 'false' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Decision 6 says the owner is whoever the issue is assigned to at open
+          # time, which presumes an assignee it never names. This makes that true
+          # rather than aspirational.
+          ASSIGNEE: ${{ vars.REVIEW_ASSIGNEE || 'Misery7100' }}
+        run: |
+          set -euo pipefail
+          url="$(gh issue create \
+            --title "Annual image review — $(date -u +%Y)" \
+            --body-file body.md)"
+          echo "opened: ${url}"
+          # Assigned after creation, not during: an assignee who is no longer a
+          # collaborator would otherwise fail the whole command and lose the
+          # issue, which is a worse outcome than an unassigned one.
+          gh issue edit "${url}" --add-assignee "${ASSIGNEE}" \
+            || echo "::warning title=Not assigned::could not assign ${ASSIGNEE}; assign the issue by hand"
+          echo "::notice title=Annual review opened::${url}"

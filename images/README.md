@@ -280,6 +280,23 @@ Outcomes are keep or retire. There is no "keep for now"; that is the state that
 produces images nobody has used since 2024. An image whose only consumer is this
 repo is retired even if it builds cleanly.
 
+**The review opens itself.** [`annual-image-review.yaml`](../.github/workflows/annual-image-review.yaml)
+runs on 8 January and opens an issue carrying both questions, the image list
+read from `docker-bake.hcl`, and a scan of which repositories reference each
+tag — with this repository excluded from its own results, since it references
+every image it publishes. A calendar promise is not a mechanism (RFC 0003
+decision 6).
+
+Two things about that scan are worth knowing before you trust a row:
+
+- **It is a starting point, not the answer.** It greps the org for
+  `ghcr.io/morzecrew/<image>`, so it misses consumers that pull by digest, build
+  the reference from a variable, or live outside the organisation, and it cannot
+  tell a live project from an abandoned one.
+- **It needs `ORG_READ_TOKEN`.** `GITHUB_TOKEN` cannot search other
+  repositories. Without that secret the issue says the scan did not run, rather
+  than showing an empty column that reads as "nobody uses it".
+
 ### Retiring an image
 
 Deletion has to be mechanical or it will not happen:
