@@ -1,6 +1,10 @@
 # RFC 0006 — Valkey image
 
-- **Status:** 🚧 In progress — **P1, P2 and P3 shipped 2026-08-16.** Admitted
+- **Status:** ✅ Complete — **P1, P2 and P3 shipped 2026-08-16**, which is all of
+  §12; the status lagged five days behind the work and was corrected 2026-08-17
+  (EXECUTION-LOG D-044). The completion criterion is that every phase in §12 has
+  shipped and §10's questions are answered or struck; both now hold. §10 question
+  4 was the last one open and is answered by measurement (D-045). Admitted
   2026-08-12 on demand measured in §3.1 (14 projects, four distinct upstream
   references, three pinned and one floating) via RFC 0003's second admission
   route; the decision and its reasoning are recorded in
@@ -345,18 +349,59 @@ come away knowing the image evicts by default.
 
 ## 10. Unresolved questions
 
-1. **Does pgmq + Postgres cover the queue usage?** This decides whether the image
-   is built at all. Blocked on RFC 0004 §10 (is pgmq even packaged for the pinned
-   major) and on a real workload to compare against.
-2. **Is there a cache requirement distinct from the queue one?** The two are
+1. ~~**Does pgmq + Postgres cover the queue usage?** This decides whether the
+   image is built at all. Blocked on RFC 0004 §10 (is pgmq even packaged for the
+   pinned major) and on a real workload to compare against.~~
+   **Answered 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-039.** The
+   blocking half is closed in the strongest possible direction: **pgmq is
+   packaged in PGDG for no major at all**, so "Postgres with pgmq" was never an
+   available option to compare against. The question could not have been settled
+   by a workload comparison, because one of the two things being compared does
+   not exist as a package. The gate reached the same conclusion on 2026-08-12 by
+   a different route — zero repositories use pgmq — and this is the supply-side
+   confirmation of it.
+2. ~~**Is there a cache requirement distinct from the queue one?** The two are
    usually conflated and §5.3 shows they want opposite settings. If only one
-   exists, the answer is likely "not this image".
-3. **Is RFC 0001's helper genuinely shareable**, or is it Postgres-specific in
+   exists, the answer is likely "not this image".~~
+   **Answered 2026-08-12 by the admission measurement in §3.1.** The cache
+   requirement exists on its own evidence — 14 projects, four distinct upstream
+   references — and the queue half was moot rather than merged into it, because
+   pgmq is packaged nowhere (question 1). The two were never in competition.
+3. ~~**Is RFC 0001's helper genuinely shareable**, or is it Postgres-specific in
    ways only a second consumer reveals? This image is how that gets answered,
-   which is an argument for building it that has nothing to do with Valkey.
-4. Whether Valkey's runtime `CONFIG SET` can drift from the generated conf, and
+   which is an argument for building it that has nothing to do with Valkey.~~
+   **Answered 2026-08-16 — yes, with three defects found in the answering.** The
+   helper is shared unchanged, but `valkey` as the second consumer exposed three
+   contract defects that a single consumer had hidden (EXECUTION-LOG D-014,
+   D-015, D-018). Both halves matter: shareable, and not demonstrably so until
+   something other than `postgres` used it.
+4. ~~Whether Valkey's runtime `CONFIG SET` can drift from the generated conf, and
    whether that matters for restart semantics — a `CONFIG SET maxmemory` survives
-   until restart and then silently reverts.
+   until restart and then silently reverts.~~
+   **Answered by measurement 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md)
+   D-045.** Yes to the drift, no to the restart consequence, and the question was
+   missing a third case that turns out to be the interesting one:
+
+   - `CONFIG SET maxmemory 7mb` changes the running server and leaves the
+     generated `valkey.conf` untouched. The startup summary, printed at boot, is
+     therefore true when printed and can go stale during the container's life.
+     This is inherent to a summary and is not fixable by this image.
+   - **`CONFIG REWRITE` writes that drift into the generated `valkey.conf`** —
+     so a persistence channel does exist, which the question did not anticipate.
+   - It still does not survive a restart, because the entrypoint regenerates the
+     file from the environment unconditionally on every start. Measured: 100mb →
+     `CONFIG SET`/`CONFIG REWRITE` → 7mb on disk → restart → 100mb on disk and in
+     the server.
+
+   **The contrast with `postgres` is the finding.** `ALTER SYSTEM` writes
+   `postgresql.auto.conf` into `PGDATA`, which is a mounted volume the entrypoint
+   must not overwrite and which Postgres reads *after* every layer the image
+   generates. Valkey's equivalent writes into a path the entrypoint owns and
+   rewrites. Neither RFC decided this; it follows from where the file lives. The
+   consequence is that this image already has the property the open
+   `allow_alter_system` question is trying to buy for `postgres`, and got it for
+   free. `smoke.sh` §18 pins it, since the property would be lost silently by any
+   change that made the regeneration conditional.
 
 ## 11. Decisions
 

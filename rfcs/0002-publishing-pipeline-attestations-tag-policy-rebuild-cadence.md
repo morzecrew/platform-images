@@ -1,18 +1,24 @@
 # RFC 0002 — Publishing pipeline: attestations, tag policy, rebuild cadence
 
-- **Status:** 🚧 In progress — **all four phases shipped; one claim still
-  unverified against GHCR.** P1's labels and attestation declaration landed
-  2026-08-12 ([docker-bake.hcl](../docker-bake.hcl), verified with
-  `bake --print`); P2's tag policy and P3's rootless smoke stage landed
-  2026-08-16 in wave 1; P4's weekly rebuild and smoke gate landed 2026-08-16 in
-  wave 2. Execution found §5.2's specified syntax is silently ignored by buildx
-  (§5.2a, decision 13) and that §5.3's stamp was not unique per build (decision
-  17, EXECUTION-LOG D-009).
-  **Attestations on published images remain unverified.** The full
+- **Status:** ✅ Complete — **all four phases shipped, and §6 is verified against
+  GHCR.** P1's labels and attestation declaration landed 2026-08-12
+  ([docker-bake.hcl](../docker-bake.hcl), verified with `bake --print`); P2's tag
+  policy and P3's rootless smoke stage landed 2026-08-16 in wave 1; P4's weekly
+  rebuild and smoke gate landed 2026-08-16 in wave 2. Execution found §5.2's
+  specified syntax is silently ignored by buildx (§5.2a, decision 13) and that
+  §5.3's stamp was not unique per build (decision 17, EXECUTION-LOG D-009).
+  ~~**Attestations on published images remain unverified.** The full
   build → push-by-digest → smoke → promote gate is measured end to end, but
   against a throwaway local registry (EXECUTION-LOG D-008, D-010). §6's
   `imagetools inspect` against a real GHCR digest is what turns the declaration
-  into a fact, and only a real publishing run can produce one.
+  into a fact, and only a real publishing run can produce one.~~
+  **Verified by execution 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md)
+  D-043.** All four of §6's bullets now hold against real published digests, on
+  every target rather than a sample. The completion criterion is that §12's four
+  phases have shipped and §6 passes against GHCR; both are now true, so the
+  status is no longer waiting on anything this repo controls. Signing remains
+  out of scope by decision 4 and §8, which is a separate RFC rather than an
+  unfinished part of this one.
 - **Scope:** What a published `ghcr.io/morzecrew/*` tag guarantees about itself.
   Covers the OCI label set in [docker-bake.hcl](../docker-bake.hcl), buildx
   provenance and SBOM attestations, a stated tag-mutability policy with an
@@ -357,6 +363,21 @@ The smoke stage of §5.5 is itself most of this RFC's verification. Beyond it:
 - The dated tag and the mutable tag resolve to the same digest immediately after
   a publish, and diverge after the next one.
 - A local `just bake postgres` produces exactly one tag and no dated alias.
+
+**Verified against GHCR (2026-08-17, EXECUTION-LOG D-043).** Every bullet above
+now holds against real published digests rather than the throwaway local registry
+of D-008 and D-010:
+
+| Bullet | Result |
+|---|---|
+| provenance + SBOM manifests | `ghcr.io/morzecrew/postgres:18.6` carries an `attestation-manifest` child whose layers are `https://spdx.dev/Document` and `https://slsa.dev/provenance/v1`. The provenance contains `buildConfig` and `llbDefinition` — the fields `mode=min` omits — so it is `mode=max`, which is what decision 2 requires. Checked on the two RFC 0004 variants as well, because decision 2 says *every* target |
+| eight labels, `.revision` matching | Nine labels on the published image: the eight OCI ones plus `io.morze.postgres.extensions`. `.revision` is `2c0f21e`, the commit whose publish produced it |
+| dated ≡ mutable, then diverging | `:18.6` and `:18.6-20260817-32061042936.1` resolve to one digest; the three earlier dated tags each kept their own digest and no longer carry `:18.6` |
+| local bake, one tag | `bake --print postgres` with no `BUILD_STAMP` yields exactly `ghcr.io/morzecrew/postgres:18.6` and no dated alias |
+
+The cleanup half of bullet 1 keeps D-029's amended wording and is unchanged by
+this: what must survive is what the gate published, and both children of a tagged
+index are untagged versions, so "untagged" alone was never the right predicate.
 
 ## 7. Docs
 

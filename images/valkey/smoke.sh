@@ -415,4 +415,41 @@ case "$("${ENGINE}" logs "${CTR}" 2>&1)" in
 esac
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
+# --- 18. a runtime CONFIG REWRITE does not survive a restart --------------
+#
+# RFC 0006 §10 question 4. `CONFIG SET` changes the running server only, but
+# `CONFIG REWRITE` writes that change into the generated valkey.conf -- so a
+# persistence channel does exist, and it outranks nothing only because the
+# entrypoint regenerates the file from the environment on every start.
+#
+# The rewrite is asserted *before* the restart on purpose. Without it this
+# section would still pass against an image where CONFIG REWRITE quietly did
+# nothing, which is the same assertion with none of the meaning.
+#
+# This is the property postgres does not have: ALTER SYSTEM writes into PGDATA,
+# which is a mounted volume the entrypoint must not overwrite. The difference is
+# where the file lives, not what either RFC decided.
+
+start "${CTR}" -e VALKEY_MAXMEMORY=100mb
+wait_ready "${CTR}"
+[ "$(cfg "${CTR}" maxmemory)" = "104857600" ] ||
+	{ echo "FAIL: VALKEY_MAXMEMORY did not take"; exit 1; }
+
+"${ENGINE}" exec "${CTR}" valkey-cli CONFIG SET maxmemory 7mb >/dev/null
+[ "$(cfg "${CTR}" maxmemory)" = "7340032" ] ||
+	{ echo "FAIL: CONFIG SET did not change the running value"; exit 1; }
+"${ENGINE}" exec "${CTR}" valkey-cli CONFIG REWRITE >/dev/null
+"${ENGINE}" exec "${CTR}" grep -q '^maxmemory 7mb' /etc/valkey/valkey.conf ||
+	{ echo "FAIL: CONFIG REWRITE did not reach the generated conf -- this test proves nothing"; exit 1; }
+echo "runtime drift: CONFIG REWRITE does reach the generated conf"
+
+"${ENGINE}" restart "${CTR}" >/dev/null
+wait_ready "${CTR}"
+[ "$(cfg "${CTR}" maxmemory)" = "104857600" ] ||
+	{ echo "FAIL: a CONFIG REWRITE survived a restart; the summary now lies at boot"; exit 1; }
+"${ENGINE}" exec "${CTR}" grep -q '^maxmemory 100mb' /etc/valkey/valkey.conf ||
+	{ echo "FAIL: valkey.conf was not regenerated from the environment"; exit 1; }
+echo "runtime drift: erased by the restart, conf regenerated from the environment"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
 echo "PASS: valkey"

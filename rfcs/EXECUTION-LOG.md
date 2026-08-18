@@ -1905,3 +1905,314 @@ not an auth failure — `gh auth status` and `/rate_limit` were healthy througho
 The loop's own tooling reads that surface over REST, so without the GraphQL
 detour this round would have looked empty, which is the failure mode wave 5's
 `--since` bug already demonstrated once.
+
+# Wave 7 · Closing the record
+
+Branch `docs/wave-7-rfc-close-out`. RFC 0002 §6's verification against GHCR,
+RFC 0006's close-out, and RFC 0009's evidence and open decisions. No image
+changed; the only executable change is one `smoke.sh` section.
+
+**Drift count: 4** — A-31, A-32, A-33 and A-35, all introduced by this wave and
+all caught by its own audit or the PR that followed it. D-044 is `drift` against
+wave 3, found here, and is not counted in this wave's number.
+
+This number was written as **0** when the group was drafted, then **3** after the
+audit, and is corrected in place each time rather than rewritten — a drift count
+written before the audit is a prediction, and this one was wrong twice. The four
+are one failure repeated: a claim that overshoots the measurement or the fix
+behind it.
+
+The wave exists because three RFCs were finished, or wrong, in ways nobody had
+checked. Two of them turned out to be finished.
+
+## D-043 — RFC 0002 §6 verified against GHCR, on every target
+
+- **Touches:** RFC 0002 §6, decision 2 (`LOCKED`), status
+- **RFC said:** attestations on published images "remain unverified"; every
+  earlier measurement (D-008, D-010) ran against a throwaway local registry, and
+  §6 says only a real publishing run can settle it
+- **Measured, against real published digests:** `ghcr.io/morzecrew/postgres:18.6`
+  carries an `attestation-manifest` child whose layers are
+  `https://spdx.dev/Document` and `https://slsa.dev/provenance/v1`. The
+  provenance contains `buildConfig` and `llbDefinition` — the fields `mode=min`
+  omits — so it is `mode=max`, which is what decision 2 requires. Nine labels,
+  `.revision` = `2c0f21e`, the commit whose publish produced it. `:18.6` and
+  `:18.6-20260817-32061042936.1` resolve to one digest while the three earlier
+  dated tags kept their own and lost `:18.6`. A local `bake --print` yields one
+  tag and no dated alias.
+- **Checked on all three postgres targets, not one**, because decision 2 says
+  *every* target and the two RFC 0004 variants had never been published before
+  this run. Both carry attestation manifests.
+- **Class:** `discovery` — the RFC was right that only a real publish could
+  answer it, and right to refuse to claim it until one had.
+- **Consequence:** RFC 0002 has nothing left that this repository controls, so
+  its status moves to ✅ Complete. Signing stays out of scope by decision 4.
+- **Proposed row (RFC 0002):** none. §6 gains a verification table; the decision
+  table is unchanged, because nothing was decided — a claim was checked.
+
+## D-044 — RFC 0006 sat at 🚧 for five days with every phase shipped
+
+- **Touches:** RFC 0006 §12, status; `rfcs/INDEX.md`
+- **RFC said:** status 🚧 In progress
+- **Found:** §12 lists exactly P1, P2 and P3, and the status block's own first
+  sentence says all three shipped on 2026-08-16. The document contradicted itself
+  in consecutive lines for five days.
+- **Class:** `drift`, against wave 3, which shipped the phases and did not move
+  the status. Not counted in wave 7's drift number.
+- **This is the fourth instance of one failure.** W-1 (RFC 0001), R-26 (RFC 0004,
+  caught in review, where I had already corrected `Draft` → `In progress` and
+  stopped one notch short), wave 6's own status entry, and now this. The pattern
+  is that the executor updates the status to describe *the work they just did*
+  rather than re-reading the phase list to ask whether anything remains.
+- **Built:** status ✅ Complete **with the completion criterion written into the
+  status block** — every §12 phase shipped and §10 answered or struck — so the
+  next reader checks a stated condition rather than re-deriving one. Same
+  treatment R-26 forced on RFC 0004.
+- **Proposed row (RFC 0006):** none; this is a status correction, recorded in the
+  reconciliation table below.
+
+## D-045 — Valkey's runtime mutation channel exists, and the restart erases it
+
+- **Touches:** RFC 0006 §10 question 4; RFC 0001 decision 5 (the summary)
+- **RFC asked:** whether a runtime `CONFIG SET` can drift from the generated conf
+  and whether that matters for restart semantics, assuming the drift "survives
+  until restart and then silently reverts"
+- **Measured:** the assumption was right about `CONFIG SET` and missed a case.
+  `CONFIG SET maxmemory 7mb` changes the running server and leaves the generated
+  file alone. **`CONFIG REWRITE` writes the drift into `/etc/valkey/valkey.conf`**
+  — a persistence channel the question did not anticipate. It still does not
+  survive a restart, because §9 of the entrypoint regenerates that file from the
+  environment unconditionally: 100mb → `CONFIG SET` + `CONFIG REWRITE` → 7mb on
+  disk → restart → 100mb on disk and in the server.
+- **Class:** `discovery`. Reading the entrypoint would have shown the
+  regeneration; only running it showed that `CONFIG REWRITE` reaches the file at
+  all, which is what makes the regeneration load-bearing rather than incidental.
+- **The finding is the contrast with `postgres`.** `ALTER SYSTEM` writes
+  `postgresql.auto.conf` into `PGDATA` — a mounted volume the entrypoint must not
+  overwrite, read *after* every layer the image generates. Valkey's equivalent
+  writes into a path the entrypoint owns. **Neither RFC decided this**; it falls
+  out of where the file lives. So `valkey` already holds the property the open
+  `allow_alter_system` question (W-3) is trying to buy for `postgres`, and holds
+  it for free.
+- **Built:** `smoke.sh` §18, which asserts the rewrite *reaches* the file before
+  asserting the restart erases it — without the first assertion the section would
+  pass against an image where `CONFIG REWRITE` quietly did nothing, which is the
+  same test with none of the meaning. Verified red against an image whose
+  regeneration was made conditional: it fails at the restart assertion and the
+  preceding one still passes.
+- **Proposed row (RFC 0006):** none. §10 question 4 is answered in place; no
+  behaviour changed, so there is no decision to record.
+
+## D-046 — Two of RFC 0009's measurements are wrong, both under decision 8
+
+- **Touches:** RFC 0009 §2, §10 questions 1 and 2, decision 8 (`OPEN`)
+- **RFC said:** `erp-frontend` runs `npm ci` "with a cache mount", and one of the
+  three Caddy projects "already uses `ghcr.io/morzecrew/caddy:2.11`". Decision 8
+  recommends it as the first migration *because* of both.
+- **Measured, against the default branch of each of the five repositories:**
+  neither holds. `erp-frontend` has no `--mount=type=cache` anywhere, and its
+  runtime is `caddy:2.11.1-alpine` from Docker Hub. **None of the five consumes
+  this repo's caddy image.** Cache mounts across all five: **zero**, not one.
+- **Corrected during this wave's own audit (A-31):** the first version of this
+  entry said *no Morze project* consumes this repo's caddy image, which is false
+  and is a broader claim than the measurement supported. An org-wide code search
+  finds `eis-backend` and `erp-backend` building `containers/gateway` from
+  `ghcr.io/morzecrew/caddy:2.11.2`. The image is adopted as a reverse-proxy
+  gateway and unadopted as a static-asset runtime.
+- **Not drift in the projects:** `erp-frontend`'s `Dockerfile` is unchanged since
+  2026-05-09, three months before the RFC measured it, so it was in this state
+  when the claims were written.
+- **Class:** `spec-gap`, filed against the design process rather than any
+  execution — this is an RFC asserting measurements that were never taken, which
+  is a different failure from an RFC being silent, and the one that is hardest to
+  catch later because a stated measurement reads as settled.
+- **Both errors point the same way, which is why nobody questioned them:** each
+  made adoption look *further along* than it is. An RFC's own evidence drifting
+  optimistic is the direction that does not provoke a re-check.
+- **Consequence:** the conclusion survives and the reasoning does not.
+  `erp-frontend` is still the right first migration — Vite emitting to `dist`,
+  `npm ci`, Caddy already — and the migration is now worth more than the RFC
+  credited it, since it introduces the first cache mount and the first consumer
+  of this repo's caddy image at once.
+- **§10 question 1 answered in passing:** both landings run a detect chain
+  testing `yarn.lock`, then `package-lock.json`, then `pnpm-lock.yaml`. Neither
+  has a `yarn.lock`, so `npm ci` wins every build and `pnpm-lock.yaml` is never
+  read. The question "which do they intend" is unanswerable from outside; "which
+  runs" is not, and it is what decision 4 needed.
+- **Proposed rows (RFC 0009):** none from this entry; §2 and §10 carry amendment
+  notes and the strike-throughs.
+
+## D-047 — RFC 0009's open decisions closed, and three unlisted ones filled
+
+- **Touches:** RFC 0009 decisions 7 and 8 (`OPEN`), §12 P1, §5.1
+- **Author-ratified 2026-08-17.** The plan gate reported RFC 0009 **not ready**
+  on three load-bearing gaps; these are the answers, and they are recorded here
+  rather than embedded in code because none of them had been written down.
+- **Decision 7 — `BUILD_OUTPUT_DIR` defaults to `dist`.** Measured split across
+  the five: `dist` 2, `out` 2, `build` 1 — a plurality, so no default is right
+  for most. Defaulted anyway, because a wrong default fails loudly at build time
+  through §5.2's non-empty and `index.html` check, and requiring the variable
+  buys explicitness against an error already caught. **Conditioned** on the
+  failure message naming the variable, the path it looked at and what it found —
+  a loud failure is only a signpost if it says which knob to turn.
+- **Decision 8 — `erp-frontend`, and not in the same PR.** The repository, not
+  the package name: the `erp-frontend` repo contains a package called
+  `morze-crm-frontend` and a separate `morze-crm-frontend` repo also exists.
+- **Decision 9 — one target, one bake variable, Node `22`.** `uv-builder`'s
+  shape; `BUILDER_NODE_VERSION` feeds tag and arg together so contents cannot
+  move without the tag (D-041's rule). `22` over `24` because starting two majors
+  ahead of the fleet changes two things at once during adoption.
+- **Decision 10 — the `packageManager` pin is not applicable to npm.** §5.1
+  requires an "exact, integrity-checked `packageManager`", citing superseded
+  RFC 0008. That is a Corepack mechanism; npm ships inside the Node image, so
+  Corepack is never in the path, and honouring it literally would mean fetching
+  npm over the network to overwrite the npm from a pinned base image — **lower**
+  reproducibility, not higher. Retained in full for a future `pnpm-builder`,
+  where it does bite. Base image Debian, mirroring `uv-builder`, keeping native
+  modules on glibc.
+- **Decision 11 (`LOCKED`) — §6's battery verifies P1; the migration is adoption
+  evidence.** §12 required P1 to land "alongside one real migration", which lives
+  in another repository and therefore cannot be in this repository's PR: the
+  requirement was unsatisfiable as written, not merely inconvenient. It also
+  conflated verification with adoption. §6 verifies the image and does it better
+  than one migration would; a migration proves someone wants it, which is §9's
+  risk and RFC 0003's retirement criterion.
+- **Class:** `spec-gap` for decision 11 and for §5.1's mechanism; decisions 7 and
+  8 are `OPEN` rows answered, which is the delegated path rather than a
+  departure. Decisions 9 and 10 fill unlisted gaps, logged at the same weight per
+  this skill's rule that an unlisted decision is not an open one.
+- **Proposed rows (RFC 0009):** 7 and 8 resolved in place; 9, 10, 11 added.
+
+## Facts measured this wave
+
+| What | Result |
+|---|---|
+| `postgres:18.6` on GHCR | attestation manifest present; SPDX SBOM + SLSA provenance v1; provenance carries `buildConfig` and `llbDefinition`, so `mode=max` |
+| `:18.6-pgvector`, `:18.6-cron` on GHCR | both attested — first publish of the wave 6 variants |
+| Published label set | 9 labels; `.revision` = `2c0f21e`, matching the producing commit |
+| Tag policy on GHCR | `:18.6` ≡ newest dated tag; three older dated tags retain their own digests |
+| Local bake, no `BUILD_STAMP` | exactly one tag, no dated alias |
+| Valkey `CONFIG SET` | changes the running server; generated conf untouched |
+| Valkey `CONFIG REWRITE` | **does** rewrite the generated conf (100mb → 7mb) |
+| Valkey restart | conf regenerated from the environment; 100mb restored on disk and in the server |
+| `valkey/smoke.sh` | 29 assertions, PASS; §18 verified red against a sabotaged image |
+| Cache mounts across the five JS projects | **zero** (RFC 0009 §2 said one) |
+| Of the five JS projects, consumers of `ghcr.io/morzecrew/caddy` | **zero** (RFC 0009 §2 said one) |
+| Org-wide consumers of `ghcr.io/morzecrew/caddy` | **two** — `eis-backend`, `erp-backend`, both `containers/gateway`, both `:2.11.2`. Found by the audit after the first draft of D-046 overstated the zero (A-31) |
+| Package manager the two landings actually run | `npm ci`, by the detect chain's order |
+
+## Rules distilled
+
+- A status line is not a phase list. Before writing one, re-read the phases and
+  ask what remains — not what was just finished. Four instances now: W-1, R-26,
+  wave 6's own entry, D-044.
+- Write the completion criterion into the status, not just the verdict. A stated
+  condition can be checked by the next reader; a ✅ cannot (D-044).
+- A test that asserts a thing was *undone* must first assert it was *done*, or it
+  passes against an implementation where the mechanism never fired (D-045).
+- Two images can differ on a safety property with neither RFC having decided it,
+  because the property follows from where a file lives. Ask what the runtime can
+  write and whether the entrypoint owns that path (D-045).
+- A measurement stated in a design document is still a measurement, and it decays
+  or was never taken. Re-measure the ones a decision rests on before executing
+  against them (D-046).
+- When a document's errors all point the same direction, that direction is the
+  bias to look for — optimistic evidence about adoption does not provoke the
+  re-check that pessimistic evidence does (D-046).
+- A phase that requires a change in another repository cannot be gated on it.
+  Separate what verifies the artefact from what proves anyone wants it (D-047).
+- A requirement inherited from a superseded document may name a mechanism that no
+  longer applies. Check the mechanism is in the path before honouring it (D-047).
+
+## Carried into the next unit
+
+- **RFC 0009 P1 is wave 8.** Decisions 7–11 are settled; §6's battery is the
+  gate. The first migration (`erp-frontend`) is adoption evidence and needs a
+  named date and an authorized cross-repo change — it is **not** this
+  repository's PR (decision 11).
+- **RFC 0009 §10 question 3 is still open** — whether `morze-landing` can leave
+  Node 16. It gates P3 only. `react-scripts` 5.0.1 on webpack 5 suggests yes, but
+  that is a read, not a measurement, and the repo is another project's.
+- **`keyvalue` renderer** still ships with RFC 0005 (D-019), whose gate remains
+  unmet and unscheduled.
+- **Two author decisions still open**, carried since wave 5: narrowing RFC 0001
+  decision 4 to image-owned secrets (A-21), and whether `postgres` ships
+  `-c allow_alter_system=off` (W-3). **D-045 is new evidence for W-3**: `valkey`
+  already has the property by construction, so the question is only ever about
+  `postgres`, and only because `PGDATA` is a volume.
+- **`morze-landing` bakes three EmailJS credentials into its Dockerfile** as
+  literal `RUN` values, and RFC 0009 §5.3 warns that build args land in
+  `mode=max` provenance. Not this repo's to fix and not in scope, but it is the
+  exact shape §5.3 describes, and it is live today. Flagged for the author.
+- ~~RFC 0002's unverified attestation claim~~ — verified (D-043).
+- ~~RFC 0006 §10 questions 1 and 4~~ — answered (D-039, D-045).
+- ~~RFC 0009 §10 questions 1 and 2~~ — answered (D-046).
+
+## Reconciliation — 2026-08-17 (wave 7)
+
+| RFC | Row | Outcome | Grade | Decision | From |
+|---|---|---|---|---|---|
+| 0002 | status | **Corrected** | — | 🚧 → ✅ Complete; §6 gains a verification table and the status states its completion criterion | D-043 |
+| 0006 | status | **Corrected** | — | 🚧 → ✅ Complete, five days late; criterion stated in the status block | D-044 |
+| 0006 | §10 q1 | **Answered** | — | pgmq is packaged for no major, so the comparison had no second term | D-039 via D-044 |
+| 0006 | §10 q4 | **Answered** | — | `CONFIG REWRITE` persists to the conf; the restart regenerates it away | D-045 |
+| 0009 | §2, §10 q1, q2 | **Corrected / answered** | — | zero of five have cache mounts; zero consume this repo's caddy; the landings run npm | D-046 |
+| 0009 | 7 | **Resolved** | `ASSUMED` | `BUILD_OUTPUT_DIR` defaults to `dist`; the failure must name the variable and the path | D-047 |
+| 0009 | 8 | **Resolved** | `ASSUMED` | `erp-frontend` (the repository) first, not in the same PR | D-047 |
+| 0009 | 9 | **Added** | `ASSUMED` | One target, one bake variable, Node `22` | D-047 |
+| 0009 | 10 | **Added** | `ASSUMED` | npm is pinned by the base image tag; the Corepack requirement is retained for a future `pnpm-builder` | D-047 |
+| 0009 | 11 | **Added** | `LOCKED` | §6 verifies P1; the first migration is adoption evidence, tracked here | D-047 |
+| 0009 | §12 P1 | **Amended** | — | The cross-repo migration no longer gates the phase | D-047 |
+
+Wave 6's rows 16, 17 and 18 (RFC 0004) were ratified by merging PR #33.
+
+## Self-audit findings — wave 7, 2026-08-17
+
+Scope: the whole branch, 4 commits — one `smoke.sh` section and five documents.
+The audit's centre of gravity is prose, because that is nearly all this wave
+produced, and prose is the thing nothing else checks.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-31 | D-046, RFC 0009 §2, facts table | **My own correction overstated its own measurement.** I wrote "**No Morze project** consumes this repo's caddy image" having measured five JS repositories. An org-wide code search finds two consumers — `eis-backend` and `erp-backend`, both `containers/gateway`, both `ghcr.io/morzecrew/caddy:2.11.2`. The image is adopted as a reverse-proxy gateway and unadopted as a static-asset runtime, which are different claims. Correcting a false claim with a broader false claim is the worst outcome available, and it happened inside the entry whose whole subject is unverified measurements. | `drift` | Fixed in three places |
+| A-32 | RFC 0006 §10, status | I wrote a completion criterion — "every §12 phase shipped **and §10's questions answered or struck**" — and then flipped the status while questions 2 and 3 were neither. Question 3's answer existed only in the status block, which is the same "answered somewhere else" defect R-26 caught on RFC 0004. A criterion the document does not visibly satisfy is worse than no criterion, because it invites the reader to stop checking. | `drift` | Fixed — both struck with their evidence |
+| A-33 | RFC 0009 §5.1, §4 | New decision 10 supersedes §5.1's `packageManager` requirement, and I left §5.1 stating it with no pointer — exactly the defect R-27 raised against RFC 0004 §5.3 one wave earlier. The same sweep found two more instances of D-046's corrected count still live in §5.1 and §4 ("the measurable win for four of five", "not one of five"). | `drift` | Fixed — amendment notes on all three |
+| A-34 | `smoke.sh` §18 | A redundant `"${ENGINE}" rm -f "${CTR}"` immediately after §17's own, and immediately before a `start` that does it a third time. Harmless, and duplication I introduced. | — | Fixed |
+| A-35 | This section's own residue | "**No CI covers any of this wave**" — contradicted by the rest of its own sentence, which correctly says `smoke.sh` §18 runs in CI. `bake.yaml`'s filter matches `images/**`. Found while opening the PR, after this table was written, and recorded rather than quietly fixed because it is A-31's shape a fourth time: an overstated headline over an accurate detail. | `drift` | Fixed |
+
+**Three of the four findings are the same failure: a correction that stopped one
+step short of the places it implicated.** A-31 corrected a claim and overshot,
+A-32 stated a criterion without satisfying it, A-33 added a superseding row and
+left the superseded prose unmarked. This wave's subject was other people's stale
+documents, and it produced stale documents of its own at the same rate — which is
+the argument for the audit being a separate pass rather than care taken while
+writing.
+
+### Verified
+
+| Check | Result |
+|---|---|
+| `valkey/smoke.sh` | 29 assertions PASS against `ghcr.io/morzecrew/valkey:9.0`, re-run after the A-34 edit |
+| `smoke.sh` §18 verified red | Against an image whose conf regeneration was made conditional: fails at the restart assertion, with the preceding "does reach the generated conf" assertion still passing. Red proof predates A-34's cleanup, which removed a `rm -f` that `start` performs anyway, leaving the assertion path unchanged |
+| Cache-mount claim | Re-measured across all five repositories, not the four I had read: zero |
+| Relative links in all five edited documents | All resolve |
+| RFC 0002, RFC 0006 live `OPEN` rows | Zero in each — the oracle for the two ✅ flips |
+| RFC 0009 decision table | 11 rows, all four-column; no `LOCKED` row contradicted by this wave |
+
+### Residue — what I would still distrust
+
+- **Decision 9 picks Node `22` without checking its LTS phase.** The row is
+  deliberately argued on migration distance rather than support status, so it
+  does not rest on a fact I did not verify — but §9 frames the release valve as
+  "current LTS and previous", and if `24` is Active LTS while `22` is in
+  maintenance, wave 8 is shipping a builder on a maintenance-phase major. Check
+  against nodejs.org before the Dockerfile exists, not after.
+- **"Two org-wide consumers" is a floor, not a count.** GitHub code search
+  indexes default branches and can lag; it is evidence that "zero" was wrong,
+  not proof that "two" is right.
+- **RFC 0009 §10 question 3 is still a read rather than a measurement.**
+  `react-scripts` 5.0.1 on webpack 5 suggests `morze-landing` can leave Node 16,
+  but nothing was built to confirm it, and it is another project's repository.
+- **No CI covers the documents**, which are most of this wave. `bake.yaml`'s path
+  filter matches `images/**`, so `smoke.sh` §18 *is* built and run in CI; every
+  RFC and the log itself are checked by review alone.
