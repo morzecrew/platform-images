@@ -224,6 +224,8 @@ author to remember.
 | Image | Route | Evidence | Decided |
 |---|---|---|---|
 | `valkey` | 2 (drift) | 14 projects running a cache/queue on four distinct upstream references — `redis:7-alpine` (floating), `redis:7.2.3-alpine`, `redis:8.0.3-alpine`, `valkey/valkey:9.0` — with one migration to Valkey already begun and no shared image to land on. See [RFC 0006](../rfcs/0006-valkey-image.md) §3.1. | 2026-08-12, **admitted** |
+| `npm-builder` | 1 | Five projects hand-roll a Node build stage, and they diverge: two use `npm install` rather than `npm ci`, none has a dependency cache mount, one is on end-of-life `node:16`, and two ship byte-identical copies of the same file. See [RFC 0009](../rfcs/0009-javascript-static-asset-builder.md) §2. | 2026-08-12, **admitted** (as RFC 0008; re-cut as RFC 0009 after its gate measurement) |
+| Node runtime / `node-distroless` | — | Proposed as the other half of the builder pair. No Morze project executes Node in production — all five build static assets and serve them from nginx or Caddy — so the runtime would have been maintained for nobody. See [RFC 0008](../rfcs/0008-javascript-builder-and-distroless-runtime-pair.md) §3.1. | 2026-08-12, **refused** |
 | OpenTelemetry Collector | — | One repository uses it. Route 1 needs two hand-rolled Dockerfiles and route 2 needs two projects that have diverged; one project satisfies neither. See [RFC 0005](../rfcs/0005-opentelemetry-collector-image.md). | 2026-08-12, **refused** |
 | ClickHouse | — | Two compose services, but the deployed instances are managed (Yandex MDB), so the image would be curating config for something we do not run. See [RFC 0007](../rfcs/0007-clickhouse-image.md). | 2026-08-12, **refused** |
 

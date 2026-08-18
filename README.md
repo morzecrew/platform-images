@@ -43,6 +43,7 @@ Tags follow bake defaults. The image name carries what is inside; bake variables
 | [caddy](./images/caddy) | Caddy with Coraza WAF and OWASP CRS; env-templated base, `CADDY_CONFIG_DIR` / `CADDY_SERVERS_DIR`, top-level snippet imports (`CADDY_BUILTIN_SNIPPETS_DIR`, `CADDY_SNIPPET_DEFS_DIR`). |
 | [flyway](./images/flyway) | Flyway with essential JDBC drivers, pinned versions. |
 | [uv-builder](./images/uv-builder) | uv-based Python build stage: sync, wheel, slim venv (`build-uv-app`). |
+| [npm-builder](./images/npm-builder) | Node build stage for static assets: frozen install, project build, verified bundle to `/srv` (`build-js-app`). |
 | [python-distroless](./images/python-distroless) | Distroless Python runtime with libmagic and CA bundle for small final images. |
 | [valkey](./images/valkey) | Valkey with a finite `maxmemory`, one persistence switch, file-first secrets, and env-generated config. |
 

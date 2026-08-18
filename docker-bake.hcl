@@ -37,6 +37,7 @@ variable "DESCRIPTIONS" {
     # per-tag table for humans.
     "postgres"          = "PostgreSQL with allowlist-based config overrides via env; the installed extension set is in the io.morze.postgres.extensions label."
     "uv-builder"        = "uv-based Python build stage: sync, wheel, slim venv via build-uv-app."
+    "npm-builder"       = "Node build stage for static assets: frozen npm install, project build, verified bundle to /srv via build-js-app."
     "python-distroless" = "Distroless Python runtime with libmagic and CA bundle."
     "valkey"            = "Valkey with a finite maxmemory, one persistence switch, file-first secrets, and env-generated config."
   }
@@ -240,6 +241,33 @@ target "uv-builder" {
 
 # ....................... #
 
+# The major is chosen against the Node release schedule, not by recency: 24 is
+# the Active LTS line (EOL 2028-04-30). A Renovate proposal moving this to a
+# Current-phase major is a downgrade in support, so it gets read rather than
+# merged -- see RFC 0009 decision 9.
+# renovate: datasource=docker depName=node extractVersion=^(?<version>\d+)-trixie$
+variable "BUILDER_NODE_VERSION" {
+  default = "24"
+}
+
+variable "BUILDER_NODE_SUITE" {
+  default = "trixie"
+}
+
+target "npm-builder" {
+  inherits   = ["_attested"]
+  context    = "./images/npm-builder"
+  dockerfile = "Dockerfile"
+  tags       = tag("npm-builder", BUILDER_NODE_VERSION)
+  labels     = label("npm-builder", BUILDER_NODE_VERSION)
+  args = {
+    NODE_VERSION = BUILDER_NODE_VERSION
+    DEBIAN_SUITE = BUILDER_NODE_SUITE
+  }
+}
+
+# ....................... #
+
 # renovate: datasource=docker depName=valkey/valkey extractVersion=^(?<version>.+)-alpine$
 variable "VALKEY_VERSION" {
   default = "9.0"
@@ -267,8 +295,6 @@ target "valkey" {
 
 # ....................... #
 
-# renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
-#
 # Coupled to BUILDER_PYTHON_VERSION: uv-builder produces /opt/venv and
 # python-distroless executes it, so a venv built for one minor and run by
 # another gives native-module ABI failures at runtime, not at build. The two
@@ -277,6 +303,13 @@ target "valkey" {
 # bump that lands before the distroless base catches up ships a broken pair
 # with no human in the loop. Compares major.minor only; the builder pins a
 # minor (3.14) and the runtime a patch (3.14.6). See RFC 0008 sec 5.4.
+#
+# The annotation below must stay directly above `variable`, with nothing but
+# whitespace between: the custom manager in .github/renovate.json matches
+# `# renovate: ...\s+variable "..."`, so a comment in the gap silently unhooks
+# the variable from Renovate entirely. This one sat above these lines until
+# 2026-08-18 and had never produced a bump (EXECUTION-LOG A-42).
+# renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
 variable "DISTROLESS_PYTHON_VERSION" {
   default = "3.14.6"
 
@@ -313,6 +346,6 @@ target "python-distroless" {
 group "default" {
   targets = [
     "flyway", "caddy", "postgres", "postgres-pgvector", "postgres-cron",
-    "uv-builder", "python-distroless", "valkey",
+    "uv-builder", "npm-builder", "python-distroless", "valkey",
   ]
 }

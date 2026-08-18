@@ -1,11 +1,18 @@
 # RFC 0009 — JavaScript static-asset builder
 
-- **Status:** 📝 Draft — admitted under RFC 0003 route 1 (five hand-rolled Node
-  build stages), **design settled and ready to execute; no code written.**
+- **Status:** 🚧 In progress — **P1 shipped 2026-08-18** in wave 8
+  ([images/npm-builder](../images/npm-builder)), verified by §6's battery per
+  decision 11. P2 and P3 are migrations in other repositories and are not this
+  repo's to ship. The completion criterion is that §12's phases have shipped and
+  §10 is answered or struck; **P1's half is met and the RFC stays In progress
+  until at least one project adopts the image** — an unadopted builder is §9's
+  risk and RFC 0003's retirement criterion, not a finished RFC.
   Wave 7 re-measured §2's evidence and found two claims wrong (§2's amendment,
   EXECUTION-LOG D-046), answered §10 questions 1 and 2, and closed decisions 7
-  and 8 while adding 9, 10 and 11 (D-047). Question 3 — whether `morze-landing`
-  can leave Node 16 — remains open and gates P3 only, not P1.
+  and 8 while adding 9, 10 and 11 (D-047). Wave 8 amended decision 9 to Node 24
+  on the release schedule (D-048) and added decisions 12 and 13 (D-049, D-051).
+  Question 3 — whether `morze-landing` can leave Node 16 — remains open and gates
+  P3 only, not P1.
 - **Scope:** One builder image that installs from a frozen lockfile, runs a
   project's build, and emits static assets at a known path — for the five Morze
   projects that build JavaScript and serve the result from a web server. Covers
@@ -157,9 +164,14 @@ four; the evidence says npm, with pnpm as the only real second.
   is superseded by decision 10 (2026-08-17, EXECUTION-LOG D-047): Corepack is
   never in the path for npm, so the pin is the base image tag. The requirement is
   retained verbatim for a future `pnpm-builder`.** Major and suite are fixed by
-  decision 9: `22`, Debian.
-- A cache mount on the npm store, which is the measurable win for ~~four~~
+  decision 9: ~~`22`~~ **`24`, Debian** — amended 2026-08-18 on the measured
+  release schedule (D-048); `22` is in Maintenance.
+- ~~A cache mount on the npm store~~ **the npm store at a fixed `/cache`, over
+  which the consumer mounts a cache** — which is the measurable win for ~~four~~
   **five** of five projects (corrected 2026-08-17, D-046 — none of them has one).
+  **Amended by execution 2026-08-18 (decision 12, D-049): an image cannot carry
+  a `--mount=type=cache`; that is a flag on the consumer's `RUN`.** The builder
+  keeps the path, the README keeps the pattern.
 - `build-js-app`, mirroring `build-uv-app`.
 
 Named for the manager, per RFC 0008 decision 1, which survives supersession: npm
@@ -210,14 +222,21 @@ larger of the two problems.
 Documented, not enforced. A consuming Dockerfile becomes:
 
 ```dockerfile
-FROM ghcr.io/morzecrew/npm-builder:22 AS build
+FROM ghcr.io/morzecrew/npm-builder:24 AS build
 COPY . .
-RUN build-js-app
+RUN --mount=type=cache,target=/cache,sharing=locked build-js-app
 
-FROM ghcr.io/morzecrew/caddy:2.11
+FROM ghcr.io/morzecrew/caddy:2.11.4
 COPY --from=build /srv /srv
 # CONFIG_DIR fragment: `import spa`
 ```
+
+**Corrected by execution 2026-08-18 (D-052).** The sketch above originally read
+`npm-builder:22`, `caddy:2.11`, and a bare `RUN build-js-app`. The major is `24`
+(decision 9); `2.11` is not a tag this repo publishes — the mutable tag carries
+the patch, currently `2.11.4`; and the cache mount belongs on the consumer's
+`RUN` (decision 12), so leaving it out of the one example everybody copies would
+have made the cache benefit opt-out in practice.
 
 The two landings replace a hand-written Caddyfile with `import spa`. That is the
 whole runtime half, and it needs no new image.
@@ -245,11 +264,21 @@ Per RFC 0002 §5.5, under rootless Podman:
   (§5.2). This is the check the image exists to add, so it is the one that must
   never be skipped.
 - `BUILD_OUTPUT_DIR=out` and `=build` both work — the three real conventions.
-- The cache mount hits on a second build.
+- ~~The cache mount hits on a second build.~~ **Amended by execution 2026-08-18 (decision 12, D-049): the documented mount pattern genuinely reuses the store, asserted by making the second build offline — a cold or unshared cache fails with `ENOTCACHED` instead of silently refetching. Timing a build would be flaky; this is binary.**
 - A lockfile that disagrees with `package.json` fails rather than resolving
   fresh — the defect two projects ship today.
 - The built assets are served by `ghcr.io/morzecrew/caddy` with `import spa`, and
   a deep path returns `index.html` rather than 404.
+
+**Extended by execution 2026-08-18 (decision 14 — see
+[EXECUTION-LOG.md](EXECUTION-LOG.md) R-28, R-29).** Two cases this list did not
+have, both found by review of PR #37 and both reproduced before fixing:
+
+- **A stale output directory already in the build context is refused.** A
+  committed `dist/index.html` plus a no-op build script shipped last release's
+  assets with every check above passing.
+- **An output directory overlapping `APP_DIST` is refused** before the install
+  runs, rather than dying inside `cp` with "are the same file".
 
 ## 7. Docs
 
@@ -328,9 +357,12 @@ Per RFC 0002 §5.5, under rootless Podman:
 | 6 | `ASSUMED` | Build-time environment passes through untouched, with the provenance and bundle-leak warning in the README rather than a mechanism. Depart if a secret-shaped variable needs actively refusing. |
 | 7 | ~~`OPEN`~~ **Decided 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-047.** `ASSUMED` | **`BUILD_OUTPUT_DIR` defaults to `dist`**, and the failure message when the directory is missing or empty must name the variable, the path it looked at, and what it found. Measured across the five projects the split is `dist` 2, `out` 2, `build` 1 — a plurality, not a majority, so no default is right for most. It is defaulted anyway because a wrong default fails **loudly** at build time via §5.2's non-empty and `index.html` check, and requiring the variable buys explicitness against an error that is already caught, at the cost of one line in every consumer forever. The naming condition is what makes the loud failure a signpost instead of the same undiagnosable 404 one layer earlier. Original text: `BUILD_OUTPUT_DIR` default `dist`, or required (§10 question 4). |
 | 8 | ~~`OPEN`~~ **Decided 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-047.** `ASSUMED` | **`erp-frontend` (the repository, not the package name) migrates first, and it does not land in the same PR** — see row 11 for why the same-PR half could not hold. Both reasons the original recommendation gave were false (D-046); it survives on the ones that are true. Original text: Which project migrates first, and whether it lands in the same PR as the image. Recommendation: `erp-frontend`, same PR — an unadopted builder is the §9 risk, and one migration is what proves the contract. |
-| 9 | `ASSUMED` | **One builder target, one bake variable, Node `22`.** Mirrors `uv-builder`'s shape exactly: `BUILDER_NODE_VERSION` feeds both the tag and the build arg, so image contents cannot move without the tag moving (EXECUTION-LOG D-041). `22` rather than `24` because the newest consumer is already there and the three on `20` move one major, whereas starting at `24` makes every adopter jump two majors *while* adopting a new builder — two changes at once, which is how a broken build gets blamed on the wrong one. Depart by adding a second target when a consumer actually needs another major (§9's release valve); `node:16` may never be one. **Added by execution 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-047.** |
+| 9 | `ASSUMED` | **One builder target, one bake variable, Node ~~`22`~~ `24`.** Mirrors `uv-builder`'s shape exactly: `BUILDER_NODE_VERSION` feeds both the tag and the build arg, so image contents cannot move without the tag moving (EXECUTION-LOG D-041). ~~`22` rather than `24` because the newest consumer is already there and the three on `20` move one major, whereas starting at `24` makes every adopter jump two majors *while* adopting a new builder — two changes at once, which is how a broken build gets blamed on the wrong one.~~ **Amended by execution 2026-08-18 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-048.** The premise was unverified when this row was written and is false: **Node 22 is in Maintenance (EOL 2027-04-30); 24 is Active LTS (EOL 2028-04-30)**. Shipping a new builder on 22 would schedule a second migration for every adopter within months of the first, and §9 frames the valve as "current LTS and previous". The migration-distance argument also does not survive the mechanism: the builder exists so the major lives in one place, and a consumer's edit is `npm-builder:22` → `npm-builder:24` either way. Build-tool compatibility risk concentrates in `morze-landing`'s `react-scripts` 5.0.1, which is P3 and gated regardless. Depart by adding a second target when a consumer actually needs another major (§9's release valve); `node:16` may never be one. **Added by execution 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-047.** |
 | 10 | `ASSUMED` | **npm's version is pinned by the base image tag, and nothing fetches a package manager at build time.** §5.1's "exact, integrity-checked `packageManager`" is a Corepack mechanism, and npm ships *inside* the Node image, so Corepack is never in the path; honouring it literally would mean downloading npm over the network to overwrite the npm that came with a pinned base image, which lowers reproducibility rather than raising it. The requirement is not wrong, it is misfiled — it is retained in full for a future `pnpm-builder`, where Corepack *is* the mechanism and the pin does bite. Base image is `node:${NODE_VERSION}-${DEBIAN_SUITE}`, Debian rather than Alpine, mirroring `uv-builder` and keeping native modules on glibc. **Added by execution 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-047.** |
 | 11 | `LOCKED` | **P1 is verified by §6's test battery; the first migration is adoption evidence and is tracked separately.** §12 said the migration "is what makes P1 verifiable", but that migration lives in another repository and cannot be in this repo's PR, so the requirement was unsatisfiable as written. It also conflated two things: §6's battery verifies the image (all three output conventions, the empty-output refusal, the lockfile disagreement, the caddy handoff), while a migration proves someone wants it — which is §9's risk and RFC 0003's retirement criterion, not a test. Graded `LOCKED` because it redefines what "shipped" means for this RFC and because the adoption half reaches outside this repository. Consequence: an unadopted `npm-builder` is subject to RFC 0003's retirement rule like any other image, and the log carries the named repository and date. **Added by execution 2026-08-17 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-047.** |
+| 12 | `ASSUMED` | **The builder fixes the npm store at `/cache`; the cache mount is the consumer's.** §5.1 listed "a cache mount on the npm store" as a property of the image and §6 tested that it "hits on a second build", but `--mount=type=cache` is a flag on a `RUN` instruction in the *consuming* Dockerfile — an image cannot carry one. What this image can keep is the path: `npm_config_cache=/cache`, documented, with `RUN --mount=type=cache,target=/cache,sharing=locked build-js-app` in the README's two-stage example so adopters get it by copying. §6's cache assertion becomes "the documented pattern genuinely reuses the store", proven by making the second build **offline** — a cold or unshared cache then fails with `ENOTCACHED` rather than silently refetching. `smoke.sh` asserts the path, because a moved path makes every consumer's mount stop matching with no error at all. **Added by execution 2026-08-18 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-049.** |
+| 13 | `ASSUMED` | **`BUILD_SCRIPT` defaults to `build`, and `NODE_ENV` / `CI` are deliberately left unset.** All five projects run `npm run build`; a script name that does not exist fails closed because `npm run` exits non-zero. The two unset variables are the load-bearing half: `NODE_ENV=production` makes `npm ci` skip devDependencies — where every one of these projects keeps its build tool, so the install succeeds and the build then fails on a missing binary — and `CI=true` makes `react-scripts` treat warnings as errors, failing builds that pass locally. Both look like build-stage hygiene. `smoke.sh` asserts both stay unset rather than trusting the comment. **Added by execution 2026-08-18 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) D-051.** |
+| 14 | `ASSUMED` | **A build that does not itself write the bundle is refused, and the output directory may not overlap `APP_DIST`.** Decision 2 (`LOCKED`) covers an empty or `index.html`-less output; review of PR #37 found the case it does not — a project that commits its output directory, or copies one in with `COPY . .`, hands `build-js-app` a complete-looking bundle the build never touched, so every check passes on **last release's assets**. Reproduced: a committed `dist/index.html` plus a no-op build script shipped stale content and the build succeeded. `index.html` must now be newer than a marker taken before `npm run`. This **extends** decision 2 rather than reopening it — the intent is unchanged, but it can fail a build that previously passed, which is why it is a row rather than an implementation detail. Compared by mtime rather than clearing the directory first: deleting a path derived from a caller-supplied variable is a worse failure than the one it prevents. The overlap guard is the same fail-fast instinct — `BUILD_OUTPUT_DIR=/srv` previously died inside `cp` with "are the same file". **Added by execution 2026-08-18 — see [EXECUTION-LOG.md](EXECUTION-LOG.md) R-28, R-29.** |
 
 ## 12. Phasing
 

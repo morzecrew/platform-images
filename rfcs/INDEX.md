@@ -23,7 +23,7 @@ number in the filename in sync.
 | [0006](0006-valkey-image.md) | Valkey image | ✅ Complete | Whether the cache/queue gap is real at all, and if so a Valkey whose value is a finite `maxmemory`, one persistence switch, file-first secrets, and refusal of the combinations that lose data silently. |
 | [0007](0007-clickhouse-image.md) | ClickHouse image | 📝 Draft | Upstream ClickHouse assumes a dedicated machine; YAML overlays with `from_env`, container-sane memory and cache defaults, a limited default user profile, and a maintained diff from upstream. |
 | [0008](0008-javascript-builder-and-distroless-runtime-pair.md) | JavaScript builder and distroless runtime pair | ❌ Superseded | Mirroring `uv-builder`/`python-distroless` for JS: which package manager the builder is named for, and one bake variable coupling builder and runtime majors so they cannot drift. |
-| [0009](0009-javascript-static-asset-builder.md) | JavaScript static-asset builder | 📝 Draft | Five projects each wrote their own Node build stage and diverged; one builder image emitting static assets to a known path, with the published `caddy` image as the runtime. |
+| [0009](0009-javascript-static-asset-builder.md) | JavaScript static-asset builder | 🚧 In progress | Five projects each wrote their own Node build stage and diverged; one builder image emitting static assets to a known path, with the published `caddy` image as the runtime. |
 
 Departures found while executing these designs are recorded in
 [EXECUTION-LOG.md](EXECUTION-LOG.md), which is not an RFC and carries no number.
