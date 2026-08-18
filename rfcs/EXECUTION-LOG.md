@@ -2216,3 +2216,188 @@ writing.
 - **No CI covers the documents**, which are most of this wave. `bake.yaml`'s path
   filter matches `images/**`, so `smoke.sh` §18 *is* built and run in CI; every
   RFC and the log itself are checked by review alone.
+
+# Wave 8 · The npm builder
+
+Branch `feat/wave-8-npm-builder`. RFC 0009 P1 — `npm-builder`, `build-js-app`,
+and §6's battery. The first new image since wave 3.
+
+**Drift count: 0** — this wave introduced none. D-048 is `drift` against wave 7,
+found here, and is not counted in this wave's number.
+
+## D-048 — Node 24, not 22: the ratified premise was false
+
+- **Touches:** RFC 0009 decision 9 (`ASSUMED`), §9
+- **Row said:** Node `22`, because "the newest consumer is already there and the
+  three on `20` move one major", whereas `24` would make adopters jump two
+  majors while adopting a new builder
+- **Measured** against `nodejs/Release`'s `schedule.json`: **22 is in
+  Maintenance, EOL 2027-04-30. 24 is Active LTS, EOL 2028-04-30.** The three
+  projects on `20` are already past EOL (2026-04-30), so the "one gentle major"
+  framing was describing a move between two unsupported positions.
+- **Built:** `BUILDER_NODE_VERSION = "24"`.
+- **Class:** `drift`, against wave 7. The public release schedule was knowable
+  when the row was written; the row was written anyway.
+- **This is my defect specifically, and the shape of it matters.** I wrote, in
+  the same message that recommended `22`, that I would "confirm 22's current LTS
+  phase against nodejs.org before it becomes a row" — then wrote the row without
+  confirming, and the author ratified it on that recommendation. A caveat
+  attached to a recommendation is worthless if the recommendation is acted on
+  first: it reads as diligence while functioning as a disclaimer.
+- **Why the original argument does not survive:** the builder exists so the major
+  lives in one place. A consumer's edit is `npm-builder:22` → `npm-builder:24`
+  either way, so "two majors at once" was never about edit size — it is about
+  build-tool compatibility, and that risk sits almost entirely in
+  `morze-landing`'s `react-scripts` 5.0.1, which is P3 and gated regardless.
+  Shipping on 22 would have scheduled a second migration for every adopter
+  within months of the first.
+- **Proposed row (RFC 0009):** 9 amended in place with the measurement.
+
+## D-049 — An image cannot carry a cache mount
+
+- **Touches:** RFC 0009 §5.1, §6, decision 12 (new)
+- **RFC said:** the builder has "a cache mount on the npm store", and §6 tests
+  that "the cache mount hits on a second build"
+- **Found:** `--mount=type=cache` is a flag on a `RUN` instruction in the
+  *consuming* Dockerfile. No image can contain one. The RFC described a property
+  the artefact is structurally incapable of having, and §6 specified a test for
+  it.
+- **Built:** the half the image *can* keep — `npm_config_cache=/cache`, fixed and
+  documented, with the mount in the README's two-stage example so adopters get it
+  by copying. `smoke.sh` asserts the path, because moving it would make every
+  consumer's mount silently stop matching, with no error anywhere.
+- **Class:** `spec-gap`. Knowable at design time from the BuildKit docs, and the
+  kind of gap that survives review because the sentence reads fine.
+- **The test had to change with it.** "The cache hits" is not directly
+  observable; timing a build is flaky. §6's assertion is now that the documented
+  pattern *genuinely reuses the store*, proven by running the second build
+  **offline**: a cold or unshared cache fails with `ENOTCACHED`. Verified that
+  the offline flag is really enforced by running the same build offline with the
+  mount removed — it fails with
+  `cache mode is 'only-if-cached' but no cached response is available`, so the
+  passing case is not passing vacuously.
+- **Proposed row (RFC 0009):** 12, `ASSUMED`.
+
+## D-050 — The §6 harness uses docker, not rootless podman
+
+- **Touches:** RFC 0002 §5.5, RFC 0009 §6
+- **Convention says:** tests run under rootless Podman, because rootless is where
+  UID mapping, volume ownership and port binds actually break
+- **Built:** `test-build-js-app.sh` drives `docker buildx` throughout
+- **Because:** `--mount=type=cache` is a BuildKit feature, and the cache
+  assertion cannot be expressed without it. The convention's rationale does not
+  apply here either — nothing in this battery depends on rootless behaviour; it
+  builds fixtures and inspects their output. The rootless assertions belong to
+  the runtime images and are made in their own smoke tests, including `caddy`'s,
+  which is the image this battery hands off to.
+- **Class:** `discovery` — the conflict only exists because of the cache
+  assertion, which only exists because of D-049.
+- **Consequence:** `npm-builder`'s rootless behaviour is asserted by `smoke.sh`
+  (which does run under Podman) and not by the battery. For a build-stage image
+  that is the right split: it is never run in production, only built from.
+- **Deliberately not applied:** running the battery twice, once per engine.
+  Doubles CI time for a build-stage image to assert something no consumer
+  depends on.
+
+## D-051 — Two unlisted decisions, one of which is a real footgun
+
+- **Touches:** RFC 0009 §5.2, decision 13 (new)
+- **RFC is silent on:** which `package.json` script `build-js-app` runs, and what
+  environment the builder presets
+- **Built:** `BUILD_SCRIPT=build` (all five projects use it; a wrong name fails
+  closed because `npm run` exits non-zero), and **`NODE_ENV` and `CI` left
+  deliberately unset.**
+- **The unset half is the one worth recording.** Both look like obvious
+  build-stage hygiene and both break real builds:
+  - `NODE_ENV=production` makes `npm ci` skip devDependencies — where all five
+    projects keep their build tool. The install succeeds and the build then fails
+    on a missing binary, which reads as a project bug rather than an image one.
+  - `CI=true` makes `react-scripts` treat warnings as errors, so a project that
+    builds locally fails here for reasons unrelated to this image.
+- **`smoke.sh` asserts both stay unset**, rather than trusting the comment that
+  says why. A comment does not survive the next person tidying the Dockerfile.
+- **Class:** unlisted decisions filled, logged at departure weight per this
+  skill's rule that an unlisted decision is not an open one.
+- **Proposed row (RFC 0009):** 13, `ASSUMED`.
+
+## D-052 — §5.4's copyable example was wrong in three ways
+
+- **Touches:** RFC 0009 §5.4
+- **RFC said:** `FROM ghcr.io/morzecrew/npm-builder:22`, `FROM
+  ghcr.io/morzecrew/caddy:2.11`, and a bare `RUN build-js-app`
+- **Found:** the major is `24` (D-048); **`2.11` is not a tag this repo
+  publishes** — the mutable tag carries the patch, currently `2.11.4`; and the
+  cache mount belongs on that `RUN` (D-049).
+- **Why it matters more than a normal doc slip:** §5.4 is the block every adopter
+  copies. A wrong tag fails immediately and loudly, which is survivable — but the
+  missing mount fails *silently*, leaving the cache benefit opt-out in practice
+  for everyone who copied the example. The RFC's central performance argument
+  would have been undermined by its own sample code.
+- **Class:** `spec-gap`.
+- **Proposed row (RFC 0009):** none; §5.4 carries a correction note.
+
+## Facts measured this wave
+
+| What | Result |
+|---|---|
+| Node 22 | Maintenance, EOL 2027-04-30 |
+| Node 24 | **Active LTS**, EOL 2028-04-30 |
+| Node 26, 27 | Current |
+| `node:22-trixie`, `node:24-trixie` | both exist on Docker Hub |
+| `ghcr.io/morzecrew/caddy` visibility | public, anonymously pullable — so §6's handoff test runs in CI rather than skipping |
+| Latest published caddy tag | `2.11.4` (RFC §5.4 said `2.11`, which does not exist) |
+| `test-build-js-app.sh` | 13 assertions, PASS |
+| Offline enforcement | same build offline *without* the mount fails `ENOTCACHED / cache mode is 'only-if-cached'` — the cache assertion is not vacuous |
+| `smoke.sh` against the baked, attested image | PASS, loaded into Podman from an OCI tar as CI does |
+| `bake --print npm-builder` | one tag `ghcr.io/morzecrew/npm-builder:24`, attested, description populated, in `default` |
+
+## Rules distilled
+
+- A caveat attached to a recommendation does not protect anything if the
+  recommendation is acted on first. Either verify before recommending, or make
+  the recommendation conditional in a way that blocks (D-048).
+- Check that the artefact can structurally hold the property before specifying a
+  test for it. "The image has a cache mount" was never buildable (D-049).
+- When a property cannot be observed directly, assert the failure instead:
+  offline installs are binary where build timings are flaky (D-049).
+- A test that asserts an absence must be run against the presence, or it cannot
+  distinguish "not set" from "not checked" (D-049's offline check, D-051's
+  `NODE_ENV`).
+- Environment variables a build image does *not* set are part of its contract,
+  and belong in the test rather than in a comment (D-051).
+- The example everyone copies is load-bearing code. A silent omission there
+  propagates further than a wrong line, because it never fails (D-052).
+
+## Carried into the next unit
+
+- **No project uses this image yet.** RFC 0009 stays In progress until one does;
+  decision 11 makes adoption evidence rather than verification, and RFC 0003's
+  retirement rule applies to an unadopted image. First migration:
+  **`erp-frontend`** (the repository), decision 8 — another repo's PR, needing
+  authorization this repo does not have.
+- **RFC 0009 §10 question 3 is still open** — whether `morze-landing` can leave
+  Node 16, now a jump to 24. It gates P3 only. Its `react-scripts` 5.0.1 is the
+  single largest compatibility unknown in the whole RFC.
+- **Renovate will propose Node 26/27** against `BUILDER_NODE_VERSION`, both
+  Current-phase rather than LTS. The bake file carries a comment saying so; that
+  comment is the only thing standing between a green Renovate PR and a support
+  downgrade. A `matchUpdateTypes` rule would be sturdier.
+- **Two author decisions still open**, carried since wave 5: narrowing RFC 0001
+  decision 4 (A-21), and whether `postgres` ships `-c allow_alter_system=off`
+  (W-3).
+- **`morze-landing` bakes three EmailJS credentials** into its Dockerfile as
+  literal `RUN` values — the exact shape RFC 0009 §5.3 warns lands in `mode=max`
+  provenance. Another repo's, and now doubly relevant since that project is P3.
+- ~~RFC 0009 decisions 7–11 need ratifying~~ — ratified, and 9 amended (D-048).
+
+## Reconciliation — 2026-08-18 (wave 8)
+
+| RFC | Row | Outcome | Grade | Decision | From |
+|---|---|---|---|---|---|
+| 0009 | status | **Updated** | — | 📝 Draft → 🚧 In progress; P1 shipped, RFC stays open until adoption | wave 8 |
+| 0009 | 9 | **Amended** | `ASSUMED` | Node `22` → `24` on the measured release schedule | D-048 |
+| 0009 | 12 | **Added** | `ASSUMED` | Builder fixes `npm_config_cache=/cache`; the mount is the consumer's | D-049 |
+| 0009 | 13 | **Added** | `ASSUMED` | `BUILD_SCRIPT=build`; `NODE_ENV` and `CI` deliberately unset | D-051 |
+| 0009 | §5.1, §6 | **Amended** | — | The cache claim and its test, per decision 12 | D-049 |
+| 0009 | §5.4 | **Corrected** | — | Wrong builder major, non-existent caddy tag, missing cache mount | D-052 |
+| 0002 | §5.5 | **Departed** | — | The §6 battery runs under docker, not rootless podman, and why | D-050 |

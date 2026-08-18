@@ -54,6 +54,14 @@ jobs:
       - name: Test the extension mechanism
         run: bash images/postgres/test-extensions.sh
 
+      # RFC 0009 §6's battery for build-js-app. Same reason it cannot live in
+      # smoke.sh: it needs fixture projects, builds that must *fail*, and a
+      # second image to serve the result. It drives buildx directly rather than
+      # podman because `--mount=type=cache` is a BuildKit feature and the cache
+      # assertion cannot be expressed without it.
+      - name: Test build-js-app
+        run: bash images/npm-builder/test-build-js-app.sh
+
       # One job, one build. A separate smoke job would have to build again --
       # images do not cross job boundaries without an artifact upload -- so the
       # thing smoke-tested would not be the thing the build step verified, and
