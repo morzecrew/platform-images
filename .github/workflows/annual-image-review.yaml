@@ -59,9 +59,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          existing="$(gh issue list --state open --limit 50 \
+          # Server-side title search, and scoped to *this* year. `--limit 50`
+          # with client-side filtering would miss the review issue once fifty
+          # newer issues are open, and matching any year would let a 2026 issue
+          # nobody closed block the 2027 review forever -- a duplicate check that
+          # silently becomes an off switch.
+          year="$(date -u +%Y)"
+          existing="$(gh issue list --state open --limit 100 \
+            --search "Annual image review in:title" \
             --json number,title \
-            --jq '[.[] | select(.title | startswith("Annual image review"))] | .[0].number // ""')"
+            --jq "[.[] | select(.title | startswith(\"Annual image review — ${year}\"))] | .[0].number // \"\"")"
           if [ -n "${existing}" ]; then
             echo "::notice title=Review already open::#${existing} is open; not opening another"
             echo "skip=true" >>"${GITHUB_OUTPUT}"

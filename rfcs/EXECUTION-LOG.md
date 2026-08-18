@@ -2808,3 +2808,28 @@ The fix is two searches, because one cannot answer both questions:
   confident falsehood (R-37, A-48).
 - A stated reason that is not the documented rule invents a second rule. Cite the
   criterion, not the circumstance that happens to satisfy it (R-39).
+
+### Four more findings, carried only in the review body
+
+CodeRabbit posted six inline threads and **four nitpicks that exist only inside
+collapsed blocks in the review body**, with no thread to resolve. This is the
+surface the loop drops by default, and the reason to open every `<details>`
+rather than working the thread list.
+
+| # | Finding | Verdict |
+|---|---|---|
+| R-40 | The compose step wrote `body.md` into `GITHUB_OUTPUT` as well as to disk, and nothing read the output — the open step consumes `--body-file`. Already gone: the R-35 rewrite removed it before this was read. | already fixed |
+| R-41 | **The duplicate check was two failures waiting.** `gh issue list --limit 50` filtered client-side, so the review issue disappears from the window once fifty newer issues are open; and matching *any* year meant a 2026 issue nobody closed would block the 2027 review **forever** — a duplicate check that silently becomes an off switch. Now a server-side title search, scoped to the current year. | fixed |
+| R-42 | `ORG_READ_TOKEN` was named but never explained: no location, no permissions, no way to check it. It is the difference between a review with evidence and a review with a blank column, and it was documented as a word. `images/README.md` now gives the location, the token form known to work, and a one-line `gh api` check to run **before** January. | fixed |
+| R-43 | The `workflow_dispatch` and `dry_run` paths were undocumented outside the workflow file, so the two things a human needs when the schedule fails — run it now, see what it will say without opening anything — were invisible from the rule that describes the review. | fixed |
+
+R-41 is the one worth keeping. Both halves are the same shape as this repo's
+recurring failure: a guard that stops guarding without ever reporting that it
+stopped. A stale open issue silently disabling every future review is exactly
+the outcome decision 6 was written to prevent, reintroduced by the mechanism
+meant to implement it.
+
+**Rule distilled:** a duplicate check needs a scope as well as a predicate.
+"Is there already one of these?" and "is there already one of these *for this
+run*?" differ by one stale record, and the first answer degrades into "never do
+this again" (R-41).

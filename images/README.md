@@ -297,6 +297,26 @@ Two things about that scan are worth knowing before you trust a row:
   repositories. Without that secret the issue says the scan did not run, rather
   than showing an empty column that reads as "nobody uses it".
 
+  Configure it as a **repository secret** on this repo (`Settings → Secrets and
+  variables → Actions`). It needs read access to the organisation's
+  repositories for GitHub's code-search API — a classic PAT with `repo` is the
+  form known to work; whether a fine-grained token is sufficient for code search
+  has not been tested here. Check it before January rather than after:
+
+  ```bash
+  gh api -X GET search/code -f q='"ghcr.io/morzecrew/uv-builder" org:morzecrew' \
+    --jq '.total_count'
+  ```
+
+  A non-zero count from a repository other than this one means the token can see
+  what the review needs. `0` with a valid token means the scan will report
+  "none found" — which is a real answer, not a broken one.
+
+The review can also be run **on demand** from the Actions tab
+(`workflow_dispatch`), which is how you re-run it after re-enabling a disabled
+schedule. Its `dry_run` input prints the generated issue body to the log and
+opens nothing, which is the safe way to see what January will say.
+
 ### Retiring an image
 
 Deletion has to be mechanical or it will not happen:
