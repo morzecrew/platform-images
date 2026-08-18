@@ -2531,3 +2531,305 @@ environment was not.
   (R-31).
 - Do not infer a release phase from the absence of a field. Check the date that
   says it shipped (R-33).
+
+# Wave 9 · The review that opens itself
+
+Branch `feat/wave-9-annual-image-review`. RFC 0003 decision 6 — the scheduled
+workflow that opens the annual review issue. No image changed.
+
+**Drift count: 4** — A-45, A-46, A-47 and A-48, all introduced by this wave.
+Three were caught by its own audit; A-48 was introduced *by* a review fix and
+caught by re-running the measurement it changed. Written as 0 when the group was drafted, which is the
+fifth consecutive wave the pre-audit number has been wrong; the practice of
+writing it before the audit is what is wrong, not the arithmetic.
+
+RFC 0003's rule shipped on 2026-08-12 and its `LOCKED` decision 6 specified a
+mechanism that was never built: for six days the annual review has been a
+calendar promise, which is the exact thing that row exists to prevent. It says
+so itself — *"a self-opening issue is the difference between a review that
+happens and a calendar promise that does not."*
+
+## D-053 — The issue carries evidence, not just a checklist
+
+- **Touches:** RFC 0003 decision 6 (`LOCKED`), decision 5 (`ASSUMED`), §4.2
+- **RFC said:** open an issue with "both questions and the current image list
+  pre-filled"
+- **Built:** that, plus a per-image scan of which repositories reference each
+  tag
+- **Because:** the review's actual work is reading consuming repositories. An
+  issue that opens with "go and grep forty repositories" is the kind that gets
+  closed unread in February, and decision 6's whole argument is about the
+  difference between a review that happens and one that does not.
+- **Class:** `spec-gap` — the RFC specified the trigger and the shape, and was
+  silent on whether the trigger should do any of the work.
+- **Two mechanisms this needed that nobody would have predicted:**
+  - **This repository is excluded from its own results.** Every image is
+    referenced here — bake file, READMEs, RFCs — so the unfiltered scan returns
+    `platform-images` for all nine, and §4.2's actual signal ("an image whose
+    *only* consumer is this repo is retired") is buried under noise that reads
+    like use. Measured before the exclusion: nine of nine rows self-referential.
+  - **`GITHUB_TOKEN` cannot search other repositories.** The scan needs
+    `ORG_READ_TOKEN`, and when it is absent the issue says the scan did not run
+    and names the secret — rather than rendering an empty column that reads as
+    "no consumers found". D-039's rule, applied to a column in a table.
+- **Held deliberately:** decision 5 says the review reads consuming
+  repositories, **not GHCR pull counts**. There is no call to the packages API
+  anywhere in the workflow, and the issue body says so, because the packages API
+  is right there and pull counts look like data.
+- **Proposed row (RFC 0003):** 11, `ASSUMED`, with the "starting point, not the
+  answer" caveat that keeps a scan from being read as a verdict.
+
+## D-054 — Decision 6 presumes an assignee it never names
+
+- **Touches:** RFC 0003 decision 6 (`LOCKED`)
+- **RFC said:** "Owner is whoever the issue is assigned to at open time"
+- **Found:** nothing names one, and a workflow cannot invent an owner. An
+  unassigned issue leaves the rule's owner undefined at exactly the moment the
+  row claims it is defined.
+- **Built:** a `REVIEW_ASSIGNEE` repository variable defaulting to the repo
+  owner, applied **after** creation rather than during it — `gh issue create
+  --assignee` fails the whole command when the assignee is no longer a
+  collaborator, which would lose the issue. A failed assignment now warns and
+  leaves the issue standing.
+- **Class:** `spec-gap`.
+- **Proposed row (RFC 0003):** 12, `ASSUMED`.
+
+## D-055 — An annual cron is the schedule most likely never to fire
+
+- **Touches:** RFC 0003 decision 6 (`LOCKED`), §6 risks
+- **Found:** GitHub disables scheduled workflows in repositories that have gone
+  inactive. An annual cron is uniquely exposed to that — and **a repository
+  quiet for a year is precisely when an unused-image review matters most.** The
+  mechanism decision 6 chose is weakest in the case it was chosen for.
+- **Built:** nothing. There is no in-repo fix, so the workflow states the
+  limitation in its own header.
+- **Class:** `discovery` — visible only once the mechanism was chosen and
+  written.
+- **Not verified by me.** This is GitHub's documented behaviour for scheduled
+  workflows, not something this wave measured, and the exact inactivity window
+  should be confirmed before anyone relies on the number.
+- **Deliberately not applied:** a monthly cron that no-ops outside January.
+  Keeps the workflow "recent" only if the disabling rule keys on workflow runs
+  rather than repository activity — which is the thing above that I have not
+  confirmed. Guessing here would trade a stated limitation for an unstated one.
+
+## The rule, applied for the first time
+
+Run by hand with the workflow's own query, this repository excluded:
+
+~~An earlier version of this table searched the bake *target* name and reported
+four images with no consumer. Two of those were an artefact of searching a string
+that never existed — see R-35, and A-48 for the false negative the first fix
+introduced.~~ **Corrected, searching the published reference:**
+
+| Image | Package referenced by | This variant's tag |
+|---|---|---|
+| `flyway` | 6 repositories | — |
+| `python-distroless` | 5 | — |
+| `uv-builder` | 5 | — |
+| `postgres` | 3 | none reference `:18.6` |
+| `postgres-cron` | 3 (the package) | **none** |
+| `postgres-pgvector` | 3 (the package) | **none** |
+| `caddy` | 2 | — |
+| `npm-builder` | **none** | — |
+| `valkey` | **none** | — |
+
+**Only `npm-builder` and `valkey` have no consumer at all.** The two postgres
+variants publish into a package three projects already use; what nobody
+references is their specific tags, which is a different and much weaker
+statement than the first version of this table made.
+
+**Neither is a retirement candidate.** The bar is **one year without a project
+consumer** (§4.1) — `valkey` shipped 2026-08-16 and `npm-builder` 2026-08-18, so
+the clock has barely started rather than run out. An earlier draft justified this
+by their being "three days old", which reads as a threshold this repo does not
+have (R-39).
+
+**`valkey` is the one to watch, and the reason is its own admission.** It was
+admitted under route 2 — 14 projects running upstream Redis or Valkey with
+divergent pins — and the whole premise was that those projects would land on a
+shared image. Two days in, none has. That is not yet a failure; it is the
+premise being unproven, and it is exactly what the annual review exists to
+notice. `npm-builder` is in the same position by design (RFC 0009 decision 11).
+
+The two postgres variants are the case that forced the two-column design. Their
+package has three consumers and their own tags have none, which the scan can now
+state precisely — but it still cannot say whether that means nobody wants a
+variant or everyone is simply on an older tag. A reviewer answers that; the table
+only stops the question being asked wrongly.
+
+## Rules distilled
+
+- A rule with a `LOCKED` mechanism and no implementation is a rule that has not
+  shipped, however completely it is written down. Six days is short; a year is
+  the usual gap, and nothing would have surfaced it (D-053).
+- Exclude the observer from the observation. A repository that publishes an
+  image also references it, so an unfiltered "who uses this" search answers a
+  different question than the one asked (D-053).
+- When automation cannot measure something, say so in the artefact it produces.
+  An empty column and an unrun scan look identical to the reader (D-053).
+- A row that says "whoever is assigned" needs something to do the assigning, or
+  it is describing a state nobody creates (D-054).
+- The mechanism chosen for a rare event should be checked against the rare event
+  itself: an annual cron in a repository that has gone quiet is exactly the case
+  it was chosen for, and the weakest place to rely on it (D-055).
+
+## Carried into the next unit
+
+- **`ORG_READ_TOKEN` does not exist yet.** Until it is created with org-wide
+  read, the January issue will open with its scan column reading *not scanned*.
+  The workflow says so rather than pretending, but the secret is the difference
+  between a review with evidence and a review with a checklist.
+- **The workflow has never run end to end.** Composition and the scan query are
+  verified locally; the duplicate check, issue creation and assignment cannot be
+  exercised until the file is on the default branch and can be dispatched.
+- **`valkey`, `npm-builder`, `postgres-cron`, `postgres-pgvector` have no
+  external consumer.** All shipped within three days, so none is due for
+  retirement — but the first review will ask, and `valkey`'s route-2 admission
+  premise is the one with something to prove.
+- **Two author decisions still open**, carried since wave 5: narrowing RFC 0001
+  decision 4 (A-21), and whether `postgres` ships `-c allow_alter_system=off`
+  (W-3).
+- **RFC 0009's first migration (`erp-frontend`) still needs a cross-repo PR**
+  this repository cannot open.
+
+## Reconciliation — 2026-08-18 (wave 9)
+
+| RFC | Row | Outcome | Grade | Decision | From |
+|---|---|---|---|---|---|
+| 0003 | status | **Updated** | — | 🚧 → ✅ Complete; decision 6 now has a mechanism rather than an intention | wave 9 |
+| 0003 | 11 | **Added** | `ASSUMED` | The issue pre-fills a consumer scan, with this repo excluded and three distinct evidence states | D-053 |
+| 0003 | 12 | **Added** | `ASSUMED` | Assignee from `REVIEW_ASSIGNEE`, applied after creation | D-054 |
+| 0003 | §6 | **Risk recorded** | — | An annual cron is disabled by repository inactivity, the case it exists for | D-055 |
+
+## Self-audit findings — wave 9, 2026-08-18
+
+Scope: one new workflow and four documents. Almost all of the risk is in a file
+that **cannot be run here** — its scheduled path fires in January and its issue
+creation needs the default branch — so the audit leaned on reading it against
+the rows it implements, and on running every piece that could be run in
+isolation.
+
+| # | Where | Finding | Class | Status |
+|---|---|---|---|---|
+| A-45 | `annual-image-review.yaml` | The scan step interpolated `${{ steps.images.outputs.targets }}` straight into its `run:` block while the compose step two steps below passed the same value through `env:`. Inconsistent within one file, and the raw form is the shape that becomes a script-injection bug the moment the interpolated value stops being repo-controlled. Moved to `env:`. | `drift` | Fixed |
+| A-46 | this log | The duplicate-issue check was **decided in the plan and never logged**. It is a real behaviour — a manual dispatch while last year's review is open opens nothing — and identifying prior reviews *by title prefix rather than by label* was a deliberate choice to avoid the workflow maintaining a label as a side effect. An unlisted decision is not an open one; it should have had an entry. Recorded here as D-056. | `drift` | Fixed |
+| A-47 | `annual-image-review.yaml` | The header asserted GitHub's cron-disabling behaviour as flat fact while D-055 in this log marks the same claim unverified. The file a reader reaches first was the more confident of the two. Reworded to say it is quoted from documentation and not measured here. | `drift` | Fixed |
+
+## D-056 — Duplicate reviews are suppressed by title, not by label
+
+- **Touches:** RFC 0003 decision 6 (`LOCKED`)
+- **RFC is silent on:** what a second trigger should do while a review is open
+- **Built:** the workflow lists open issues and skips if any title starts with
+  "Annual image review". `workflow_dispatch` makes a second trigger easy, and an
+  annual review that opens twice is a review nobody trusts to be the current one.
+- **By title rather than by label**, so the workflow does not have to create and
+  maintain a label as a side effect of running — `gh issue create --label` fails
+  outright when the label does not exist, which would make first-run success
+  depend on repository state nobody set up.
+- **Class:** unlisted decision filled; logged at departure weight.
+- **Consequence, stated plainly:** a review issue that is closed without the work
+  being done is invisible to this check, and the next dispatch opens a fresh one.
+  That is the intended direction — the check prevents duplicates, not amnesia.
+
+### Verified
+
+| Check | Result |
+|---|---|
+| Workflow YAML | Parses; 6 steps, `contents: read` + `issues: write`, cron `0 9 8 1 *` |
+| Issue composer | Extracted and run in both modes — scanned and unscanned — rendering all three evidence states distinctly |
+| Consumer scan query | Run end to end against the live API for all nine images; results in the table above |
+| Self-exclusion | Verified by contrast: unfiltered, all nine rows return `platform-images`; filtered, four return nothing |
+| Duplicate-detection query | Run against this repository; returns empty, which is correct — no review issue is open |
+| Decision 5 (no pull counts) | `grep` finds two mentions of the packages API, both prose asserting its absence. No call |
+| RFC 0003 decision table | 12 rows, contiguous, four columns |
+
+### Residue — what I would still distrust
+
+- **The workflow has never run.** Issue creation, assignment and the
+  `dry_run` branch are unexercised, and cannot be exercised until the file is on
+  the default branch. The first real proof is a manual dispatch after merge, and
+  I would do that before trusting January.
+- **`ORG_READ_TOKEN` does not exist**, so the first run — whenever it happens —
+  produces the unscanned form of the issue. That path is tested; the scanned path
+  is the one the January issue should carry, and it needs a secret only you can
+  create.
+- **The cron-disabling limitation is quoted, not measured.** It is the single
+  thing most likely to make this workflow silently never fire, and I have not
+  confirmed the window.
+- **The scan cannot read variants.** `postgres-pgvector` and `postgres-cron`
+  return nothing, which may mean nobody wants them or may mean everyone uses
+  plain `postgres`. A reviewer answers that; the table only asks.
+
+## Review round 1 — PR #38, 2026-08-18
+
+Six findings, **all six valid**. Two were defects in the evidence the workflow
+produces, which is the one thing it exists to produce.
+
+| # | Finding | Verdict |
+|---|---|---|
+| R-34 | **The bake guard was unreachable and its explanation discarded.** `targets="$(docker buildx bake --print 2>/dev/null \| …)"` under `set -euo pipefail`: a failing bake aborts the step at the assignment, so the `[ -n "${targets}" ] \|\| { echo "::error…"; exit 1; }` below it never runs — and `2>/dev/null` removed the only account of why. The sibling step in `bake.yaml` does not suppress stderr. This is the unreachable-branch case my own audit pass 5 exists for, and the audit missed it. Now `bake --print` writes to a file with stderr flowing to the log, and failure is caught by `\|\|` rather than by a guard that cannot run. | fixed |
+| R-35 | **The scan searched strings that have never existed.** `TARGETS` held bake *target* names, but `postgres-cron` publishes as `ghcr.io/morzecrew/postgres:18.6-cron` — so the query `ghcr.io/morzecrew/postgres-cron` was guaranteed to return nothing whoever used it. Two of the four "none found" rows in this wave's own table, and in the PR body, were that artefact. **This is D-039's failure mode, committed inside the workflow built to prevent it**: "could not look" printed as "nobody uses it". Now derived from `target.<name>.tags` in `bake --print`. | fixed |
+| R-36 | **The scheduled-workflow limitation was vague and had no mitigation.** Verified against GitHub's documentation rather than the reviewer's word: *"In a public repository, scheduled workflows are automatically disabled when no repository activity has occurred in 60 days."* The number and the public-repository qualifier are now stated, together with the mitigation that matters more than either — `gh workflow enable`, then `workflow_dispatch` rather than waiting another year. | fixed |
+| R-37 | **Image-level evidence against a tag-level question.** Related to R-35 and the reason its first fix was wrong on its own — see A-48. Resolved by searching both and reporting both. | fixed |
+| R-38 | **The assignee contract was documented in one place and implemented in another.** Row 12 described post-creation assignment; it did not name the literal fallback, and decision 6's "at open time" was left unreconciled. Both now in row 12. | fixed |
+| R-39 | **An invented three-day threshold.** This log justified "no retirement candidates" by the images being three days old, where the rule is **one year without a project consumer** (§4.1). The conclusion was right and the stated reason was a criterion this repo does not have — which is how undocumented rules get born. Reworded to cite §4.1. | fixed |
+
+### A-48 — the first fix for R-35 traded one wrong answer for another
+
+Deriving the search string from `tags[0]` gave `ghcr.io/morzecrew/postgres:18.6`
+for the base target — and **three projects reference `postgres` on older tags**,
+so the corrected scan reported `postgres` as having no consumers. A false
+"nobody uses it" for an image with three users is worse than the artefact it
+replaced, and it was caught only by running the scan and reading a result that
+disagreed with what I already knew.
+
+The fix is two searches, because one cannot answer both questions:
+
+- the **package path** is the retirement signal, matching every tag a consumer
+  might pin, including versions older than the current one;
+- the **exact tag** separates targets sharing a package, and is emitted only for
+  those, since elsewhere it is a column of noise.
+
+**Class:** `drift` — introduced by this wave, in the fix for a review finding.
+
+### Rules distilled
+
+- A guard placed after a command that `set -e` will abort on is not a guard.
+  Check whether the failure path can reach the code written to handle it (R-34).
+- Search for what is *published*, not for what the build calls it. A target name
+  and a registry reference are different strings, and the difference is silent
+  (R-35).
+- When a fix changes a measurement, re-run the measurement and read it against
+  what you already know. A result that surprises you is the fix telling you it is
+  wrong (A-48).
+- One query cannot answer two questions. "Is this image used" and "is this tag
+  used" have different right answers, and picking either alone produces a
+  confident falsehood (R-37, A-48).
+- A stated reason that is not the documented rule invents a second rule. Cite the
+  criterion, not the circumstance that happens to satisfy it (R-39).
+
+### Four more findings, carried only in the review body
+
+CodeRabbit posted six inline threads and **four nitpicks that exist only inside
+collapsed blocks in the review body**, with no thread to resolve. This is the
+surface the loop drops by default, and the reason to open every `<details>`
+rather than working the thread list.
+
+| # | Finding | Verdict |
+|---|---|---|
+| R-40 | The compose step wrote `body.md` into `GITHUB_OUTPUT` as well as to disk, and nothing read the output — the open step consumes `--body-file`. Already gone: the R-35 rewrite removed it before this was read. | already fixed |
+| R-41 | **The duplicate check was two failures waiting.** `gh issue list --limit 50` filtered client-side, so the review issue disappears from the window once fifty newer issues are open; and matching *any* year meant a 2026 issue nobody closed would block the 2027 review **forever** — a duplicate check that silently becomes an off switch. Now a server-side title search, scoped to the current year. | fixed |
+| R-42 | `ORG_READ_TOKEN` was named but never explained: no location, no permissions, no way to check it. It is the difference between a review with evidence and a review with a blank column, and it was documented as a word. `images/README.md` now gives the location, the token form known to work, and a one-line `gh api` check to run **before** January. | fixed |
+| R-43 | The `workflow_dispatch` and `dry_run` paths were undocumented outside the workflow file, so the two things a human needs when the schedule fails — run it now, see what it will say without opening anything — were invisible from the rule that describes the review. | fixed |
+
+R-41 is the one worth keeping. Both halves are the same shape as this repo's
+recurring failure: a guard that stops guarding without ever reporting that it
+stopped. A stale open issue silently disabling every future review is exactly
+the outcome decision 6 was written to prevent, reintroduced by the mechanism
+meant to implement it.
+
+**Rule distilled:** a duplicate check needs a scope as well as a predicate.
+"Is there already one of these?" and "is there already one of these *for this
+run*?" differ by one stale record, and the first answer degrades into "never do
+this again" (R-41).
