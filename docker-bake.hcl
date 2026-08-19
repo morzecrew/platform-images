@@ -121,7 +121,7 @@ target "flyway" {
     # renovate: datasource=maven depName=org.postgresql:postgresql
     POSTGRES_JDBC_VERSION   = "42.7.13"
     # renovate: datasource=maven depName=com.clickhouse:clickhouse-jdbc
-    CLICKHOUSE_JDBC_VERSION = "0.9.8"
+    CLICKHOUSE_JDBC_VERSION = "0.10.0"
   }
 }
 
