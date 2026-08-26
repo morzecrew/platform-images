@@ -311,7 +311,7 @@ target "valkey" {
 # 2026-08-18 and had never produced a bump (EXECUTION-LOG A-42).
 # renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
 variable "DISTROLESS_PYTHON_VERSION" {
-  default = "3.14.6"
+  default = "3.14.7"
 
   # regexall, not split/slice: slice raises a bare "end index greater than the
   # length of the list" on a version with no minor (e.g. "3"), which replaces
