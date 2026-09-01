@@ -270,7 +270,7 @@ target "npm-builder" {
 
 # renovate: datasource=docker depName=valkey/valkey extractVersion=^(?<version>.+)-alpine$
 variable "VALKEY_VERSION" {
-  default = "9.1.1"
+  default = "9.1.2"
 }
 
 target "valkey" {
