@@ -129,7 +129,7 @@ target "flyway" {
 
 # renovate: datasource=docker depName=caddy versioning=docker
 variable "CADDY_VERSION" {
-  default = "2.11.6"
+  default = "2.11.7"
 }
 
 target "caddy" {
