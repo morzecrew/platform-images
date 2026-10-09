@@ -2833,3 +2833,88 @@ meant to implement it.
 "Is there already one of these?" and "is there already one of these *for this
 run*?" differ by one stale record, and the first answer degrades into "never do
 this again" (R-41).
+
+---
+
+# Wave 10 · linux/arm64
+
+Branch `feat/multi-arch-images`. Requested directly rather than through an RFC:
+publish every image for `linux/amd64` and `linux/arm64`, build arm64 on GitHub's
+native `ubuntu-24.04-arm` runner rather than under QEMU, and keep the Python
+build identical between `uv-builder` and `python-distroless` on both platforms.
+
+**Drift count: 0** before audit and review.
+
+## D-057 — RFC 0002's arm64 non-goal is reopened
+
+- **Touches:** RFC 0002 §4 non-goals and §8 ("Reopens when a consumer runs
+  one; `python-distroless` needs real work first")
+- **Built:** every target, both platforms. The `python-distroless` work §4
+  pointed at was four hardcoded `x86_64-linux-gnu` paths, now
+  `*-linux-gnu` globs: the deps stage has exactly one multiarch directory, so
+  each matches once. Every base image already published arm64 (checked with
+  `imagetools inspect`, 2026-10-09).
+- **Class:** `discovery`. The reopen condition was met by request; nothing in
+  the design was wrong.
+
+## D-058 — The gate runs per platform; promotion merges
+
+- **Touches:** RFC 0002 decision 10 (`LOCKED`), §5.4
+- **RFC said:** build once, smoke-test that exact artifact, push only on
+  success. The workflow comment said the digest tested is the digest published,
+  "literally rather than by equivalence".
+- **Built:** one build-and-smoke leg per platform on its own native runner,
+  each pushing by digest and smoke-testing that digest on its platform. A
+  `promote` job, gated on both legs, joins the two per-platform indexes with
+  `imagetools create` and only then tags.
+- **Why this is not a decision-10 conflict:** each platform is still built
+  once and its exact manifest smoke-tested. The published index is new, but it
+  is a list of the tested platform and attestation manifests by digest, so no
+  untested byte is reachable from a tag. What changed is that "literally" now
+  holds per platform manifest, not for the top-level index digest.
+- **Added:** promote dry-runs every merge before tagging any, and refuses an
+  index that lacks either platform or either attestation manifest. Decision 2's
+  attestations crossing a merge is new ground, and it was the shorthand
+  `attest` syntax silently producing none that made row 13 necessary.
+- **Class:** `spec-gap`. §5.4 assumed one runner.
+
+## D-059 — The Python pair is one variable, and the builder leaves Astral's tag
+
+- **Touches:** RFC 0008 §5.4 (the Python half, which P0 shipped and supersession
+  kept) and decision 9 (resolved)
+- **RFC said:** the two variables "cannot simply be merged — one is a minor
+  (`3.14`) and one a patch (`3.14.6`) drawn from different registries", so check
+  they agree on major.minor.
+- **Measured:** they were not the same build. `uv-builder:3.14` resolved to
+  CPython 3.14.8 (Astral tags minors only) while `python-distroless` pinned
+  3.14.6. Configure flags, glibc 2.41 and `/usr/local` prefix matched on amd64
+  and arm64; the patch did not.
+- **Built:** `uv-builder` is now `python:<patch>-trixie` plus the uv binary
+  copied from `ghcr.io/astral-sh/uv:<UV_VERSION>`, which is what Astral's
+  `uv:python<minor>-trixie` tag is. `DISTROLESS_PYTHON_VERSION` drives both
+  images, and its validation now requires an exact patch instead of comparing
+  two values. `al3xos/python-distroless`'s `/usr/local` is an official
+  `python` build as well, so one patch gives the same version, configure flags,
+  toolchain and glibc on both platforms. Not the same binary: the two are
+  separately compiled variants (build timestamps differ), and that is the
+  identity a venv needs.
+  `BUILDER_PYTHON_VERSION` is gone. `UV_VERSION` is a new Renovate-tracked pin,
+  replacing the uv that floated with Astral's tag.
+- **Bumped to 3.14.8** in the same change: al3xos published it on 2026-10-07,
+  and coupling at 3.14.6 would have moved `uv-builder:3.14` back two patches.
+- **Consequence, stated plainly:** `uv-builder` now waits for al3xos to publish a
+  patch before it moves. The builder's Python is a build-time tool and the
+  runtime's is what ships, so the lag costs less than the drift did.
+- **Class:** `spec-gap`. The drift check measured the wrong thing.
+
+### Verified
+
+| Check | Result |
+|---|---|
+| `bake --print` | `uv-builder:3.14` and `python-distroless:3.14.8`, both with `PYTHON_VERSION=3.14.8` |
+| Validation | `3.14` and `abc` both refused with the patch message |
+| amd64 build + smoke | Both images pass `smoke.sh` under rootless Podman. libmagic loads through the glob `COPY` |
+| amd64 pair | markupsafe built `--no-binary` in `uv-builder`, imported through `/opt/venv/bin/python` in `python-distroless`; both report 3.14.8 |
+| arm64 Python identity | `_sysconfigdata` from both bases' arm64 manifests: same `CONFIG_ARGS`, `SOABI`, prefix |
+| Dry-run assertion | Parsed against a real `imagetools create --dry-run` index; attestation manifests survive the merge |
+| arm64 build + smoke | **Not run locally**: no QEMU on the dev host. First run is the PR's `ubuntu-24.04-arm` leg |

@@ -44,10 +44,12 @@ ENV PYTHONUNBUFFERED=1 \
     LD_LIBRARY_PATH=/usr/lib
 
 COPY --from=deps /etc/ssl/certs /etc/ssl/certs
-COPY --from=deps /usr/lib/x86_64-linux-gnu/libmagic.so.1 /usr/lib/
-COPY --from=deps /usr/lib/x86_64-linux-gnu/libbz2.so.1.0 /usr/lib/
-COPY --from=deps /usr/lib/x86_64-linux-gnu/liblzma.so.5 /usr/lib/
-COPY --from=deps /usr/lib/x86_64-linux-gnu/libz.so.1 /usr/lib/
+# `*-linux-gnu` is the Debian multiarch directory, which differs per platform
+# (x86_64-, aarch64-). The deps stage has exactly one, so each glob matches once.
+COPY --from=deps /usr/lib/*-linux-gnu/libmagic.so.1 /usr/lib/
+COPY --from=deps /usr/lib/*-linux-gnu/libbz2.so.1.0 /usr/lib/
+COPY --from=deps /usr/lib/*-linux-gnu/liblzma.so.5 /usr/lib/
+COPY --from=deps /usr/lib/*-linux-gnu/libz.so.1 /usr/lib/
 COPY --from=deps /usr/share/file/magic.mgc /usr/share/file/magic.mgc
 COPY --from=deps /usr/share/misc/magic.mgc /usr/share/misc/magic.mgc
 

@@ -218,24 +218,27 @@ target "postgres-cron" {
 
 # ....................... #
 
-# renovate: datasource=docker depName=ghcr.io/astral-sh/uv extractVersion=^python(?<version>.+)-trixie$
-variable "BUILDER_PYTHON_VERSION" {
-  default = "3.14"
-}
-
 variable "BUILDER_DEBIAN_SUITE" {
   default = "trixie"
 }
 
+# renovate: datasource=docker depName=ghcr.io/astral-sh/uv versioning=docker
+variable "UV_VERSION" {
+  default = "0.12.24"
+}
+
+# Python comes from DISTROLESS_PYTHON_VERSION below, the exact patch both images
+# build on. The tag stays the minor, which is what consumers pin.
 target "uv-builder" {
   inherits   = ["_attested"]
   context    = "./images/uv-builder"
   dockerfile = "Dockerfile"
-  tags       = tag("uv-builder", BUILDER_PYTHON_VERSION)
-  labels     = label("uv-builder", BUILDER_PYTHON_VERSION)
+  tags       = tag("uv-builder", regex("^[0-9]+\\.[0-9]+", DISTROLESS_PYTHON_VERSION))
+  labels     = label("uv-builder", regex("^[0-9]+\\.[0-9]+", DISTROLESS_PYTHON_VERSION))
   args = {
-    PYTHON_VERSION = BUILDER_PYTHON_VERSION
+    PYTHON_VERSION = DISTROLESS_PYTHON_VERSION
     DEBIAN_SUITE   = BUILDER_DEBIAN_SUITE
+    UV_VERSION     = UV_VERSION
   }
 }
 
@@ -295,14 +298,13 @@ target "valkey" {
 
 # ....................... #
 
-# Coupled to BUILDER_PYTHON_VERSION: uv-builder produces /opt/venv and
-# python-distroless executes it, so a venv built for one minor and run by
-# another gives native-module ABI failures at runtime, not at build. The two
-# versions come from different registries and have independent renovate
-# annotations, and renovate automerges -- so without this validation a builder
-# bump that lands before the distroless base catches up ships a broken pair
-# with no human in the loop. Compares major.minor only; the builder pins a
-# minor (3.14) and the runtime a patch (3.14.6). See RFC 0008 sec 5.4.
+# The one Python version for both uv-builder and python-distroless: uv-builder
+# produces /opt/venv and python-distroless executes it, on every platform. It
+# used to be two variables checked for matching major.minor (RFC 0008 sec 5.4),
+# which still let the builder float to a newer patch than the runtime; one
+# variable makes the pair the same build by construction. A Renovate bump here
+# moves both images, and python:<patch>-trixie exists before al3xos publishes
+# the same patch, so the distroless registry sets the pace.
 #
 # The annotation below must stay directly above `variable`, with nothing but
 # whitespace between: the custom manager in .github/renovate.json matches
@@ -311,17 +313,15 @@ target "valkey" {
 # 2026-08-18 and had never produced a bump (EXECUTION-LOG A-42).
 # renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
 variable "DISTROLESS_PYTHON_VERSION" {
-  default = "3.14.6"
+  default = "3.14.8"
 
-  # regexall, not split/slice: slice raises a bare "end index greater than the
-  # length of the list" on a version with no minor (e.g. "3"), which replaces
-  # the message below with an HCL internal error at exactly the moment someone
-  # has set something odd. regexall returns [] instead of raising, and the
-  # non-empty check then refuses a version that has no major.minor at all --
-  # otherwise two malformed values would compare equal and pass.
+  # A full patch, never a minor: "3.14" resolves to whatever each registry's
+  # floating tag points at today, and the two registries move independently.
+  # regexall rather than regex so a bad value gets this message, not an HCL
+  # "pattern did not match" from the uv-builder tag expression.
   validation {
-    condition = join("", regexall("^[0-9]+\\.[0-9]+", BUILDER_PYTHON_VERSION)) != "" && join("", regexall("^[0-9]+\\.[0-9]+", BUILDER_PYTHON_VERSION)) == join("", regexall("^[0-9]+\\.[0-9]+", DISTROLESS_PYTHON_VERSION))
-    error_message = "Python version drift: BUILDER_PYTHON_VERSION and DISTROLESS_PYTHON_VERSION must agree on major.minor, and both must start with one. uv-builder builds the venv that python-distroless runs; a mismatch fails at runtime, not at build."
+    condition     = length(regexall("^[0-9]+\\.[0-9]+\\.[0-9]+$", DISTROLESS_PYTHON_VERSION)) > 0
+    error_message = "DISTROLESS_PYTHON_VERSION must be an exact major.minor.patch. uv-builder and python-distroless both build on it, and a floating minor lets them become different Pythons."
   }
 }
 

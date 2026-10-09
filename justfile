@@ -43,7 +43,9 @@ publish:
         exit 1
     fi
     echo "$(gh auth token)" | docker login {{ _reg }} -u dummy --password-stdin
-    docker buildx bake -f {{ _bake }} --push
+    # Both platforms, as CI publishes them: a host-only push would repoint the
+    # tags at a single-platform image. Needs a builder that can emit arm64.
+    docker buildx bake -f {{ _bake }} --set "*.platform=linux/amd64,linux/arm64" --push
 
 # Push an existing local tag.
 push image tag: _login

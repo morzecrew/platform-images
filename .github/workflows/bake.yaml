@@ -20,9 +20,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Both published platforms, each on a native runner, so an image that builds
+  # or starts on amd64 only fails here rather than in the publish run.
   bake:
-    runs-on: ubuntu-latest
-    name: Bake and smoke
+    strategy:
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    name: Bake and smoke (${{ matrix.runner }})
 
     steps:
       - name: Checkout code
@@ -101,7 +106,7 @@ jobs:
       # Rootless rather than Docker: rootless is where UID mapping, volume
       # ownership and sub-1024 port binds actually fail, and those are the
       # assumptions Docker hides until a customer's air-gapped install finds
-      # them. Podman is present on ubuntu-latest without setup.
+      # them. Podman is present on both runner images without setup.
       #
       # Driven by targets, not by directories. Iterating images/*/smoke.sh tests
       # one image per directory, which silently skips any target sharing a

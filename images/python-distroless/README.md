@@ -4,7 +4,7 @@ Minimal **runtime** image for Python workloads: [`al3xos/python-distroless`](htt
 
 ## Contents
 
-**Tag `3.14.5`** — distroless Python on `al3xos/python-distroless`, with libmagic, CA certs, and common runtime libs from bookworm.
+**Tag `3.14.8`** — distroless Python on `al3xos/python-distroless`, with libmagic, CA certs, and common runtime libs from bookworm.
 
 - Intended as the **final stage** after a builder such as [`uv-builder`](../uv-builder): copy `/opt/venv` from the build stage and set `PATH` to the venv’s `bin` if you run your app as the main process.
 - **User** `65532:65532` by default (overridable via **`APP_UID`** / **`APP_GID`** build args).
@@ -12,7 +12,7 @@ Minimal **runtime** image for Python workloads: [`al3xos/python-distroless`](htt
 - **Writable temp**: `TMPDIR` is **`APP_TMP_DIR`** (default `/srv/runtime/tmp`); `XDG_CACHE_HOME` is `${TMPDIR}/.cache`. Mount a volume over those paths if you need a writable layer at runtime.
 - Bundled from bookworm: updated CA certs, **`libmagic.so.1`** and **`magic.mgc`**, plus **`libbz2`**, **`liblzma`**, **`libz`**. **`LD_LIBRARY_PATH=/usr/lib`** is set so these libs resolve.
 
-`DISTROLESS_PYTHON_VERSION` in [`docker-bake.hcl`](../../docker-bake.hcl) sets the registry tag and `PYTHON_VERSION` in [`Dockerfile`](./Dockerfile). `DEBIAN_VERSION` comes from bake’s `DISTROLESS_DEBIAN_VERSION`. They must resolve to a real tag on **`al3xos/python-distroless`**: `FROM al3xos/python-distroless:${PYTHON_VERSION}-debian${DEBIAN_VERSION}` (e.g. `3.14.5-debian13`). If upstream uses full semver, set `DISTROLESS_PYTHON_VERSION` in bake to that exact string.
+Published for `linux/amd64` and `linux/arm64`. `DISTROLESS_PYTHON_VERSION` in [`docker-bake.hcl`](../../docker-bake.hcl) sets the registry tag and `PYTHON_VERSION` in [`Dockerfile`](./Dockerfile), and is also the Python [`uv-builder`](../uv-builder) builds on, so the pair is one CPython build per platform. `DEBIAN_VERSION` comes from bake’s `DISTROLESS_DEBIAN_VERSION`. They must resolve to a real tag on **`al3xos/python-distroless`**: `FROM al3xos/python-distroless:${PYTHON_VERSION}-debian${DEBIAN_VERSION}` (e.g. `3.14.8-debian13`), and `python:${PYTHON_VERSION}-trixie` must exist for uv-builder. The value must be an exact patch; bake refuses a bare minor.
 
 ## Building
 
@@ -22,7 +22,7 @@ From the repo root (see [images/README.md](../README.md)):
 just bake python-distroless
 ```
 
-Image: `ghcr.io/morzecrew/python-distroless:3.14.5`.
+Image: `ghcr.io/morzecrew/python-distroless:3.14.8`.
 
 ## Layout
 

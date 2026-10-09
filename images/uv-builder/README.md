@@ -1,14 +1,14 @@
 # uv-builder images
 
-Build-stage image for Python applications managed with **[uv](https://docs.astral.sh/uv/)**. Based on Astral’s official `ghcr.io/astral-sh/uv:python*` images, with a small Debian layer (`bash`, `binutils`, `findutils`, `ca-certificates`) and a **`build-uv-app`** helper script for reproducible, slimmer venvs.
+Build-stage image for Python applications managed with **[uv](https://docs.astral.sh/uv/)**. Based on the official `python:<patch>-trixie` image with the `uv` binary from `ghcr.io/astral-sh/uv` (what Astral’s `uv:python*` images are, pinned to an exact Python patch), plus a small Debian layer (`bash`, `binutils`, `findutils`, `ca-certificates`) and a **`build-uv-app`** helper script for reproducible, slimmer venvs.
 
 ## Contents
 
-**Tag `3.14`** — `uv` on `ghcr.io/astral-sh/uv:python3.14-trixie`, with **`build-uv-app`** (`rootfs/build.sh`) for sync → wheel → slim venv.
+**Tag `3.14`** (`linux/amd64`, `linux/arm64`) — `uv` on `python:3.14.8-trixie`, with **`build-uv-app`** (`rootfs/build.sh`) for sync → wheel → slim venv.
 
 Use in a **multi-stage** Dockerfile: mount or copy your project into `/app`, run `build-uv-app`, then copy `/opt/venv` (and your app if needed) into a minimal runtime image such as [`python-distroless`](../python-distroless).
 
-`BUILDER_PYTHON_VERSION` and `BUILDER_DEBIAN_SUITE` in [`docker-bake.hcl`](../../docker-bake.hcl) set the registry tag and map to `PYTHON_VERSION` / `DEBIAN_SUITE` in [`Dockerfile`](./Dockerfile).
+`DISTROLESS_PYTHON_VERSION` in [`docker-bake.hcl`](../../docker-bake.hcl) is the exact Python patch for both this image and [`python-distroless`](../python-distroless), so the venv built here runs on the same CPython build there, on either platform; its major.minor is the tag. `BUILDER_DEBIAN_SUITE` and `UV_VERSION` map to `DEBIAN_SUITE` / `UV_VERSION` in [`Dockerfile`](./Dockerfile).
 
 ## Building
 
@@ -54,5 +54,5 @@ For proxies during image build, pass standard BuildKit build-args (`HTTP_PROXY`,
 
 ## Layout
 
-- `Dockerfile` — uv base + packages + `WORKDIR /app`
+- `Dockerfile` — official Python base + uv binary + packages + `WORKDIR /app`
 - `rootfs/build.sh` — installed as `/usr/local/bin/build-uv-app`

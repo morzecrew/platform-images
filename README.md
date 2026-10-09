@@ -22,8 +22,9 @@ just push uv-builder 3.14
 **Publishing is CI's job, not a local command.** A merge to `main` that touches
 `docker-bake.hcl` or `images/**` publishes, as does the weekly rebuild and a
 manual run of [publish.yaml](.github/workflows/publish.yaml). Each of those
-builds the image, pushes it by digest with no tag attached, smoke-tests that
-exact digest, and only then moves the tags.
+builds the image for `linux/amd64` and `linux/arm64`, each on a native runner,
+pushes it by digest with no tag attached, smoke-tests that exact digest on its
+own platform, and only then moves the tags to an index carrying both.
 
 `just publish` still exists and **refuses by default**, because both of its
 failure modes are silent: it skips that smoke gate, and on the default Buildx
@@ -48,6 +49,9 @@ Tags follow bake defaults. The image name carries what is inside; bake variables
 | [valkey](./images/valkey) | Valkey with a finite `maxmemory`, one persistence switch, file-first secrets, and env-generated config. |
 
 ## Consuming these images
+
+Every image is published for **`linux/amd64` and `linux/arm64`**; a pull resolves
+the host's platform.
 
 Every image publishes **two tags**:
 
