@@ -2934,7 +2934,7 @@ build identical between `uv-builder` and `python-distroless` on both platforms.
 | amd64 pair | markupsafe built `--no-binary` in `uv-builder`, imported through `/opt/venv/bin/python` in `python-distroless`; both report 3.14.8 |
 | arm64 Python identity | `_sysconfigdata` from both bases' arm64 manifests: same `CONFIG_ARGS`, `SOABI`, prefix |
 | Dry-run assertion | Parsed against a real `imagetools create --dry-run` index; attestation manifests survive the merge |
-| arm64 build + smoke | **Not run locally**: no QEMU on the dev host. First run is the PR's `ubuntu-24.04-arm` leg |
+| arm64 build + smoke | **Not run locally**: no QEMU on the dev host. The PR's `ubuntu-24.04-arm` leg found D-060 and D-061 |
 
 ## Review round 1 — PR #62, 2026-10-09
 
@@ -2956,3 +2956,25 @@ arm64 run failed in the build-js-app battery (D-060), which no reviewer raised.
   the requested configuration produces (R-45).
 - A test that pulls a published image tests yesterday's release, and fails
   outright on a platform that release lacks (D-060).
+
+## D-061 — Upstream's arm64 image cannot `import ctypes`
+
+- **Touches:** D-057 (the arm64 work `python-distroless` needed)
+- **Found by:** the arm64 smoke test, the first time it ran to completion:
+  `ImportError: libffi.so.8: cannot open shared object file`.
+- **Cause:** `al3xos/python-distroless` copies libffi into
+  `/usr/lib/x86_64-linux-gnu/` on every platform. On arm64 that directory holds
+  an aarch64 `libffi.so.8.1.4` the loader never searches. The same class of
+  hardcoded path D-057 removed from this repo's Dockerfile.
+- **Built:** the final stage copies upstream's own `libffi.so.8` onto
+  `/usr/lib`, already on `LD_LIBRARY_PATH`, through a `*-linux-gnu` glob that
+  keeps working once upstream moves it.
+- **Measured, so this is the only gap:** `readelf -d` over the interpreter,
+  `libpython` and every `lib-dynload` module, against both platforms' export.
+  The unresolved set is otherwise identical on amd64 and arm64 (sqlite3, uuid,
+  readline, curses, tk, gdbm, dbm — upstream's minimal choice, unchanged here);
+  libffi is the only arm64-only entry.
+- **Upstream:** worth reporting to `al3xos/python-distroless`; the base image is
+  broken for `ctypes` on arm64 on its own.
+- **Class:** `discovery`.
+

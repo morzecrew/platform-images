@@ -23,7 +23,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN install -d -m 0750 -o ${APP_UID} -g ${APP_GID} ${APP_RUNTIME_DIR} \
     && install -d -m 0750 -o ${APP_UID} -g ${APP_GID} ${APP_TMP_DIR}
 
-FROM al3xos/python-distroless:${PYTHON_VERSION}-debian${DEBIAN_VERSION}
+FROM al3xos/python-distroless:${PYTHON_VERSION}-debian${DEBIAN_VERSION} AS upstream
+
+FROM upstream
 
 ARG APP_UID
 ARG APP_GID
@@ -52,6 +54,13 @@ COPY --from=deps /usr/lib/*-linux-gnu/liblzma.so.5 /usr/lib/
 COPY --from=deps /usr/lib/*-linux-gnu/libz.so.1 /usr/lib/
 COPY --from=deps /usr/share/file/magic.mgc /usr/share/file/magic.mgc
 COPY --from=deps /usr/share/misc/magic.mgc /usr/share/misc/magic.mgc
+
+# Upstream copies libffi into /usr/lib/x86_64-linux-gnu/ on every platform, so
+# on arm64 the aarch64 build of it sits where the loader never looks and
+# `import ctypes` fails. Its own file, onto LD_LIBRARY_PATH; on amd64 this is a
+# duplicate of a library already found. The glob keeps working once upstream
+# moves it to the right directory.
+COPY --from=upstream /usr/lib/*-linux-gnu/libffi.so.8 /usr/lib/
 
 COPY --from=deps ${APP_RUNTIME_DIR} ${APP_RUNTIME_DIR}
 
