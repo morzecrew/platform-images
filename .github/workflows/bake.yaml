@@ -153,3 +153,18 @@ jobs:
             echo "::endgroup::"
           done
           exit "${failed}"
+
+  # The check the main ruleset requires, by the name it requires. A matrix leg
+  # reports as "Bake and smoke (<runner>)", which no ruleset entry names, so
+  # this one job stands for all of them and keeps its name when the matrix
+  # changes. `always()` is load-bearing: a required check that is skipped
+  # counts as passed, so without it a failed leg would read as green here.
+  required:
+    needs: bake
+    if: always()
+    runs-on: ubuntu-latest
+    name: Bake Images (build only)
+
+    steps:
+      - name: Every platform passed
+        run: test "${{ needs.bake.result }}" = success

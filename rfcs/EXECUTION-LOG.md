@@ -2936,3 +2936,23 @@ build identical between `uv-builder` and `python-distroless` on both platforms.
 | Dry-run assertion | Parsed against a real `imagetools create --dry-run` index; attestation manifests survive the merge |
 | arm64 build + smoke | **Not run locally**: no QEMU on the dev host. First run is the PR's `ubuntu-24.04-arm` leg |
 
+## Review round 1 — PR #62, 2026-10-09
+
+Four findings: two fixed, one acknowledged, one refuted. Separately, the first
+arm64 run failed in the build-js-app battery (D-060), which no reviewer raised.
+
+| # | Finding | Verdict |
+|---|---|---|
+| R-44 | **The required check never existed.** The `main` ruleset requires `Bake Images (build only)`; the job reported as `Bake and smoke` before this wave and as two matrix checks after it. A required check nothing reports cannot pass, and every recent Renovate PR (#47–#61) was merged by hand despite `automerge: true`. Consequence: once this lands, Renovate PRs that trigger this workflow automerge when green, as `renovate.json` already intends. Now one aggregate job carries that name, `if: always()` so a failed leg reports as failed rather than skipped — a skipped required check counts as passed. | fixed |
+| R-45 | **The promote gate counted attestations, not their contents.** Measured: a local build with `--provenance mode=min` still yields one attestation manifest, and only `mode=max` records `buildDefinition.internalParameters.buildConfig`. So a bake file whose `attest` stopped applying — the row 13 failure — would have passed. Promote now requires mode=max provenance and an SPDX SBOM on each leg's digest, and the merged index's attestations must reference its platform manifests one-to-one. | fixed |
+| R-46 | **A transient push failure part-way through promotion leaves earlier packages tagged.** True, and true before this wave. A registry has no transaction spanning packages; everything deterministic is now checked for every target before the first tag, and anything a partial promotion did tag is a tested image a rerun completes. | acknowledged |
+| R-47 | **Leaving Astral's base drops the `uv` entrypoint.** It had none: `ghcr.io/astral-sh/uv:python3.14-trixie` has `Entrypoint: null` and `Cmd: ["/usr/local/bin/uv"]`, both kept. | refuted |
+
+### Rules distilled
+
+- A required check is a name, not a job. Rename the job and the gate silently
+  becomes unsatisfiable; matrix legs never had a stable name to require (R-44).
+- A gate that counts evidence passes the default. Check for the property only
+  the requested configuration produces (R-45).
+- A test that pulls a published image tests yesterday's release, and fails
+  outright on a platform that release lacks (D-060).
