@@ -2978,3 +2978,16 @@ arm64 run failed in the build-js-app battery (D-060), which no reviewer raised.
   broken for `ctypes` on arm64 on its own.
 - **Class:** `discovery`.
 
+## D-062 — The stale-output assertion flaked once on arm64
+
+- **Touches:** RFC 0009 §6, assertion 9
+- **Seen:** one arm64 run built the stale fixture successfully, so
+  `[ index.html -nt "$STARTED_AT" ]` held for a file written before the build.
+  The rerun passed, as did every earlier run on both platforms.
+- **Not established:** why. Podman's `COPY` keeps the source mtime (measured),
+  and the two timestamps were about 0.6 s apart, so neither mtime rewriting nor
+  timestamp granularity accounts for it.
+- **Built:** the fixture's file is aged a year with `touch -d`, which is what
+  its name already claims, so no sub-second ordering can decide the result. If
+  `COPY` were resetting mtimes this would still fail, and say so.
+- **Class:** `irreducible` until it recurs with more evidence.

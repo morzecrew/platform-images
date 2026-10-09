@@ -219,6 +219,10 @@ echo "=== 9. a stale output directory in the context is refused ==="
 d=$(fixture stale '"true"')
 mkdir -p "${d}/dist"
 echo "STALE-FROM-LAST-YEAR" >"${d}/dist/index.html"
+# Aged to match its name. Written moments before the build, it was older than
+# build-js-app's start marker by under a second, and an arm64 CI run once saw
+# the order inverted (EXECUTION-LOG D-062). A committed bundle is days old.
+touch -d '1 year ago' "${d}/dist/index.html"
 expect_build_fails "stale output refused" "${d}" "is older than this build"
 
 echo
