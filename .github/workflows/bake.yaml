@@ -24,6 +24,9 @@ jobs:
   # or starts on amd64 only fails here rather than in the publish run.
   bake:
     strategy:
+      # One platform failing says nothing about the other; cancelling it would
+      # hide whether a fix is needed once or twice.
+      fail-fast: false
       matrix:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
@@ -58,14 +61,6 @@ jobs:
       # The third is a full build.
       - name: Test the extension mechanism
         run: bash images/postgres/test-extensions.sh
-
-      # RFC 0009 §6's battery for build-js-app. Same reason it cannot live in
-      # smoke.sh: it needs fixture projects, builds that must *fail*, and a
-      # second image to serve the result. It drives buildx directly rather than
-      # podman because `--mount=type=cache` is a BuildKit feature and the cache
-      # assertion cannot be expressed without it.
-      - name: Test build-js-app
-        run: bash images/npm-builder/test-build-js-app.sh
 
       # One job, one build. A separate smoke job would have to build again --
       # images do not cross job boundaries without an artifact upload -- so the
@@ -102,6 +97,21 @@ jobs:
             echo "::endgroup::"
           done
           podman images
+
+      # RFC 0009 §6's battery for build-js-app. Same reason it cannot live in
+      # smoke.sh: it needs fixture projects, builds that must *fail*, and a
+      # second image to serve the result.
+      #
+      # After the build, not before, so the handoff is served by the caddy this
+      # commit built rather than the published tag: that is the pair this
+      # change would ship, and a published tag can lack the runner's platform
+      # (caddy had no arm64 until the change adding it was published).
+      - name: Test build-js-app
+        run: |
+          set -euo pipefail
+          CADDY_REF="$(docker buildx bake --print caddy \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["target"]["caddy"]["tags"][0])')" \
+            bash images/npm-builder/test-build-js-app.sh
 
       # Rootless rather than Docker: rootless is where UID mapping, volume
       # ownership and sub-1024 port binds actually fail, and those are the

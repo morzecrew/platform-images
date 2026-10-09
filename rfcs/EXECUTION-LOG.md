@@ -2907,6 +2907,23 @@ build identical between `uv-builder` and `python-distroless` on both platforms.
   runtime's is what ships, so the lag costs less than the drift did.
 - **Class:** `spec-gap`. The drift check measured the wrong thing.
 
+## D-060 — The build-js-app handoff runs against the caddy this commit built
+
+- **Touches:** RFC 0009 §6 (the caddy handoff assertion), decision 11 (`LOCKED`)
+- **RFC said:** the handoff is served by "the published `caddy` image"; the
+  battery pulled `ghcr.io/morzecrew/caddy:2.11.4` and refused to skip.
+- **Found:** the PR's first arm64 run failed at assertion 11 — the published tag
+  has no arm64 manifest, and gets one only when this change publishes. The
+  battery would have stayed red on arm64 until after merge.
+- **Built:** the step moves after the build-and-load step and passes
+  `CADDY_REF` from `bake --print`; the battery uses a local image when one
+  exists instead of re-pulling it. The handoff now tests the caddy this change
+  would ship, which also stops a Renovate caddy bump from being tested against
+  the previous version's published tag.
+- **Not changed:** decision 11's "never skipped" — a missing image still fails.
+- **Class:** `discovery`. Nothing published was multi-platform when §6 was
+  written.
+
 ### Verified
 
 | Check | Result |
@@ -2918,3 +2935,4 @@ build identical between `uv-builder` and `python-distroless` on both platforms.
 | arm64 Python identity | `_sysconfigdata` from both bases' arm64 manifests: same `CONFIG_ARGS`, `SOABI`, prefix |
 | Dry-run assertion | Parsed against a real `imagetools create --dry-run` index; attestation manifests survive the merge |
 | arm64 build + smoke | **Not run locally**: no QEMU on the dev host. First run is the PR's `ubuntu-24.04-arm` leg |
+

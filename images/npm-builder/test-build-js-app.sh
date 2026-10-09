@@ -233,7 +233,12 @@ echo "=== 11. the runtime handoff: caddy serves it, deep paths get index.html ==
 # is an infrastructure problem, not an optional test -- and a skip would leave
 # the battery green with §6's handoff assertion never run, which is exactly the
 # silent gap this image exists to remove.
-"${ENGINE}" pull -q "${CADDY}" >/dev/null 2>&1 ||
+#
+# A local image is used as-is rather than re-pulled: CI points CADDY_REF at the
+# caddy it just built and loaded, and pulling that name would replace it with
+# the published one -- or fail, on a platform not yet published.
+"${ENGINE}" image inspect "${CADDY}" >/dev/null 2>&1 ||
+	"${ENGINE}" pull -q "${CADDY}" >/dev/null 2>&1 ||
 	die "could not pull ${CADDY}; the handoff assertion cannot be skipped (set CADDY_REF to override)"
 if true; then
 	d="${WORK}/handoff"
