@@ -233,25 +233,44 @@ jobs:
           targets=$(printf '%s' "${plan}" \
             | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')
 
-          # Every target is checked before any is tagged. The dry run prints the
-          # index that would be pushed; it must carry both platforms, each with
-          # its attestation -- a merge that dropped them would publish an image
-          # claiming provenance it no longer has (decision 2), or one platform
-          # under a tag that promises two.
+          # Every target is checked before any is tagged, in two halves.
+          #
+          # Each leg's digest must carry what decision 2 promises: an SPDX SBOM
+          # and mode=max provenance. Counting attestation manifests is not
+          # enough -- BuildKit attaches min-mode provenance by default, so a
+          # bake file whose `attest` stopped applying (the row 13 failure)
+          # still yields one per platform. Only max records `buildConfig`.
+          #
+          # The dry run then prints the index that would be pushed. It must hold
+          # both platforms, and each attestation must reference one of them, so
+          # a merge cannot drop a platform or pair an attestation with the
+          # wrong image.
           declare -A SOURCES
           for t in ${targets}; do
             repo="$(printf '%s' "${plan}" | python3 -c \
               "import json,sys; print(json.load(sys.stdin)['target']['${t}']['tags'][0].rsplit(':', 1)[0])")"
             refs=()
             for leg in /tmp/digests/digests-*; do
-              refs+=("${repo}@$(cat "${leg}/${t}")")
+              ref="${repo}@$(cat "${leg}/${t}")"
+              refs+=("${ref}")
+              docker buildx imagetools inspect "${ref}" \
+                --format '{"provenance": {{json .Provenance}}, "sbom": {{json .SBOM}}}' | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          slsa = (d['provenance'] or {}).get('SLSA') or {}
+          assert 'buildConfig' in slsa.get('buildDefinition', {}).get('internalParameters', {}), '${ref}: provenance is not mode=max'
+          assert 'SPDX' in (d['sbom'] or {}), '${ref}: no SPDX SBOM'
+          "
             done
             docker buildx imagetools create --dry-run "${refs[@]}" | python3 -c "
           import json, sys
           m = json.load(sys.stdin)['manifests']
           att = [x for x in m if x.get('annotations', {}).get('vnd.docker.reference.type') == 'attestation-manifest']
-          plats = sorted(x['platform']['architecture'] for x in m if x not in att)
-          assert plats == ['amd64', 'arm64'] and len(att) == 2, '${t}: platforms %s, %d attestations' % (plats, len(att))
+          img = [x for x in m if x not in att]
+          plats = sorted(x['platform']['architecture'] for x in img)
+          assert plats == ['amd64', 'arm64'], '${t}: platforms %s' % plats
+          refd = sorted(x['annotations']['vnd.docker.reference.digest'] for x in att)
+          assert refd == sorted(x['digest'] for x in img), '${t}: attestations reference %s, not one per platform' % refd
           "
             SOURCES["${t}"]="${refs[*]}"
           done
