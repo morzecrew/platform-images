@@ -53,9 +53,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build-and-publish:
-    runs-on: ubuntu-latest
-    name: Build and Publish Images
+  # One leg per platform, each on a native runner rather than one runner under
+  # QEMU: caddy compiles Go, uv-builder exists to compile wheels, and an
+  # emulated arm64 smoke test exercises the emulator as much as the image. Each
+  # leg runs the gate's first two passes for its platform; promote runs the
+  # third once both legs have passed.
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    name: Build and smoke (${{ matrix.arch }})
 
     steps:
       - name: Checkout code
@@ -80,33 +92,24 @@ jobs:
 
       # The gate, in three passes over the target list (RFC 0002 §5.4 and
       # decision 10; EXECUTION-LOG D-008 measured that this shape preserves
-      # attestations end to end).
+      # attestations end to end). This step is the first two, per platform:
       #
       #   1. build   -- push by digest with tags cleared, so nothing is
       #                 reachable by name until it has passed
       #   2. smoke   -- pull that exact digest back and run the image's script
-      #   3. promote -- imagetools create re-points tags at the same index; it
-      #                 does not rebuild, so the digest tested is the digest
-      #                 published, literally rather than by equivalence
+      #                 on the platform it was built for
+      #   3. promote -- the promote job, below
       #
-      # Promotion is its own pass rather than per-target, so one image failing
-      # its smoke test cannot leave earlier images already published.
-      #
-      # GIT_REVISION / BUILD_DATE / BUILD_STAMP default to empty in
-      # docker-bake.hcl so local builds stay cache-stable; CI fills them in.
-      #
-      # BUILD_STAMP must be unique per *build*, not per run (RFC 0002 rows 11
-      # and 17). Neither run_id nor run_number changes when a run is re-run --
-      # only run_attempt does -- and a re-run rebuilds from moved apt/base
-      # state, so without it a second attempt repoints a tag called immutable.
-      - name: Build, smoke-gate, and publish
+      # GIT_REVISION / BUILD_DATE default to empty in docker-bake.hcl so local
+      # builds stay cache-stable; CI fills them in.
+      - name: Build and smoke-gate
         env:
           GIT_REVISION: ${{ github.sha }}
+          PLATFORM: linux/${{ matrix.arch }}
         run: |
           set -euo pipefail
 
           export BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          export BUILD_STAMP="$(date -u +%Y%m%d)-${{ github.run_id }}.${{ github.run_attempt }}"
 
           # The scheduled rebuild exists to pick up a rebuilt base layer, which
           # a cached build cannot do (decision 3). Push-triggered runs stay
@@ -117,8 +120,6 @@ jobs:
             echo "scheduled rebuild: building with --no-cache"
           fi
 
-          # Captured once, before any --set override, so it still carries the
-          # real tag list that promotion needs.
           plan="$(docker buildx bake --print)"
           targets=$(printf '%s' "${plan}" \
             | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')
@@ -146,13 +147,14 @@ jobs:
           declare -A REPO DIGEST
 
           for t in ${targets}; do
-            echo "::group::build ${t}"
+            echo "::group::build ${t} (${PLATFORM})"
             repo="$(printf '%s' "${plan}" | python3 -c \
               "import json,sys; print(json.load(sys.stdin)['target']['${t}']['tags'][0].rsplit(':', 1)[0])")"
 
             # Clearing tags is required as well as overriding output: without it
             # bake refuses with "can't push tagged ref by digest".
             docker buildx bake ${nocache} \
+              --set "${t}.platform=${PLATFORM}" \
               --set "${t}.tags=" \
               --set "${t}.output=type=registry,name=${repo},push-by-digest=true,name-canonical=true" \
               --metadata-file "/tmp/meta-${t}.json" "${t}"
@@ -173,29 +175,137 @@ jobs:
             echo "::endgroup::"
           done
 
+          # Written only after every smoke test passed, so promote never sees a
+          # digest from a leg that failed part-way.
+          mkdir -p /tmp/digests
           for t in ${targets}; do
-            ref="${REPO[${t}]}@${DIGEST[${t}]}"
+            printf '%s' "${DIGEST[${t}]}" >"/tmp/digests/${t}"
+          done
+
+      - name: Hand the tested digests to promote
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/
+          if-no-files-found: error
+          retention-days: 1
+
+  # The third pass. imagetools create joins each target's per-platform digests
+  # into one index and points the tags at it. It does not rebuild: the index is
+  # new, but every platform manifest and attestation in it is the one a leg
+  # smoke-tested on its own platform, by digest.
+  #
+  # Promotion is its own job rather than per-leg or per-target, so one image
+  # failing its smoke test on either platform cannot leave anything published.
+  promote:
+    needs: build
+    runs-on: ubuntu-latest
+    name: Promote
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "${GH_TOKEN}" | docker login ghcr.io -u dummy --password-stdin
+
+      - name: Collect the tested digests
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: digests-*
+          path: /tmp/digests
+
+      # BUILD_STAMP must be unique per *build*, not per run (RFC 0002 rows 11
+      # and 17). Neither run_id nor run_number changes when a run is re-run --
+      # only run_attempt does -- and a re-run rebuilds from moved apt/base
+      # state, so without it a second attempt repoints a tag called immutable.
+      - name: Promote
+        run: |
+          set -euo pipefail
+
+          export BUILD_STAMP="$(date -u +%Y%m%d)-${{ github.run_id }}.${{ github.run_attempt }}"
+
+          plan="$(docker buildx bake --print)"
+          targets=$(printf '%s' "${plan}" \
+            | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')
+
+          # Every target is checked before any is tagged, in two halves.
+          #
+          # Each leg's digest must carry what decision 2 promises: an SPDX SBOM
+          # and mode=max provenance. Counting attestation manifests is not
+          # enough -- BuildKit attaches min-mode provenance by default, so a
+          # bake file whose `attest` stopped applying (the row 13 failure)
+          # still yields one per platform. Only max records `buildConfig`.
+          #
+          # The dry run then prints the index that would be pushed. It must hold
+          # both platforms, and each attestation must reference one of them, so
+          # a merge cannot drop a platform or pair an attestation with the
+          # wrong image.
+          declare -A SOURCES
+          for t in ${targets}; do
+            repo="$(printf '%s' "${plan}" | python3 -c \
+              "import json,sys; print(json.load(sys.stdin)['target']['${t}']['tags'][0].rsplit(':', 1)[0])")"
+            refs=()
+            for leg in /tmp/digests/digests-*; do
+              ref="${repo}@$(cat "${leg}/${t}")"
+              refs+=("${ref}")
+              docker buildx imagetools inspect "${ref}" \
+                --format '{"provenance": {{json .Provenance}}, "sbom": {{json .SBOM}}}' | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          slsa = (d['provenance'] or {}).get('SLSA') or {}
+          assert 'buildConfig' in slsa.get('buildDefinition', {}).get('internalParameters', {}), '${ref}: provenance is not mode=max'
+          assert 'SPDX' in (d['sbom'] or {}), '${ref}: no SPDX SBOM'
+          "
+            done
+            docker buildx imagetools create --dry-run "${refs[@]}" | python3 -c "
+          import json, sys
+          m = json.load(sys.stdin)['manifests']
+          att = [x for x in m if x.get('annotations', {}).get('vnd.docker.reference.type') == 'attestation-manifest']
+          img = [x for x in m if x not in att]
+          plats = sorted(x['platform']['architecture'] for x in img)
+          assert plats == ['amd64', 'arm64'], '${t}: platforms %s' % plats
+          refd = sorted(x['annotations']['vnd.docker.reference.digest'] for x in att)
+          assert refd == sorted(x['digest'] for x in img), '${t}: attestations reference %s, not one per platform' % refd
+          "
+            SOURCES["${t}"]="${refs[*]}"
+          done
+
+          for t in ${targets}; do
             mapfile -t tags < <(printf '%s' "${plan}" | python3 -c \
               "import json,sys; print('\n'.join(json.load(sys.stdin)['target']['${t}']['tags']))")
             args=()
             for tag in "${tags[@]}"; do args+=(--tag "${tag}"); done
+            read -ra refs <<<"${SOURCES[${t}]}"
             echo "::group::promote ${t} -> ${tags[*]}"
-            docker buildx imagetools create "${args[@]}" "${ref}"
+            docker buildx imagetools create "${args[@]}" "${refs[@]}"
             echo "::endgroup::"
           done
 
           echo "published: ${targets}"
 
-      # Scheduled failures are the silent ones -- nobody watches a cron the way
-      # they watch their own push -- and decision 12 makes this notification a
-      # precondition for the schedule existing at all.
-      #
-      # One reused issue, not one per week: fifty-two open issues describing the
-      # same broken rebuild is a mailing list, not a signal.
+  # Scheduled failures are the silent ones -- nobody watches a cron the way
+  # they watch their own push -- and decision 12 makes this notification a
+  # precondition for the schedule existing at all.
+  #
+  # One reused issue, not one per week: fifty-two open issues describing the
+  # same broken rebuild is a mailing list, not a signal.
+  report-failure:
+    needs: [build, promote]
+    if: failure() && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    name: Report scheduled rebuild failure
+
+    steps:
       - name: Report scheduled rebuild failure
-        if: failure() && github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No checkout in this job, so gh cannot infer the repository.
+          GH_REPO: ${{ github.repository }}
           TITLE: Weekly image rebuild is failing
         run: |
           set -euo pipefail

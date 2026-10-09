@@ -219,6 +219,10 @@ echo "=== 9. a stale output directory in the context is refused ==="
 d=$(fixture stale '"true"')
 mkdir -p "${d}/dist"
 echo "STALE-FROM-LAST-YEAR" >"${d}/dist/index.html"
+# Aged to match its name. Written moments before the build, it was older than
+# build-js-app's start marker by under a second, and an arm64 CI run once saw
+# the order inverted (EXECUTION-LOG D-062). A committed bundle is days old.
+touch -d '1 year ago' "${d}/dist/index.html"
 expect_build_fails "stale output refused" "${d}" "is older than this build"
 
 echo
@@ -233,7 +237,12 @@ echo "=== 11. the runtime handoff: caddy serves it, deep paths get index.html ==
 # is an infrastructure problem, not an optional test -- and a skip would leave
 # the battery green with §6's handoff assertion never run, which is exactly the
 # silent gap this image exists to remove.
-"${ENGINE}" pull -q "${CADDY}" >/dev/null 2>&1 ||
+#
+# A local image is used as-is rather than re-pulled: CI points CADDY_REF at the
+# caddy it just built and loaded, and pulling that name would replace it with
+# the published one -- or fail, on a platform not yet published.
+"${ENGINE}" image inspect "${CADDY}" >/dev/null 2>&1 ||
+	"${ENGINE}" pull -q "${CADDY}" >/dev/null 2>&1 ||
 	die "could not pull ${CADDY}; the handoff assertion cannot be skipped (set CADDY_REF to override)"
 if true; then
 	d="${WORK}/handoff"
