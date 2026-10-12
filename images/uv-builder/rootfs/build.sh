@@ -22,7 +22,10 @@ uv sync --frozen ${UV_GROUPS}
 uv build --wheel
 
 uv pip install --python "${PYTHON_BIN}" --no-deps dist/*.whl
-"${PYTHON_BIN}" -OO -m compileall -q -f "${VENV_PATH}"
+# No -OO: that writes `.opt-2.pyc`, which only an interpreter started with -OO
+# reads. python-distroless and most runtimes start without it, so the venv
+# would ship bytecode nothing loads and recompile every import at startup.
+"${PYTHON_BIN}" -m compileall -q -f "${VENV_PATH}"
 
 # Remove Python sources
 if [[ "${REMOVE_PY_SOURCES}" == "1" ]]; then
@@ -35,9 +38,9 @@ if [[ "${STRIP_NATIVE}" == "1" ]]; then
 		xargs -0 -r strip --strip-unneeded || true
 fi
 
-# Remove tests
+# Remove tests. Not __pycache__: that is where the bytecode compiled above lives.
 if [[ "${REMOVE_TESTS}" == "1" ]]; then
-	find "${VENV_PATH}" -type d \( -name "tests" -o -name "test" -o -name "__pycache__" \) \
+	find "${VENV_PATH}" -type d \( -name "tests" -o -name "test" \) \
 		-prune -exec rm -rf {} + || true
 fi
 
