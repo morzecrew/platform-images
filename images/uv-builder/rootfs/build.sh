@@ -25,7 +25,13 @@ uv pip install --python "${PYTHON_BIN}" --no-deps dist/*.whl
 # No -OO: that writes `.opt-2.pyc`, which only an interpreter started with -OO
 # reads. python-distroless and most runtimes start without it, so the venv
 # would ship bytecode nothing loads and recompile every import at startup.
-"${PYTHON_BIN}" -m compileall -q -f "${VENV_PATH}"
+#
+# With sources removed, bytecode has to sit beside them (-b): an interpreter
+# reads __pycache__ only for a module whose .py still exists, and imports a
+# package left with nothing but __pycache__ as an empty namespace.
+legacy=""
+[[ "${REMOVE_PY_SOURCES}" == "1" ]] && legacy="-b"
+"${PYTHON_BIN}" -m compileall -q -f ${legacy} "${VENV_PATH}"
 
 # Remove Python sources
 if [[ "${REMOVE_PY_SOURCES}" == "1" ]]; then

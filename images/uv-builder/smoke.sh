@@ -56,7 +56,16 @@ srcs = list(pathlib.Path("/opt/venv").rglob("*.py"))
 missing = [str(p) for p in srcs if not pathlib.Path(importlib.util.cache_from_source(p)).is_file()]
 assert srcs and not missing, "%d of %d modules have no loadable bytecode, e.g. %s" % (len(missing), len(srcs), missing[:3])
 EOF
+# REMOVE_PY_SOURCES=1 leaves only bytecode. It must still import as the real
+# package -- with nothing but __pycache__ it becomes an empty namespace and
+# "imports" without running a line of the code.
+export UV_PROJECT_ENVIRONMENT=/opt/bare VENV_PATH=/opt/bare REMOVE_PY_SOURCES=1
+out="$(build-uv-app 2>&1)" || { echo "${out}"; exit 1; }
+/opt/bare/bin/python - <<EOF
+import smokeapp
+assert getattr(smokeapp, "VALUE", None) == 1, "imported %r without its code" % smokeapp
+EOF
 ' || { echo "FAIL: build-uv-app left modules without bytecode a plain interpreter loads"; exit 1; }
-echo "build-uv-app: venv carries loadable bytecode"
+echo "build-uv-app: venv carries loadable bytecode, with and without sources"
 
 echo "PASS: uv-builder"
