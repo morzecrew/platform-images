@@ -27,7 +27,7 @@ Entrypoint script: **`/usr/local/bin/build-uv-app`** (`rootfs/build.sh`). It ass
 - Project root at **`APP_ROOT`** (default `/app`) with a uv project (`pyproject.toml`, lockfile for `--frozen`).
 - Virtualenv at **`VENV_PATH`** (default `/opt/venv`), with `UV_PROJECT_ENVIRONMENT=/opt/venv` already set in the image.
 
-Typical flow: `uv sync` → `uv build --wheel` → install wheel into the venv → **`python -OO -m compileall -q -f`** on the venv → optional removal of **`*.py`** (when **`REMOVE_PY_SOURCES=1`**) → optional stripping and cleanup (see environment variables below).
+Typical flow: `uv sync` → `uv build --wheel` → install wheel into the venv → **`python -m compileall -q -f`** on the venv (plain `.pyc` in `__pycache__`, which a runtime started without `-OO` loads) → optional removal of **`*.py`** (when **`REMOVE_PY_SOURCES=1`**) → optional stripping and cleanup (see environment variables below).
 
 ### Environment variables (build)
 
@@ -37,9 +37,9 @@ Typical flow: `uv sync` → `uv build --wheel` → install wheel into the venv �
 | `VENV_PATH` | `/opt/venv` | Target venv path. |
 | `UV_GROUPS` | `--no-group dev` | Extra arguments passed to `uv sync` (e.g. drop dev groups). |
 | `PYTHON_BIN` | `${VENV_PATH}/bin/python` | Python used for `compileall`, `pip uninstall`, and `uv pip install --python`. |
-| `REMOVE_PY_SOURCES` | `0` | If `1`, delete `*.py` under the venv (after `compileall`, so bytecode remains). |
+| `REMOVE_PY_SOURCES` | `0` | If `1`, delete `*.py` under the venv. Bytecode is then compiled beside each module (`compileall -b`) rather than into `__pycache__`, because Python reads `__pycache__` only for a module whose source still exists. |
 | `STRIP_NATIVE` | `1` | Strip `*.so` with `strip --strip-unneeded`. |
-| `REMOVE_TESTS` | `1` | Remove `tests` / `test` / `__pycache__` trees under the venv. |
+| `REMOVE_TESTS` | `1` | Remove `tests` / `test` trees under the venv. `__pycache__` is kept: it holds the compiled bytecode. |
 | `REMOVE_DOCS` | `0` | If `1`, remove `docs` / `doc` / `examples` / `example` directories under the venv. |
 | `REMOVE_LOCALES` | `1` | If `1`, remove `locale` / `locales` / `i18n` trees and `*.mo` / `*.po` files under the venv. |
 | `REMOVE_TYPE_HINTS` | `1` | Delete `*.pyi`. |
