@@ -40,10 +40,6 @@ name = "smokeapp"
 version = "0.0.0"
 requires-python = ">=3.10"
 
-# build-uv-app defaults to --no-group dev, which uv refuses for an undefined group.
-[dependency-groups]
-dev = []
-
 [build-system]
 requires = ["uv_build>=0.7"]
 build-backend = "uv_build"
@@ -65,7 +61,7 @@ out="$(build-uv-app 2>&1)" || { echo "${out}"; exit 1; }
 import smokeapp
 assert getattr(smokeapp, "VALUE", None) == 1, "imported %r without its code" % smokeapp
 EOF
-' || { echo "FAIL: build-uv-app left modules without bytecode a plain interpreter loads"; exit 1; }
+' || { echo "FAIL: build-uv-app did not produce a venv with bytecode a plain interpreter loads"; exit 1; }
 echo "build-uv-app: venv carries loadable bytecode, with and without sources"
 
 echo "PASS: uv-builder"
