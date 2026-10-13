@@ -3,7 +3,9 @@ set -Eeuo pipefail
 
 : "${APP_ROOT:=/app}"
 : "${VENV_PATH:=/opt/venv}"
-: "${UV_GROUPS:=--no-group dev}"
+# --no-dev, not --no-group dev: the latter fails outright on a project with no
+# dev group, and --no-dev drops the dev group and the legacy dev-dependencies alike.
+: "${UV_GROUPS:=--no-dev}"
 : "${PYTHON_BIN:=${VENV_PATH}/bin/python}"
 : "${STRIP_NATIVE:=1}"
 : "${REMOVE_TESTS:=1}"

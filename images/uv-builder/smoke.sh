@@ -40,10 +40,6 @@ name = "smokeapp"
 version = "0.0.0"
 requires-python = ">=3.10"
 
-# build-uv-app defaults to --no-group dev, which uv refuses for an undefined group.
-[dependency-groups]
-dev = []
-
 [build-system]
 requires = ["uv_build>=0.7"]
 build-backend = "uv_build"
@@ -56,16 +52,32 @@ srcs = list(pathlib.Path("/opt/venv").rglob("*.py"))
 missing = [str(p) for p in srcs if not pathlib.Path(importlib.util.cache_from_source(p)).is_file()]
 assert srcs and not missing, "%d of %d modules have no loadable bytecode, e.g. %s" % (len(missing), len(srcs), missing[:3])
 EOF
+# The build above had no dev group, which the default UV_GROUPS must tolerate;
+# this one gets a dev dependency, which the default must leave out. A local
+# path package, so it resolves with the network off.
+mkdir -p /devdep/src/devdep
+touch /devdep/src/devdep/__init__.py
+sed "s/smokeapp/devdep/" /app/pyproject.toml >/devdep/pyproject.toml
+cat >>/app/pyproject.toml <<EOF
+
+[dependency-groups]
+dev = ["devdep"]
+
+[tool.uv.sources]
+devdep = { path = "/devdep" }
+EOF
+uv lock -q --offline
 # REMOVE_PY_SOURCES=1 leaves only bytecode. It must still import as the real
 # package -- with nothing but __pycache__ it becomes an empty namespace and
 # "imports" without running a line of the code.
 export UV_PROJECT_ENVIRONMENT=/opt/bare VENV_PATH=/opt/bare REMOVE_PY_SOURCES=1
 out="$(build-uv-app 2>&1)" || { echo "${out}"; exit 1; }
 /opt/bare/bin/python - <<EOF
-import smokeapp
+import importlib.util, smokeapp
 assert getattr(smokeapp, "VALUE", None) == 1, "imported %r without its code" % smokeapp
+assert importlib.util.find_spec("devdep") is None, "the dev group was installed"
 EOF
-' || { echo "FAIL: build-uv-app left modules without bytecode a plain interpreter loads"; exit 1; }
-echo "build-uv-app: venv carries loadable bytecode, with and without sources"
+' || { echo "FAIL: build-uv-app did not produce a working production venv"; exit 1; }
+echo "build-uv-app: loadable bytecode with and without sources; dev group optional and left out"
 
 echo "PASS: uv-builder"

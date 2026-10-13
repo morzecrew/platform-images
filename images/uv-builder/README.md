@@ -35,7 +35,7 @@ Typical flow: `uv sync` → `uv build --wheel` → install wheel into the venv �
 |----------|---------|---------|
 | `APP_ROOT` | `/app` | Project directory. |
 | `VENV_PATH` | `/opt/venv` | Target venv path. |
-| `UV_GROUPS` | `--no-group dev` | Extra arguments passed to `uv sync` (e.g. drop dev groups). |
+| `UV_GROUPS` | `--no-dev` | Extra arguments passed to `uv sync`. The default leaves out the `dev` dependency group (or legacy `tool.uv.dev-dependencies`) and works whether or not the project defines one. |
 | `PYTHON_BIN` | `${VENV_PATH}/bin/python` | Python used for `compileall`, `pip uninstall`, and `uv pip install --python`. |
 | `REMOVE_PY_SOURCES` | `0` | If `1`, delete `*.py` under the venv. Bytecode is then compiled beside each module (`compileall -b`) rather than into `__pycache__`, because Python reads `__pycache__` only for a module whose source still exists. |
 | `STRIP_NATIVE` | `1` | Strip `*.so` with `strip --strip-unneeded`. |
