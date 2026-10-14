@@ -26,11 +26,7 @@ first time it is inconvenient.
 
 | Path | Consumed by | What it is |
 |---|---|---|
-| [`rootfs/lib/envconf.sh`](rootfs/lib/envconf.sh) | `valkey` | The env-config contract: allowlist, denylist, secrets, startup summary. See [RFC 0001](../rfcs/0001-shared-env-config-contract.md). |
-
-`postgres` is the second consumer and has not moved yet — RFC 0001 P4 retrofits
-it, deliberately last, because it is the only step that can regress a running
-deployment.
+| [`rootfs/lib/envconf.sh`](rootfs/lib/envconf.sh) | `valkey`, `postgres`, `caddy`, `flyway` | The env-config contract: allowlist, denylist, secrets, startup summary. See [RFC 0001](../rfcs/0001-shared-env-config-contract.md). `flyway` uses only `envconf_secret`. |
 
 ## Rules
 

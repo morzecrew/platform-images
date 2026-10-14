@@ -2991,3 +2991,97 @@ arm64 run failed in the build-js-app battery (D-060), which no reviewer raised.
   its name already claims, so no sub-second ordering can decide the result. If
   `COPY` were resetting mtimes this would still fail, and say so.
 - **Class:** `irreducible` until it recurs with more evidence.
+
+---
+
+# Wave 11 · `<NAME>_FILE` for application images
+
+Branch `feat/envfile-secrets`. Requested directly rather than through an RFC, as
+a brief: deployments hand secrets over as files, applications on
+`python-distroless` read environment variables, and the image has no shell to
+bridge the two. Extend RFC 0001 decision 4 to them, and to `flyway`.
+
+**Drift count: 2**: D-064, found by this wave's first test run, and D-066.
+
+## D-063 — RFC 0001 §8's exclusion of `flyway` and `python-distroless` is reopened, for secrets only
+
+- **Touches:** RFC 0001 §8 ("Retrofitting `flyway`, `uv-builder`,
+  `python-distroless`"), decision 4 (`LOCKED`)
+- **RFC said:** they take no runtime env config, so the contract does not apply.
+- **Built:** decision 4 alone. `python-distroless` ships
+  `/usr/local/bin/envfile-exec`, a stdlib Python launcher that resolves
+  `<NAME>_FILE` for the names an application declares in `ENVFILE_NAMES`, then
+  execs. `flyway` gets an entrypoint resolving `FLYWAY_URL`, `FLYWAY_USER` and
+  `FLYWAY_PASSWORD` through `envconf_secret`, then `exec flyway "$@"`.
+- **Why declared names:** expanding every `*_FILE` would rewrite
+  `SSL_CERT_FILE` and `AWS_*_FILE`, which are paths. Declaring is decision 2's
+  allowlist stance applied to secrets.
+- **A-21 does not bite here:** `FLYWAY_PASSWORD` is upstream's name, but Flyway
+  has no `_FILE` handling of its own to conflict with, so the image adding
+  `FLYWAY_PASSWORD_FILE` intercepts nothing.
+- **Class:** `discovery`. The exclusion was right for the configuration
+  contract and never considered secrets.
+
+## D-064 — `envconf_secret` took a directory and returned an empty secret
+
+- **Touches:** RFC 0001 decision 4 (`LOCKED`: "an unreadable `_FILE` aborts
+  rather than falling back")
+- **Seen:** published `valkey:9.2` with `VALKEY_PASSWORD_FILE=/etc` logged
+  `cat: read error: Is a directory` and then `Ready to accept connections`
+  with no `requirepass`. A directory passes `[ -r ]`, and `cat` failing inside
+  `$(cat "$file"; printf X)` is hidden by the `printf`. Compose creates a
+  directory at the mount point when a secret's source file is missing, so this
+  is the ordinary misconfiguration, not a contrived one.
+- **Built:** `[ -f ]` after `[ -r ]`, and `cat … && printf X` with the failure
+  checked. Pinned in `shared/test/run.sh` and in `valkey`'s smoke test, which
+  fails against the published 9.2 and passes on this branch.
+- **Class:** `drift`. Not reachable by reading the code; the first test of a
+  directory found it.
+
+## D-065 — The launcher is opt-in
+
+- **Touches:** the brief's open question: a default `ENTRYPOINT` or one each
+  application sets
+- **Decided:** opt-in. `python-distroless` keeps upstream's `python`
+  entrypoint. An application has to edit its Dockerfile to declare
+  `ENVFILE_NAMES` anyway, so a default would save no edit, and it would change
+  the entrypoint of every image already built on this one at its next rebuild.
+- **Class:** `discovery`.
+
+## D-066 — A change to `shared/` alone ran no CI and published nothing
+
+- **Touches:** `shared/README.md` ("Runs in CI on every PR"), RFC 0001
+  decision 6
+- **Seen:** neither `bake.yaml` nor `publish.yaml` listed `shared/**` in its
+  `paths:` filter. A PR touching only `envconf.sh` skipped the shared suite and
+  every smoke test, and the skipped required check counts as passing. A merge of
+  that PR published nothing until the weekly rebuild.
+- **Built:** `shared/**` in both filters. D-064 would have shipped untested
+  through exactly this gap had it not come with image changes.
+- **Class:** `drift`.
+
+### Verified
+
+- `python-distroless` smoke battery: 21 launcher cases in one container (the
+  brief's table, plus a device file, non-ASCII and leading-digit names, and a
+  `sitecustomize.py` on `PYTHONPATH`), then one detached container for PID 1,
+  SIGTERM and `inspect`. Nine sabotaged launchers each failed it: `_FILE` left
+  set, every newline stripped, override note dropped, and each of size, NUL,
+  regular-file, name and UTF-8 checks removed, plus the shebang without `-IS`.
+- The first isolation test shadowed `stat` and passed against an unisolated
+  launcher: `stat` is frozen, so `PYTHONPATH` cannot reach it. The way in is
+  `site` importing `sitecustomize`, which the test now uses.
+- Startup cost is about 8 ms (median of 15, inside the image). The first version
+  imported `re`, which alone cost about 45 ms there, so names are checked with
+  `str.isidentifier` instead.
+- `flyway`: a stub `flyway` ahead on `PATH` receives the resolved values, the
+  arguments unchanged and no `_FILE` variable. A missing file and a directory
+  are both refused. `CMD` is asserted against the image config, because Flyway
+  prints a usage text with or without upstream's `-?`, just not the same one.
+
+### Residue
+
+- `flyway`'s shell path aborts with exit 1, not 78, and does not apply the
+  launcher's 64 KiB, UTF-8 and NUL checks; `envconf_secret` never has. A NUL
+  is dropped by the shell rather than refused.
+

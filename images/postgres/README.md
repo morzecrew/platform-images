@@ -71,6 +71,15 @@ per group lives; it covers the generated preload line, the include and file-path
 settings this image's precedence rule depends on, the SQL-compatibility
 switches, and `allow_alter_system`.
 
+### Secrets
+
+Nothing to add here: the official entrypoint, which this image runs unchanged,
+already reads `POSTGRES_PASSWORD_FILE` and upstream's other `_FILE` variables.
+One difference from the [repo's secrets rule](../README.md#secrets): setting
+both `POSTGRES_PASSWORD` and `POSTGRES_PASSWORD_FILE` is refused at startup
+rather than letting the file win. The names are upstream's, so upstream's rule
+stands (EXECUTION-LOG A-21).
+
 ### The startup summary
 
 Before the server starts, the entrypoint prints every setting any layer assigns,

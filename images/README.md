@@ -56,6 +56,13 @@ contract. It is normative: image READMEs link here rather than restating it.
 >   `CADDY_*` spellings; the unprefixed names it published first still work and
 >   warn (EXECUTION-LOG D-022), which supersedes §4's "renaming existing
 >   variables" non-goal and is proposed, not yet accepted.
+> - **`python-distroless`** ships `envfile-exec`, the opt-in launcher that
+>   gives application images `<NAME>_FILE` for the names they declare (see
+>   [Application images](#application-images)). It has no other runtime
+>   configuration.
+> - **`flyway`** resolves `FLYWAY_URL_FILE`, `FLYWAY_USER_FILE` and
+>   `FLYWAY_PASSWORD_FILE` through the shared helper, then hands every argument
+>   to upstream's `flyway`. Nothing else here applies to it: it is a CLI.
 >
 > Where an image's behaviour and this section disagree, this section is the
 > target and the image is the gap. Each image's own README states what it
@@ -125,6 +132,29 @@ silently starting with the wrong credential is worse than not starting.
 Note the limit of what this buys: a secret supplied through the plain variable is
 still visible in `docker inspect` output and crash dumps. The `_FILE` form is
 what avoids that, and an image README says so where it matters.
+
+A `<NAME>_FILE` that is missing, unreadable or not a regular file aborts. A
+directory counts: it is what Compose leaves at the mount point when a secret's
+source file does not exist.
+
+#### Application images
+
+An application built on `python-distroless` owns its setting names, and no image
+here can know them, so the image cannot curate them the way `valkey` curates
+`VALKEY_PASSWORD`. The application declares them instead, and the launcher
+resolves those:
+
+```dockerfile
+ENV ENVFILE_NAMES="POSTGRES__PASSWORD AUTH__ACCESS_SECRET_KEY_B64"
+ENTRYPOINT ["/usr/local/bin/envfile-exec", "/opt/venv/bin/app"]
+```
+
+**Undeclared `*_FILE` variables are left alone.** Plenty of real ones are paths
+that must stay paths — `SSL_CERT_FILE`, `AWS_CONFIG_FILE`,
+`AWS_WEB_IDENTITY_TOKEN_FILE` — and expanding every `*_FILE` would hand boto a
+credential where it expects a filename. Declaring names is the allowlist stance
+applied to secrets. The contract, the summary line and the exit codes are in
+[python-distroless's README](python-distroless/README.md#secrets-from-files-envfile-exec).
 
 ### Startup summary
 

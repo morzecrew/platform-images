@@ -416,6 +416,9 @@ RFC 0002 §on rootless CI covers running these under rootless Podman.
   runtime env config — the first is a CLI, the other two are build/runtime
   stages. Named as excluded so a later reader does not read "every image" too
   literally.
+  **Reopened 2026-10-14 for secrets only (EXECUTION-LOG D-063).** `flyway`
+  and `python-distroless` gained decision 4's `<NAME>_FILE`; the rest of the
+  contract still does not apply to them, and `uv-builder` is untouched.
 
 ## 9. Risks
 
