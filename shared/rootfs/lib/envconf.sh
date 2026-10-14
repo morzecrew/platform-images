@@ -591,6 +591,10 @@ envconf_secret() {
 		# below, and the secret came back empty with status 0.
 		[ -f "${file}" ] ||
 			envconf_die "${file_var} is set to '${file}', which is not a regular file"
+		# A command substitution drops NUL bytes, which would change the secret
+		# without a word. Counted rather than matched: no shell can hold one.
+		[ "$(tr -d '\000' <"${file}" | wc -c)" -eq "$(wc -c <"${file}")" ] ||
+			envconf_die "${file_var} is set to '${file}', which contains a NUL byte"
 		# Strip a single trailing newline: every editor adds one and no secret
 		# wants it. Embedded newlines are the file's business, not ours.
 		value=$(cat "${file}" && printf X) ||

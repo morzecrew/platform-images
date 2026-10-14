@@ -354,6 +354,12 @@ out=$(VALKEY_PASSWORD=plain VALKEY_PASSWORD_FILE="${TMP}/secret-dir" \
 	run "a _FILE naming a directory aborts" 1 'envconf_secret VALKEY_PASSWORD')
 expect_contains "  ...names the variable" "${out}" "VALKEY_PASSWORD_FILE"
 
+printf 'pass\000word' >"${TMP}/secret-nul"
+out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-nul" \
+	run "a _FILE holding a NUL aborts, it is not silently shortened" 1 \
+	'envconf_secret VALKEY_PASSWORD')
+expect_contains "  ...says why" "${out}" "NUL"
+
 # Kubernetes secret volumes are symlinks into ..data.
 ln -s "${TMP}/secret" "${TMP}/secret-link"
 out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-link" \
