@@ -10,6 +10,7 @@ on:
       - shared/**
       - .github/workflows/publish.yaml
       - "!images/**/README.md"
+      - "!shared/README.md"
       - "!README.md"
 
   # Mondays 05:00 UTC, an hour AFTER cleanup-images (04:00) -- and the order is

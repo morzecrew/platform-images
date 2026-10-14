@@ -53,12 +53,16 @@ def put(name, data):
     return path
 
 def run(env, cmd=DUMP):
+    # Bounded: a launcher that blocks opening a FIFO must fail, not hang CI.
     return subprocess.run([L, *cmd], env={"PATH": os.environ["PATH"], **env},
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, timeout=20)
 
 def case(label, env, *, rc=0, cmd=DUMP, child=None, err=(), noerr=()):
-    r = run(env, cmd)
     try:
+        try:
+            r = run(env, cmd)
+        except subprocess.TimeoutExpired:
+            raise AssertionError("the launcher hung")
         assert r.returncode == rc, "exit %d, want %d: %s" % (r.returncode, rc, r.stderr.strip())
         if child:
             got = json.loads(r.stdout)
@@ -101,10 +105,13 @@ os.symlink("..data/token", os.path.join(D, "k8s", "token"))
 case("a Kubernetes-style symlink is followed",
      {"ENVFILE_NAMES": "A", "A_FILE": os.path.join(D, "k8s", "token")}, child={"A": "from-k8s"})
 
+fifo = os.path.join(D, "fifo")
+os.mkfifo(fifo)
 for label, path in [
     ("that is missing", os.path.join(D, "nope")),
     ("that is a directory", D),
     ("that is a device", "/dev/null"),
+    ("that is a FIFO", fifo),
     ("over 64 KiB", put("big", b"TOPSECRET" * 7300)),
     ("that is not UTF-8", put("latin1", b"TOPSECRET\xff")),
     ("holding a NUL", put("nul", b"TOPSECRET\0x")),
