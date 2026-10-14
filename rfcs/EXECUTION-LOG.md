@@ -3000,6 +3000,8 @@ Branch `feat/envfile-secrets`. Requested directly rather than through an RFC, as
 a brief: deployments hand secrets over as files, applications on
 `python-distroless` read environment variables, and the image has no shell to
 bridge the two. Extend RFC 0001 decision 4 to them, and to `flyway`.
+Its addendum, `build-uv-app` in two layers for the same storage budget, is
+D-067.
 
 **Drift count: 2**: D-064, found by this wave's first test run, and D-066.
 
@@ -3084,4 +3086,30 @@ bridge the two. Extend RFC 0001 decision 4 to them, and to `flyway`.
 - `flyway`'s shell path aborts with exit 1, not 78, and does not apply the
   launcher's 64 KiB, UTF-8 and NUL checks; `envconf_secret` never has. A NUL
   is dropped by the shell rather than refused.
+
+## D-067 — `build-uv-app` builds in two layers on request
+
+- **Touches:** nothing in an RFC; the brief's addendum. `build-uv-app` put an
+  application's dependencies and its code in one layer, so every code change
+  re-stored and re-downloaded both (erp-backend: 52 MB, of which the app is
+  1.2 MB).
+- **Built:** `build-uv-app deps` (`uv sync --no-install-project`, a `.pth`
+  naming `APP_PATH`, today's slimming) and `build-uv-app app` (the wheel into
+  `APP_PATH` with `--target`, compiled and slimmed there alone). No argument
+  keeps the single step.
+- **Departs from the brief:** console scripts land in `APP_PATH/bin`, not in
+  the venv's `bin`. The runtime copies the venv from the `deps` stage, so a
+  script the `app` stage put there would never ship. Their shebang is the
+  venv's python, which the `.pth` gives `APP_PATH`.
+- **Departs from the brief:** the layer-digest test builds with Podman, not
+  buildx, for the reason `test-build-js-app.sh` records: CI's buildx driver
+  cannot use a locally loaded image in `FROM`.
+- **Verified:** `smoke.sh` runs `deps` before any source exists, checks the
+  venv's checksum is unchanged by `app`, and runs the console script.
+  `test-build-uv-app.sh` builds a fixture twice with only its source changed:
+  the venv layer is the same layer, the app layer is new, the script runs on
+  python-distroless, and `python -v` shows both layers' bytecode loaded. Both
+  fail against the published builder, which ignores the argument and finds no
+  sources.
+- **Class:** `discovery`.
 

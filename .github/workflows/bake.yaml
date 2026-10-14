@@ -114,6 +114,18 @@ jobs:
             | python3 -c 'import json,sys; print(json.load(sys.stdin)["target"]["caddy"]["tags"][0])')" \
             bash images/npm-builder/test-build-js-app.sh
 
+      # build-uv-app's deps/app split needs two builds and a second image, the
+      # python-distroless the result would ship on. Both are this commit's.
+      - name: Test build-uv-app's two layers
+        run: |
+          set -euo pipefail
+          ref() {
+            docker buildx bake --print "$1" \
+              | python3 -c "import json,sys; print(json.load(sys.stdin)['target']['$1']['tags'][0])"
+          }
+          UV_BUILDER_REF="$(ref uv-builder)" DISTROLESS_REF="$(ref python-distroless)" \
+            bash images/uv-builder/test-build-uv-app.sh
+
       # Rootless rather than Docker: rootless is where UID mapping, volume
       # ownership and sub-1024 port binds actually fail, and those are the
       # assumptions Docker hides until a customer's air-gapped install finds

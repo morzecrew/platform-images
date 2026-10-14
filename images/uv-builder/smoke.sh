@@ -80,4 +80,45 @@ EOF
 ' || { echo "FAIL: build-uv-app did not produce a working production venv"; exit 1; }
 echo "build-uv-app: loadable bytecode with and without sources; dev group optional and left out"
 
+# The two-layer modes. `deps` runs before any source exists, as it does in a
+# Dockerfile that copies only the lock; `app` must leave that venv exactly as
+# it was, or the layer split buys nothing.
+"${ENGINE}" run --rm --network none "${IMAGE}" bash -euo pipefail -c '
+mkdir -p /split && cd /split
+cat >pyproject.toml <<EOF
+[project]
+name = "splitapp"
+version = "0.0.0"
+requires-python = ">=3.10"
+
+[project.scripts]
+splitapp = "splitapp:main"
+
+[build-system]
+requires = ["uv_build>=0.7"]
+build-backend = "uv_build"
+EOF
+uv lock -q --offline
+export APP_ROOT=/split UV_PROJECT_ENVIRONMENT=/opt/split VENV_PATH=/opt/split APP_PATH=/opt/splitapp
+out="$(build-uv-app deps 2>&1)" || { echo "${out}"; exit 1; }
+venv_sum() { find /opt/split -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum; }
+before="$(venv_sum)"
+mkdir -p src/splitapp
+printf "def main():\n    print(\"splitapp ran\")\n" >src/splitapp/__init__.py
+out="$(build-uv-app app 2>&1)" || { echo "${out}"; exit 1; }
+[ "$(venv_sum)" = "${before}" ] || { echo "app mode changed the venv"; exit 1; }
+[ ! -e /opt/splitapp/.lock ] || { echo "uv left /opt/splitapp/.lock behind"; exit 1; }
+[ "$(/opt/splitapp/bin/splitapp)" = "splitapp ran" ] || { echo "console script did not run"; exit 1; }
+/opt/split/bin/python - <<EOF
+import importlib.util, pathlib, splitapp
+assert splitapp.__file__.startswith("/opt/splitapp/"), splitapp.__file__
+srcs = list(pathlib.Path("/opt/splitapp").rglob("*.py"))
+missing = [str(p) for p in srcs if not pathlib.Path(importlib.util.cache_from_source(p)).is_file()]
+assert srcs and not missing, missing
+EOF
+rc=0; build-uv-app nonsense >/dev/null 2>&1 || rc=$?
+[ "${rc}" = 64 ] || { echo "an unknown mode exited ${rc}, want 64"; exit 1; }
+' || { echo "FAIL: build-uv-app deps/app"; exit 1; }
+echo "build-uv-app deps/app: deps without sources, app leaves the venv alone, script and bytecode in APP_PATH"
+
 echo "PASS: uv-builder"
