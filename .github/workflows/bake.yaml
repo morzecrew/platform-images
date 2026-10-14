@@ -9,6 +9,7 @@ on:
       - shared/**
       - .github/workflows/bake.yaml
       - "!images/**/README.md"
+      - "!shared/README.md"
       - "!README.md"
 
   workflow_dispatch:

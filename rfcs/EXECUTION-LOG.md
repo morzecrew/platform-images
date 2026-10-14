@@ -3073,7 +3073,8 @@ D-067.
 - The first isolation test shadowed `stat` and passed against an unisolated
   launcher: `stat` is frozen, so `PYTHONPATH` cannot reach it. The way in is
   `site` importing `sitecustomize`, which the test now uses.
-- Startup cost is about 8 ms (median of 15, inside the image). The first version
+- Startup cost is 11 ms (amd64) and 15 ms (arm64) on CI, median of 15 inside
+  the image. The first version
   imported `re`, which alone cost about 45 ms there, so names are checked with
   `str.isidentifier` instead.
 - `flyway`: a stub `flyway` ahead on `PATH` receives the resolved values, the
@@ -3084,8 +3085,8 @@ D-067.
 ### Residue
 
 - `flyway`'s shell path aborts with exit 1, not 78, and does not apply the
-  launcher's 64 KiB, UTF-8 and NUL checks; `envconf_secret` never has. A NUL
-  is dropped by the shell rather than refused.
+  launcher's 64 KiB and UTF-8 checks; `envconf_secret` never has. A NUL is
+  refused since review round 1 (R-48).
 
 ## D-067 — `build-uv-app` builds in two layers on request
 
@@ -3112,4 +3113,15 @@ D-067.
   fail against the published builder, which ignores the argument and finds no
   sources.
 - **Class:** `discovery`.
+
+## Review round 1 — PR #67, 2026-10-14
+
+Raised on #67, which merged before the fixes were pushed; they ship in its
+follow-up, branch `fix/envfile-review-findings`.
+
+| ID | Finding | Class | Resolution |
+|---|---|---|---|
+| R-48 | **A NUL in a `_FILE` reached `envconf_secret`'s command substitution, which drops it**: the secret changed without an error, in `flyway` and `valkey` alike. Already listed as residue above, and still wrong to leave. | — | Fixed: refused, counted with `tr -d` and `wc -c` |
+| R-49 | **`envfile-exec` checked the path with `os.stat`, then opened it**: a path swapped for a FIFO in between would block startup. | — | Fixed: opened with `O_NONBLOCK`, type checked with `fstat` on the descriptor. A FIFO case with a timeout pins it; a launcher without `O_NONBLOCK` hangs there and fails. |
+| R-50 | **A change to `shared/README.md` alone started a full multi-platform publish**, since D-066 added `shared/**` with no README exclusion. | — | Fixed: `!shared/README.md` in both filters |
 
