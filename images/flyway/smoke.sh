@@ -17,4 +17,38 @@ for drv in postgresql clickhouse-jdbc; do
 	echo "driver: ${drv}"
 done
 
+# Declaring an ENTRYPOINT drops the CMD inherited from upstream. Flyway prints
+# a usage text either way, but not the same one, so the config is what's checked.
+cmd=$("${ENGINE}" image inspect --format '{{json .Config.Cmd}}' "${IMAGE}")
+[ "${cmd}" = '["-?"]' ] || { echo "FAIL: CMD is ${cmd}, upstream's is [\"-?\"]"; exit 1; }
+echo "CMD: upstream's"
+
+# FLYWAY_*_FILE. A stub `flyway` ahead of upstream's on PATH prints the
+# arguments and environment the real one would have received.
+with_stub() {
+	"${ENGINE}" run --rm --entrypoint sh "$@" "${IMAGE}" -c '
+mkdir -p /tmp/stub && printf "#!/bin/sh\necho \"args: \$*\"\nenv\n" >/tmp/stub/flyway
+chmod +x /tmp/stub/flyway
+printf "jdbc:postgresql://db/app\n" >/tmp/url && printf "app\n" >/tmp/user && printf "s3cret\n" >/tmp/pw
+PATH=/tmp/stub:$PATH exec /usr/local/bin/flyway-entrypoint migrate -X'
+}
+out=$(with_stub -e FLYWAY_URL_FILE=/tmp/url -e FLYWAY_USER_FILE=/tmp/user \
+	-e FLYWAY_PASSWORD_FILE=/tmp/pw -e FLYWAY_PASSWORD=plain 2>&1) ||
+	{ echo "FAIL: entrypoint with _FILE secrets did not run flyway"; echo "${out}"; exit 1; }
+for want in "args: migrate -X" "FLYWAY_URL=jdbc:postgresql://db/app" "FLYWAY_USER=app" "FLYWAY_PASSWORD=s3cret" \
+	"[envfile] FLYWAY_PASSWORD <- FLYWAY_PASSWORD_FILE=/tmp/pw (plain FLYWAY_PASSWORD ignored)"; do
+	echo "${out}" | grep -qxF "${want}" || { echo "FAIL: flyway did not get '${want}'"; echo "${out}"; exit 1; }
+done
+echo "${out}" | grep -q "^FLYWAY_[A-Z]*_FILE=" && { echo "FAIL: a _FILE variable reached flyway"; echo "${out}"; exit 1; }
+echo "FLYWAY_*_FILE: resolved, file wins over plain, arguments passed through"
+
+for path in /nonexistent /tmp; do
+	if out=$(with_stub -e FLYWAY_PASSWORD=plain -e "FLYWAY_PASSWORD_FILE=${path}" 2>&1); then
+		echo "FAIL: FLYWAY_PASSWORD_FILE=${path} ran flyway"; echo "${out}"; exit 1
+	fi
+	echo "${out}" | grep -q "FLYWAY_PASSWORD_FILE is set to '${path}'" ||
+		{ echo "FAIL: refusal does not name FLYWAY_PASSWORD_FILE"; echo "${out}"; exit 1; }
+	echo "refused: FLYWAY_PASSWORD_FILE=${path}"
+done
+
 echo "PASS: flyway"

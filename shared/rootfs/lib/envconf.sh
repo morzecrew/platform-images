@@ -587,9 +587,14 @@ envconf_secret() {
 	if [ -n "${file}" ]; then
 		[ -r "${file}" ] ||
 			envconf_die "${file_var} is set to '${file}', which is not readable"
+		# A directory passes -r, `cat` on it fails inside the substitution
+		# below, and the secret came back empty with status 0.
+		[ -f "${file}" ] ||
+			envconf_die "${file_var} is set to '${file}', which is not a regular file"
 		# Strip a single trailing newline: every editor adds one and no secret
 		# wants it. Embedded newlines are the file's business, not ours.
-		value=$(cat "${file}"; printf X)
+		value=$(cat "${file}" && printf X) ||
+			envconf_die "${file_var} is set to '${file}', which could not be read"
 		value=${value%X}
 		value=${value%"$_ENVCONF_NL"}
 		printf '%s' "${value}"

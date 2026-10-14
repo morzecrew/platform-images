@@ -64,4 +64,9 @@ COPY --from=upstream /usr/lib/*-linux-gnu/libffi.so.8 /usr/lib/
 
 COPY --from=deps ${APP_RUNTIME_DIR} ${APP_RUNTIME_DIR}
 
+# Opt-in: an application image puts it in front of its own command and declares
+# ENVFILE_NAMES. The entrypoint stays upstream's python, so nothing built on
+# this image changes behaviour by being rebuilt.
+COPY --chmod=0755 rootfs/envfile-exec /usr/local/bin/envfile-exec
+
 USER ${APP_UID}:${APP_GID}
