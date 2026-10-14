@@ -346,6 +346,20 @@ else
 	esac
 fi
 
+# A directory passes `-r`, and `cat` failing inside a command substitution is
+# not an error the caller sees: the secret came back empty and the server
+# started with it.
+mkdir "${TMP}/secret-dir"
+out=$(VALKEY_PASSWORD=plain VALKEY_PASSWORD_FILE="${TMP}/secret-dir" \
+	run "a _FILE naming a directory aborts" 1 'envconf_secret VALKEY_PASSWORD')
+expect_contains "  ...names the variable" "${out}" "VALKEY_PASSWORD_FILE"
+
+# Kubernetes secret volumes are symlinks into ..data.
+ln -s "${TMP}/secret" "${TMP}/secret-link"
+out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-link" \
+	run "a _FILE symlink is followed" 0 'envconf_secret VALKEY_PASSWORD')
+expect_equals "  ...value" "${out}" "from-file"
+
 # --- summary --------------------------------------------------------------
 
 out=$(run "summary prints value and origin" 0 \

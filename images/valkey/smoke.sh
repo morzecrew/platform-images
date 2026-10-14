@@ -190,6 +190,11 @@ esac
 expect_refusal "an unreadable VALKEY_PASSWORD_FILE" "not readable" \
 	-e VALKEY_PASSWORD=fallback -e VALKEY_PASSWORD_FILE=/nonexistent/pw
 
+# What Compose leaves when a secret's source file is missing: a directory at
+# the mount point. It is readable, and once started without a password.
+expect_refusal "a VALKEY_PASSWORD_FILE that is a directory" "not a regular file" \
+	-e VALKEY_PASSWORD=fallback -e VALKEY_PASSWORD_FILE=/etc
+
 # --- 6. the two §5.3 refusals ----------------------------------------------
 
 expect_refusal "persistence with an evicting policy" "contradict each other" \
