@@ -116,6 +116,7 @@ target "flyway" {
   dockerfile = "Dockerfile"
   tags       = tag("flyway", FLYWAY_VERSION)
   labels     = label("flyway", FLYWAY_VERSION)
+  contexts   = { shared = "./shared" }
   args = {
     FLYWAY_VERSION          = FLYWAY_VERSION
     # renovate: datasource=maven depName=org.postgresql:postgresql
