@@ -1,0 +1,79 @@
+#!/usr/local/bin/python3 -IS
+# envfile-exec -- resolve declared <NAME>_FILE secrets into <NAME>, then exec.
+#
+#   ENV ENVFILE_NAMES="POSTGRES__PASSWORD AUTH__ACCESS_SECRET_KEY_B64"
+#   ENTRYPOINT ["/usr/local/bin/envfile-exec", "/opt/venv/bin/app"]
+#
+# The contract is in images/python-distroless/README.md. Only declared names
+# are resolved: SSL_CERT_FILE, AWS_CONFIG_FILE and friends are paths and must
+# stay paths. Stdlib only, isolated (-I) and without site (-S), so neither the
+# application's PYTHONPATH nor a .pth file can change what this does. No `re`:
+# importing it costs ~45 ms here, four times the interpreter's own startup.
+import os
+import stat
+import sys
+
+MAX_BYTES = 64 * 1024
+
+
+def die(msg, code=78):  # 78 is EX_CONFIG
+    print(f"envfile-exec: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+# Messages name the variable and the path, never the content.
+def read_secret(var, path):
+    try:
+        # os.stat follows symlinks: a Kubernetes secret volume is links into ..data.
+        if not stat.S_ISREG(os.stat(path).st_mode):
+            die(f"{var}={path} is not a regular file")
+        with open(path, "rb") as f:
+            data = f.read(MAX_BYTES + 1)
+    except OSError as e:
+        die(f"{var}={path} cannot be read: {e.strerror}")
+    if len(data) > MAX_BYTES:
+        die(f"{var}={path} is larger than {MAX_BYTES} bytes")
+    # An environment value cannot hold a NUL; refusing beats truncating.
+    if b"\0" in data:
+        die(f"{var}={path} contains a NUL byte")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        die(f"{var}={path} is not valid UTF-8")
+    # Exactly one trailing newline, as envconf_secret strips: editors add it,
+    # and a PEM key's embedded newlines are content.
+    return text[:-1] if text.endswith("\n") else text
+
+
+def main(argv):
+    if len(argv) < 2:
+        die("usage: envfile-exec <command> [args...]", 64)  # EX_USAGE
+    env = dict(os.environ)
+
+    names = env.get("ENVFILE_NAMES", "").replace(",", " ").split()
+    for name in names:
+        # An ASCII identifier is exactly [A-Za-z_][A-Za-z0-9_]*.
+        if not (name.isascii() and name.isidentifier()):
+            die(f"ENVFILE_NAMES: {name!r} is not a valid variable name")
+
+    for name in dict.fromkeys(names):
+        var = f"{name}_FILE"
+        path = env.get(var)
+        if not path:
+            continue
+        note = f" (plain {name} ignored)" if name in env else ""
+        env[name] = read_secret(var, path)
+        # One way to configure each name, as far as the application can see.
+        del env[var]
+        print(f"[envfile] {name} <- {var}={path}{note}", file=sys.stderr)
+
+    sys.stderr.flush()
+    try:
+        os.execvpe(argv[1], argv[1:], env)
+    except FileNotFoundError:
+        die(f"{argv[1]}: command not found", 127)
+    except OSError as e:
+        die(f"{argv[1]}: {e.strerror}", 126)
+
+
+main(sys.argv)

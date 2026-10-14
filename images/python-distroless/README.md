@@ -14,6 +14,56 @@ Minimal **runtime** image for Python workloads: [`al3xos/python-distroless`](htt
 
 Published for `linux/amd64` and `linux/arm64`. `DISTROLESS_PYTHON_VERSION` in [`docker-bake.hcl`](../../docker-bake.hcl) sets the registry tag and `PYTHON_VERSION` in [`Dockerfile`](./Dockerfile), and is also the Python [`uv-builder`](../uv-builder) builds on, so the pair is one CPython build per platform. `DEBIAN_VERSION` comes from bake’s `DISTROLESS_DEBIAN_VERSION`. They must resolve to a real tag on **`al3xos/python-distroless`**: `FROM al3xos/python-distroless:${PYTHON_VERSION}-debian${DEBIAN_VERSION}` (e.g. `3.14.8-debian13`), and `python:${PYTHON_VERSION}-trixie` must exist for uv-builder. The value must be an exact patch; bake refuses a bare minor.
 
+## Secrets from files: `envfile-exec`
+
+Deployments hand secrets over as files (morzer, Compose `secrets:`, Kubernetes
+secret volumes); applications read environment variables. There is no shell
+here to bridge the two, so the image ships a launcher that does it,
+`/usr/local/bin/envfile-exec`. It is **opt-in**: the entrypoint stays
+upstream's `python`, and an application image puts the launcher in front of its
+own command:
+
+```dockerfile
+ENV ENVFILE_NAMES="POSTGRES__PASSWORD AUTH__ACCESS_SECRET_KEY_B64"
+ENTRYPOINT ["/usr/local/bin/envfile-exec", "/opt/venv/bin/app"]
+```
+
+For each name in `ENVFILE_NAMES` (whitespace- or comma-separated) whose
+`<NAME>_FILE` is set and non-empty, it reads the file, sets `<NAME>` to the
+content with exactly one trailing newline stripped, removes `<NAME>_FILE`, and
+then `exec`s the command, so the application is PID 1, gets the signals and owns
+the exit code.
+
+- **Only declared names.** `SSL_CERT_FILE`, `AWS_CONFIG_FILE`,
+  `AWS_WEB_IDENTITY_TOKEN_FILE` and the like are paths and stay paths. That is
+  why the names are declared rather than every `*_FILE` being expanded. An
+  operator can extend `ENVFILE_NAMES` at run time; like the
+  [allowlist](../README.md#allowlist-never-denylist), it is a guard rail, not a
+  security boundary.
+- **The file wins** over a plain `<NAME>`, and a plain `<NAME>` with no
+  `_FILE` passes through untouched, which is how local development keeps
+  working.
+- **Symlinks are followed**, so Kubernetes' `..data` layout works. An empty file
+  gives an empty value; refusing one is the application's call.
+- **Isolated:** `python3 -IS`, stdlib only, not the application's venv, so
+  nothing the application sets can change it. It costs one interpreter start,
+  about 8 ms.
+
+One line per resolved name goes to stderr, never a value. Nothing is printed
+when nothing was resolved:
+
+```text
+[envfile] AUTH__ACCESS_SECRET_KEY_B64 <- AUTH__ACCESS_SECRET_KEY_B64_FILE=/run/secrets/access_secret_key
+[envfile] POSTGRES__PASSWORD <- POSTGRES__PASSWORD_FILE=/run/secrets/postgres_password (plain POSTGRES__PASSWORD ignored)
+```
+
+| Exit | When |
+| --- | --- |
+| 78 (`EX_CONFIG`) | A `<NAME>_FILE` is missing, unreadable, not a regular file, over 64 KiB, not UTF-8 or holds a NUL; or a declared name is not `[A-Za-z_][A-Za-z0-9_]*`. The message names the variable and the path, never the content. |
+| 64 (`EX_USAGE`) | No command was given. |
+| 127 / 126 | The command was not found / could not be executed. |
+| anything else | The application's own: the launcher is gone by then. |
+
 ## Building
 
 From the repo root (see [images/README.md](../README.md)):
@@ -27,3 +77,4 @@ Image: `ghcr.io/morzecrew/python-distroless:3.14.8`.
 ## Layout
 
 - `Dockerfile` — deps stage from `debian:bookworm-slim` (certs, libmagic, runtime dir layout); runtime `FROM al3xos/python-distroless`
+- `rootfs/envfile-exec` — the `<NAME>_FILE` launcher above
