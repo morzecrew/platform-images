@@ -46,8 +46,8 @@ the exit code.
 - **Symlinks are followed**, so Kubernetes' `..data` layout works. An empty file
   gives an empty value; refusing one is the application's call.
 - **Isolated:** `python3 -IS`, stdlib only, not the application's venv, so
-  nothing the application sets can change it. It costs one interpreter start,
-  about 8 ms.
+  nothing the application sets can change it. It costs one interpreter start:
+  11 to 15 ms on CI's amd64 and arm64 runners.
 
 One line per resolved name goes to stderr, never a value. Nothing is printed
 when nothing was resolved:
