@@ -6,6 +6,7 @@ on:
     paths:
       - docker-bake.hcl
       - images/**
+      - shared/**
       - .github/workflows/bake.yaml
       - "!images/**/README.md"
       - "!README.md"
