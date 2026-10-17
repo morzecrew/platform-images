@@ -29,7 +29,7 @@ Image: `ghcr.io/morzecrew/caddy:2.11.4`.
 - Writable locations (typical volume mounts): **`/config`**, **`/data`**, **`/srv`** (e.g. static assets).
 - **`/docker-entrypoint.d/*.sh`** — optional shell hooks sourced in lexical order before config validation (same idea as other official images).
 - **`gettext`** is installed if you want `envsubst`-style templating in those hooks or sidecar steps; the stock entrypoint does not rewrite the Caddyfile.
-- **Coraza** loads `/opt/coraza/config/coraza.conf`, CRS's `crs-setup.conf` (upstream's template, unmodified), **`/opt/coraza/overrides/*.conf`** (optional; mount or bake files there), then the CRS rules in `/opt/coraza/owasp-crs/`. See [WAF](#waf-coraza-and-owasp-crs).
+- **Coraza** loads `/opt/coraza/config/coraza.conf`, the body limit, CRS's `crs-setup.conf` (upstream's template, unmodified), **`/opt/coraza/overrides/*.conf`** (optional; mount or bake files there), then the CRS rules in `/opt/coraza/owasp-crs/`. See [WAF](#waf-coraza-and-owasp-crs).
 
 ## Configuration
 
@@ -43,7 +43,7 @@ Every row below is a **curated** variable in the sense of the [environment confi
 |----------|---------|-------------|
 | `CADDY_EDGE_ADDRESS` | `:8080` | Site block address (e.g. `:443` with TLS). |
 | `CADDY_HEALTH_PATH` | `/__platform_healthz` | Path for the built-in liveness handler (`handle {$CADDY_HEALTH_PATH}` → `200` / `ok`). Must match Caddy’s path matcher form (leading slash). |
-| `CADDY_REQUEST_BODY_MAX_SIZE` | `30MB` | `request_body` max size for the site. |
+| `CADDY_REQUEST_BODY_MAX_SIZE` | `30MB` | The largest request body, for `request_body` and the WAF both: a body this size or larger gets `413`. Caddy's size syntax (`30MB`, `30MiB`). The WAF cannot go above 1 GiB, so a larger value, or `0`, still refuses at 1 GiB. |
 | `CADDY_AUTO_HTTPS` | `auto_https off` | Global auto-HTTPS directive in the options block. `on` leaves Caddy's automatic HTTPS on, for a site serving a real domain; any other value is written into the options block as is (e.g. `auto_https disable_redirects`). |
 | `CADDY_TEMPLATE_DIR` | `/etc/caddy/templates` | Reserved for custom templating workflows (not used by the default entrypoint). |
 | `CADDY_CONFIG_DIR` | `/etc/caddy/config.d` | Directory for injected site fragments (`*.caddy`). The Caddyfile uses `import {$CADDY_CONFIG_DIR}/*.caddy` (with this default). |
@@ -226,6 +226,12 @@ SecRule REQUEST_URI "@beginsWith /v1/files" "id:1000,phase:1,pass,t:none,nolog,c
 ```
 
 That second one is worth knowing about: CRS refuses a request carrying `Expect` (rule 920450), and curl sends `Expect: 100-continue` with any body over 1 MiB. `curl -H 'Expect:'` drops it.
+
+**The body limit** is `CADDY_REQUEST_BODY_MAX_SIZE`, for the WAF too. The WAF has to refuse an oversized body itself: one that runs into `request_body`'s cap while the WAF is reading it comes back as `500` rather than `413`. So the entrypoint sets the WAF's limit from the variable, and prints it before Caddy starts:
+
+```text
+WAF request body limit: 30000000 bytes (CADDY_REQUEST_BODY_MAX_SIZE=30MB)
+```
 
 ### Rate limiting
 

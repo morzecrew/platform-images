@@ -171,5 +171,24 @@ echo "Validating Caddy config..."
 caddy fmt --overwrite /etc/caddy/Caddyfile
 caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 
+# The WAF buffers a body to inspect it and refuses one past a limit of its own.
+# Set apart from CADDY_REQUEST_BODY_MAX_SIZE, that limit was a second, smaller
+# cap: 12.5 MiB under the 30MB default, so an image raising only the documented
+# one still refused anything above 12.5 MiB with 413.
+#
+# Caddy parses the size, so `30MB`, `30MiB` and `1.5GB` mean what they mean to
+# request_body; an invalid one has already failed the adapt above. The limit
+# is the cap itself, not one byte more: the WAF refuses a body that reaches its
+# limit with 413, while one that reaches request_body's cap first, mid-read,
+# comes back as 500. Coraza takes 1 byte to 1 GiB, so a cap of 0 (no limit) or
+# above 1 GiB gets 1 GiB.
+CADDY_WAF_REQUEST_BODY_LIMIT=$(
+	printf ':1 {\n\trequest_body {\n\t\tmax_size %s\n\t}\n}\n' "${CADDY_REQUEST_BODY_MAX_SIZE}" |
+		caddy adapt --adapter caddyfile --config /dev/stdin 2>/dev/null |
+		awk -F'"max_size":' 'NF > 1 { n = $2 + 0 } END { print (n < 1 || n > 1073741824) ? 1073741824 : n }'
+)
+export CADDY_WAF_REQUEST_BODY_LIMIT
+echo "WAF request body limit: ${CADDY_WAF_REQUEST_BODY_LIMIT} bytes (CADDY_REQUEST_BODY_MAX_SIZE=${CADDY_REQUEST_BODY_MAX_SIZE})"
+
 echo "Launching $*"
 exec "$@"

@@ -295,6 +295,33 @@ for probe in "id=1%27%20OR%20%271%27%3D%271" "q=%3Cscript%3Ealert(1)%3C%2Fscript
 done
 echo "waf: CRS refuses an SQLi and an XSS probe, a plain request passes"
 
+# --- 10. the WAF's body limit is CADDY_REQUEST_BODY_MAX_SIZE -----------------
+
+# The WAF had a fixed 12.5 MiB limit of its own. Under a smaller cap it is
+# worse than a second limit: a body that runs into request_body's cap while the
+# WAF reads it is a 500. So the WAF must refuse first, at the cap.
+body_code() {
+	# body_code <bytes>: POST a JSON body of exactly that size
+	printf '{"a":"%s"}' "$(head -c $(($1 - 8)) /dev/zero | tr '\000' x)" >"${WORK}/body.json"
+	curl -s -o /dev/null -w '%{http_code}' -H 'Host: app.example' \
+		-H 'Content-Type: application/json' --data-binary "@${WORK}/body.json" \
+		"http://127.0.0.1:18080/v1/x"
+}
+for pair in 999=200 1000=413 5000=413; do
+	code=$(body_code "${pair%=*}")
+	[ "${code}" = "${pair#*=}" ] ||
+		{ echo "FAIL: a ${pair%=*}-byte body under a 1000-byte cap got ${code}, expected ${pair#*=}"; exit 1; }
+done
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+echo "waf: the body limit is the cap, and an oversized body is 413, not 500"
+
+# Caddy parses the size, so its units mean what they mean to request_body.
+for pair in 30MiB=31457280 1.5GB=1073741824 0=1073741824; do
+	out=$("${ENGINE}" run --rm -e "CADDY_REQUEST_BODY_MAX_SIZE=${pair%=*}" "${IMAGE}" true 2>&1)
+	expect_in "CADDY_REQUEST_BODY_MAX_SIZE=${pair%=*} gives the WAF ${pair#*=}" "${out}" \
+		"WAF request body limit: ${pair#*=} bytes"
+done
+
 # --- 11. CADDY_AUTO_HTTPS=on leaves automatic HTTPS on -----------------------
 
 # Caddy has no `auto_https on`, and an empty value means the default, `off`, so
