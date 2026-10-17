@@ -4,7 +4,7 @@ Custom Caddy Docker images for the Morze platform. Based on official `caddy` wit
 
 ## Contents
 
-**Tag `2.11.4`** — Caddy built with [coraza-caddy](https://github.com/corazawaf/coraza-caddy), CRS rules under `/opt/coraza/`, and a small **platform Caddyfile** (`rootfs/Caddyfile`).
+**Tag `2.11.7`** — Caddy built with [coraza-caddy](https://github.com/corazawaf/coraza-caddy), CRS rules under `/opt/coraza/`, and a small **platform Caddyfile** (`rootfs/Caddyfile`).
 
 - **Runtime injection** — site fragments as `*.caddy` under **`CADDY_CONFIG_DIR`** (default **`/etc/caddy/config.d`**), plus optional **global options** fragments under **`CADDY_SERVERS_DIR`** (default **`/etc/caddy/servers.d`**) merged into the top-level `{ }` block (see below).
 - **Named snippets** — bundled patterns under **`CADDY_BUILTIN_SNIPPETS_DIR`** (default **`/etc/caddy/snippets`**) are **`import`ed at top level** in the base Caddyfile, so from **`CADDY_CONFIG_DIR`** you can compose the app with e.g. `import spa` and `import security_headers`. Add your own **`(name) { }`** definitions as `*.caddy` under **`CADDY_SNIPPET_DEFS_DIR`** (default **`/etc/caddy/snippet_defs.d`**); see [Snippets](#snippets-composable-patterns).
@@ -20,7 +20,7 @@ From the repo root (see [images/README.md](../README.md)):
 just bake caddy
 ```
 
-Image: `ghcr.io/morzecrew/caddy:2.11.4`.
+Image: `ghcr.io/morzecrew/caddy:2.11.7`.
 
 ## Process and layout
 
