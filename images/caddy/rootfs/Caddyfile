@@ -24,7 +24,7 @@ import {$CADDY_SNIPPET_DEFS_DIR}/*.caddy
 		Include /opt/coraza/config/coraza.conf
 		Include /opt/coraza/config/crs-setup.conf
 		Include /opt/coraza/overrides/*.conf
-		Include /opt/coraza/owasp-crs/rules/*.conf
+		Include /opt/coraza/owasp-crs/*.conf
 		`
 	}
 

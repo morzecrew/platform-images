@@ -276,4 +276,23 @@ while IFS= read -r pair; do
 done <<<"${readme_table}"
 echo "defaults: entrypoint, Dockerfile and README agree"
 
+# --- 9. the WAF runs CRS -----------------------------------------------------
+
+# The include once named a directory that did not exist. Coraza logged an
+# empty glob, a warning, and ran without CRS, so both probes below reached the
+# upstream. Fixing the include alone made every request 500, health included:
+# the image's own crs-setup.conf had replaced upstream's and lacked the
+# version marker CRS refuses to run without.
+mkdir -p "${WORK}/app"
+printf 'handle /v1/* {\n\trespond "upstream" 200\n}\n' >"${WORK}/app/10-app.caddy"
+start 18080:8080 -e CADDY_REQUEST_BODY_MAX_SIZE=1000 -v "${WORK}/app:/etc/caddy/config.d:ro,Z"
+wait_health "http://127.0.0.1:18080/__platform_healthz"
+code=$(http_code "http://127.0.0.1:18080/v1/x?id=1")
+[ "${code}" = "200" ] || { echo "FAIL: a plain request got ${code}, expected 200"; exit 1; }
+for probe in "id=1%27%20OR%20%271%27%3D%271" "q=%3Cscript%3Ealert(1)%3C%2Fscript%3E"; do
+	code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:18080/v1/x?${probe}")
+	[ "${code}" = "403" ] || { echo "FAIL: WAF let ?${probe} through with ${code}, expected 403"; exit 1; }
+done
+echo "waf: CRS refuses an SQLi and an XSS probe, a plain request passes"
+
 echo "PASS: caddy"
