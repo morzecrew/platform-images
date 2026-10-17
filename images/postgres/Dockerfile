@@ -2,7 +2,7 @@
 
 # ....................... #
 
-ARG POSTGRES_IMAGE_TAG=18.1
+ARG POSTGRES_IMAGE_TAG=18.6
 
 FROM postgres:${POSTGRES_IMAGE_TAG}
 
