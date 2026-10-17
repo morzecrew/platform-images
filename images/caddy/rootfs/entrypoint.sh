@@ -161,6 +161,12 @@ envconf_summary caddy "${SRCMAP}" \
 rm -f "${SRCMAP}"
 trap - EXIT
 
+# `on` leaves Caddy's automatic HTTPS alone. Caddy has no `auto_https on`, and
+# an empty value means the image default, which is off -- so before this an
+# image serving a real domain had to put some other global option here to get
+# certificates. The summary above says `on`; the Caddyfile gets an empty line.
+[ "${CADDY_AUTO_HTTPS}" != on ] || export CADDY_AUTO_HTTPS=
+
 echo "Validating Caddy config..."
 caddy fmt --overwrite /etc/caddy/Caddyfile
 caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null

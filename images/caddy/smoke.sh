@@ -295,4 +295,27 @@ for probe in "id=1%27%20OR%20%271%27%3D%271" "q=%3Cscript%3Ealert(1)%3C%2Fscript
 done
 echo "waf: CRS refuses an SQLi and an XSS probe, a plain request passes"
 
+# --- 11. CADDY_AUTO_HTTPS=on leaves automatic HTTPS on -----------------------
+
+# Caddy has no `auto_https on`, and an empty value means the default, `off`, so
+# a site serving a real domain had no way to say "on". local_certs keeps the
+# certificate offline.
+mkdir -p "${WORK}/servers"
+printf 'local_certs\nskip_install_trust\n' >"${WORK}/servers/10-local.caddy"
+start 18443:8443 -e CADDY_AUTO_HTTPS=on -e CADDY_EDGE_ADDRESS=app.example.test:8443 \
+	-v "${WORK}/servers:/etc/caddy/servers.d:ro,Z"
+for _ in $(seq 1 15); do
+	logs="$(logs_of)"
+	case "${logs}" in *"enabling automatic TLS certificate management"*) break ;; esac
+	sleep 1
+done
+expect_in "on: certificates are managed" "${logs}" "enabling automatic TLS certificate management"
+expect_in "on: the summary says on" "${logs}" "CADDY_AUTO_HTTPS = on"
+expect_not_in "on: automatic HTTPS is not disabled" "${logs}" "automatic HTTPS is completely disabled"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+out=$("${ENGINE}" run --rm -e CADDY_EDGE_ADDRESS=app.example.test:8443 "${IMAGE}" \
+	caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1)
+expect_in "default: automatic HTTPS stays off" "${out}" '"automatic_https":{"disable":true}'
+
 echo "PASS: caddy"

@@ -44,7 +44,7 @@ Every row below is a **curated** variable in the sense of the [environment confi
 | `CADDY_EDGE_ADDRESS` | `:8080` | Site block address (e.g. `:443` with TLS). |
 | `CADDY_HEALTH_PATH` | `/__platform_healthz` | Path for the built-in liveness handler (`handle {$CADDY_HEALTH_PATH}` → `200` / `ok`). Must match Caddy’s path matcher form (leading slash). |
 | `CADDY_REQUEST_BODY_MAX_SIZE` | `30MB` | `request_body` max size for the site. |
-| `CADDY_AUTO_HTTPS` | `auto_https off` | Global auto-HTTPS directive in the options block. |
+| `CADDY_AUTO_HTTPS` | `auto_https off` | Global auto-HTTPS directive in the options block. `on` leaves Caddy's automatic HTTPS on, for a site serving a real domain; any other value is written into the options block as is (e.g. `auto_https disable_redirects`). |
 | `CADDY_TEMPLATE_DIR` | `/etc/caddy/templates` | Reserved for custom templating workflows (not used by the default entrypoint). |
 | `CADDY_CONFIG_DIR` | `/etc/caddy/config.d` | Directory for injected site fragments (`*.caddy`). The Caddyfile uses `import {$CADDY_CONFIG_DIR}/*.caddy` (with this default). |
 | `CADDY_SERVERS_DIR` | `/etc/caddy/servers.d` | Fragments merged into the **global options** `{ }` block (`import {$CADDY_SERVERS_DIR}/*.caddy`), after `order coraza_waf after rate_limit`. |
