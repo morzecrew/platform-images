@@ -30,6 +30,7 @@ with_stub() {
 mkdir -p /tmp/stub && printf "#!/bin/sh\necho \"args: \$*\"\nenv\n" >/tmp/stub/flyway
 chmod +x /tmp/stub/flyway
 printf "jdbc:postgresql://db/app\n" >/tmp/url && printf "app\n" >/tmp/user && printf "s3cret\n" >/tmp/pw
+printf "pass\377" >/tmp/notutf8 && head -c 65537 /dev/zero | tr "\000" a >/tmp/big
 PATH=/tmp/stub:$PATH exec /usr/local/bin/flyway-entrypoint migrate -X'
 }
 out=$(with_stub -e FLYWAY_URL_FILE=/tmp/url -e FLYWAY_USER_FILE=/tmp/user \
@@ -42,10 +43,12 @@ done
 echo "${out}" | grep -q "^FLYWAY_[A-Z]*_FILE=" && { echo "FAIL: a _FILE variable reached flyway"; echo "${out}"; exit 1; }
 echo "FLYWAY_*_FILE: resolved, file wins over plain, arguments passed through"
 
-for path in /nonexistent /tmp; do
-	if out=$(with_stub -e FLYWAY_PASSWORD=plain -e "FLYWAY_PASSWORD_FILE=${path}" 2>&1); then
-		echo "FAIL: FLYWAY_PASSWORD_FILE=${path} ran flyway"; echo "${out}"; exit 1
-	fi
+# 78 (EX_CONFIG) and the same checks as python-distroless's envfile-exec.
+for path in /nonexistent /tmp /tmp/notutf8 /tmp/big; do
+	rc=0
+	out=$(with_stub -e FLYWAY_PASSWORD=plain -e "FLYWAY_PASSWORD_FILE=${path}" 2>&1) || rc=$?
+	[ "${rc}" = 78 ] ||
+		{ echo "FAIL: FLYWAY_PASSWORD_FILE=${path} exited ${rc}, want 78"; echo "${out}"; exit 1; }
 	echo "${out}" | grep -q "FLYWAY_PASSWORD_FILE is set to '${path}'" ||
 		{ echo "FAIL: refusal does not name FLYWAY_PASSWORD_FILE"; echo "${out}"; exit 1; }
 	echo "refused: FLYWAY_PASSWORD_FILE=${path}"

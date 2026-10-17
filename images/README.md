@@ -133,9 +133,12 @@ Note the limit of what this buys: a secret supplied through the plain variable i
 still visible in `docker inspect` output and crash dumps. The `_FILE` form is
 what avoids that, and an image README says so where it matters.
 
-A `<NAME>_FILE` that is missing, unreadable or not a regular file aborts. A
-directory counts: it is what Compose leaves at the mount point when a secret's
-source file does not exist.
+A `<NAME>_FILE` that is missing, unreadable, not a regular file, over 64 KiB,
+not UTF-8 or holding a NUL byte aborts with exit 78 (`EX_CONFIG`), naming the
+variable and the path but never the content. A directory counts: it is what
+Compose leaves at the mount point when a secret's source file does not exist.
+`valkey`, `flyway` and the application launcher below share these checks and
+this exit code; `postgres` keeps upstream's own `_FILE` handling.
 
 #### Application images
 

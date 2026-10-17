@@ -575,6 +575,42 @@ envconf_refuse_newline() {
 	fi
 }
 
+# The refusals below exit 78 (EX_CONFIG), not envconf_die's 1, and check what
+# python-distroless's envfile-exec checks: one contract for a secret file,
+# whichever image reads it.
+_envconf_secret_die() {
+	echo "FATAL: $*" >&2
+	exit 78
+}
+
+# RFC 3629 UTF-8, the same rule Python's decoder applies: no overlong forms,
+# no surrogates, nothing above U+10FFFF. Judged on byte values from od, so no
+# awk's or regex engine's idea of the locale is involved.
+_envconf_is_utf8() {
+	od -An -v -tu1 <"$1" | awk '
+		{
+			for (i = 1; i <= NF; i++) {
+				b = $i + 0
+				if (need) {
+					if (b < lo || b > hi) { bad = 1; exit }
+					lo = 128; hi = 191; need--
+				} else if (b < 128) {
+					continue
+				} else if (b >= 194 && b <= 223) {
+					need = 1; lo = 128; hi = 191
+				} else if (b >= 224 && b <= 239) {
+					need = 2; lo = (b == 224) ? 160 : 128; hi = (b == 237) ? 159 : 191
+				} else if (b >= 240 && b <= 244) {
+					need = 3; lo = (b == 240) ? 144 : 128; hi = (b == 244) ? 143 : 191
+				} else {
+					bad = 1; exit
+				}
+			}
+		}
+		END { exit (bad || need) ? 1 : 0 }
+	'
+}
+
 envconf_secret() {
 	local name="$1"
 	local file_var file value
@@ -586,19 +622,28 @@ envconf_secret() {
 
 	if [ -n "${file}" ]; then
 		[ -r "${file}" ] ||
-			envconf_die "${file_var} is set to '${file}', which is not readable"
+			_envconf_secret_die "${file_var} is set to '${file}', which is not readable"
 		# A directory passes -r, `cat` on it fails inside the substitution
 		# below, and the secret came back empty with status 0.
 		[ -f "${file}" ] ||
-			envconf_die "${file_var} is set to '${file}', which is not a regular file"
+			_envconf_secret_die "${file_var} is set to '${file}', which is not a regular file"
+		# A secret is a password or a key, not a payload; 64 KiB is envfile-exec's
+		# limit, and checked first, so nothing below reads a huge file.
+		[ "$(wc -c <"${file}")" -le 65536 ] ||
+			_envconf_secret_die "${file_var} is set to '${file}', which is larger than 65536 bytes"
 		# A command substitution drops NUL bytes, which would change the secret
 		# without a word. Counted rather than matched: no shell can hold one.
 		[ "$(tr -d '\000' <"${file}" | wc -c)" -eq "$(wc -c <"${file}")" ] ||
-			envconf_die "${file_var} is set to '${file}', which contains a NUL byte"
+			_envconf_secret_die "${file_var} is set to '${file}', which contains a NUL byte"
+		# The value lands in an environment or a config file that a program
+		# decodes as text, and what it does with bytes that are not text is
+		# its own business: refused here rather than found at the database.
+		_envconf_is_utf8 "${file}" ||
+			_envconf_secret_die "${file_var} is set to '${file}', which is not valid UTF-8"
 		# Strip a single trailing newline: every editor adds one and no secret
 		# wants it. Embedded newlines are the file's business, not ours.
 		value=$(cat "${file}" && printf X) ||
-			envconf_die "${file_var} is set to '${file}', which could not be read"
+			_envconf_secret_die "${file_var} is set to '${file}', which could not be read"
 		value=${value%X}
 		value=${value%"$_ENVCONF_NL"}
 		printf '%s' "${value}"

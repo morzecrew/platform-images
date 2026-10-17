@@ -18,9 +18,10 @@ environment and has no `_FILE` variant of its own. The image's entrypoint adds
 one for those three, following the repo's [secrets rule](../README.md#secrets):
 `FLYWAY_PASSWORD_FILE=/run/secrets/db_password` sets `FLYWAY_PASSWORD` to the
 file's content (one trailing newline stripped), wins over a plain
-`FLYWAY_PASSWORD`, and is removed before Flyway starts. A missing, unreadable or
-non-regular file aborts with exit 1 and a message naming the variable; it never
-falls back to the plain value.
+`FLYWAY_PASSWORD`, and is removed before Flyway starts. A file that is missing,
+unreadable, not a regular file, over 64 KiB, not UTF-8 or holding a NUL byte
+aborts with exit 78 and a message naming the variable, the same contract as
+`python-distroless`'s `envfile-exec`; it never falls back to the plain value.
 
 Every argument goes to `flyway` unchanged, and `CMD` is upstream's `-?`, so
 `migrate`, `info` and the rest work as they do on the official image. One line
