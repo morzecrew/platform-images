@@ -156,19 +156,26 @@ instead.
 `/data`, declared as a volume. `dir` is denylisted, so it cannot be pointed
 elsewhere by environment — moving it would silently strand existing data.
 
+**Valkey does not read data written by a newer version.** `:9.2` was built on
+`9.2.0-rc1`, which writes RDB format 81. `:9.1` cannot load that, with
+`VALKEY_PERSISTENCE` set to `rdb` or `aof`: it exits with `Can't handle RDB
+format version 81`. A deployment with data persisted by `:9.2` stays on `:9.2`
+or starts `:9.1` on an empty volume. A cache with persistence `off` can move
+freely.
+
 ## Usage
 
 ```yaml
 services:
   cache:
-    image: ghcr.io/morzecrew/valkey:9.2
+    image: ghcr.io/morzecrew/valkey:9.1
     environment:
       VALKEY_MAXMEMORY_PERCENT: "60"
     secrets: [valkey_password]
     mem_limit: 512m
 
   queue:
-    image: ghcr.io/morzecrew/valkey:9.2
+    image: ghcr.io/morzecrew/valkey:9.1
     environment:
       VALKEY_PERSISTENCE: aof
       VALKEY_MAXMEMORY_POLICY: noeviction   # required; see the refusals
