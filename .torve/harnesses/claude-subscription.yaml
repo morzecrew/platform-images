@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schemas/harness.json
+# Claude Code in torve's claude seat image. The image's own `/opt/torve/run`
+# starts claude; its definition is copied under `.torve/sandbox/claude/` from
+# torve's `sandboxes/claude/`, so `torve doctor` can compare the two.
+adapter: subscription
+image: claude-sandbox:2.1.283
+equip_root: ~/.claude/skills
+kinds: [skill, plugin, mcp, hook, agent]
+env:
+  # acceptEdits denies every other Bash call, silently, in print mode.
+  CLAUDE_PERMISSION_MODE: bypassPermissions
+  BASH_MAX_OUTPUT_LENGTH: "20000"
+  MAX_MCP_OUTPUT_TOKENS: "5000"
+  CLAUDE_TOOLS: Bash,Read,Edit,Write,Glob,Grep
+api: [anthropic]

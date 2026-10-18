@@ -1,0 +1,10 @@
+# yaml-language-server: $schema=../schemas/agent.json
+role: implement
+
+equipment:
+- kind: skill
+  source: torve:working-rules
+- kind: skill
+  source: torve:flag-dont-flip
+- kind: hook
+  source: torve:hooks/implement

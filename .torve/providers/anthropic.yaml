@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=../schemas/provider.json
+# Anthropic on a Claude Code subscription token. `key_env` names the host
+# variable, never the token; the runner tunnels through the host's https_proxy.
+name: anthropic
+key_env: CLAUDE_CODE_HH_OAUTH_TOKEN
+via_proxy: true
+
+routes:
+  anthropic:
+    base_url: https://api.anthropic.com
+
+models:
+  claude-opus-5-5:
+    context_window: 200000
+    max_tokens: 32000

@@ -1,0 +1,5 @@
+# yaml-language-server: $schema=../schemas/harness.json
+# The harness that runs nothing: the planner seat is on it, since contracts
+# come from `torve plan`. It names an adapter and no command, which is the
+# one combination `fake` permits.
+adapter: fake

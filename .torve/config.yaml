@@ -1,0 +1,72 @@
+# yaml-language-server: $schema=schemas/config.json
+# platform-images under torve: the seats bloomery runs, the lab store, and a
+# pull request per document that a person merges.
+schema_version: 1
+engine: "0.4.0"
+
+runtime:
+  adapter: docker
+  image: platform-gates-sandbox:1   # .torve/sandbox/platform-gates/
+  sandbox_timeout: 2700      # strictly outside agent_timeout, refused otherwise
+  agent_timeout: 2200
+  network: host              # this host's egress runs through a local proxy
+
+store:
+  adapter: postgres
+  dsn_env: TORVE_PG_DSN      # the name of the variable, never the DSN itself
+  lease_for: 60
+  max_run_duration: 7200
+
+unmeasured_images: allow     # the seat images are torve's, measured over torve's work
+
+poison_ceiling: 3
+
+reap:
+  stale_after: 600
+
+promotion:
+  landing: pull_request
+  auto_merge: true
+  quiet_window: 30
+  unit: document
+
+scm:
+  repo: morzecrew/platform-images
+  open_pr: true              # credentials are `gh`'s on the host
+
+tiers:
+  planner: {harness: fake}
+  executor:
+    harness: claude-subscription
+    model: deepseek-v4.1-flash
+    provider: modelstudio
+    dialect: anthropic
+    reasoning: medium
+  reviewer:
+    harness: claude-subscription
+    profile: review
+    model: claude-opus-5-5
+    provider: anthropic
+
+broker:
+  adapter: local
+  mode: endpoint
+  cost_tolerance: 0.25
+
+providers:
+  default: [anthropic, modelstudio]
+  repositories: {}
+  never_send: []
+
+review:
+  "on": [task_gated]
+  blocks_at: blocker         # findings are recorded; only a blocker stops
+
+threads:
+  enabled: true
+  bots: [coderabbitai, codeant-ai]
+  rounds_per_pass: 1
+  sources: [forge, record]
+
+vcs:
+  signing_key: /home/misery7100/.ssh/id_github

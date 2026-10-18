@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=schemas/gates.json
+schema_version: 1
+
+# The smoke and extension tests drive containers, and a sandbox has no Docker
+# daemon until torve S-0111. Until then the shell gates are the checks that
+# need none, and `.github/workflows/bake.yaml` stays the build's only judge.
+tests:
+  patterns:
+    - "shared/test/**"
+    - "images/*/smoke.sh"
+    - "images/*/test-*.sh"
+
+gates:
+  - name: scope
+    run: "@scope"
+    state: blocking
+    origin: structural
+  - name: secrets
+    run: "@secrets"
+    state: blocking
+    origin: structural
+  - name: no-test-tampering
+    run: "@no-test-tampering"
+    state: blocking
+    origin: structural
+  - name: decisions-reported
+    run: "@decisions-reported"
+    state: blocking
+    origin: structural
+  # The env-config helper's own suite, which bake.yaml runs first.
+  - name: env-helper
+    run: "sh shared/test/run.sh -v"
+    input: worktree
+    state: blocking
+    origin: structural
+    timeout: 60
+  # Errors only: at warning and below the base is already red.
+  - name: shellcheck
+    run: "git ls-files -z '*.sh' | xargs -0 shellcheck -S error"
+    input: worktree
+    state: blocking
+    origin: structural
+    timeout: 60
+  - name: hadolint
+    run: "git ls-files -z '*Dockerfile' | xargs -0 hadolint -t error"
+    input: worktree
+    state: blocking
+    origin: structural
+    timeout: 60
+  # Every target resolves: variables, inheritance and contexts.
+  - name: bake-definitions
+    run: "docker buildx bake --print >/dev/null"
+    input: worktree
+    state: blocking
+    origin: structural
+    timeout: 60
+  - name: acceptance
+    run: "@task.acceptance"
+    state: blocking
+    origin: structural
+    timeout: 900
