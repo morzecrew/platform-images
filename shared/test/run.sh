@@ -384,11 +384,42 @@ for bytes in '\200' 'ab\303' '\300\257' '\355\240\200' '\364\220\200\200'; do
 	expect_contains "  ...says why" "${out}" "not valid UTF-8"
 done
 
+# Several defects at once get the reason envfile-exec gives: size, then NUL,
+# then UTF-8, wherever in the file each one is.
+for bytes in '\377' '\303('; do
+	printf "${bytes}pass\000" >"${TMP}/secret-nul-bad-utf8"
+	out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-nul-bad-utf8" \
+		run "a _FILE with ${bytes} before a NUL aborts" 78 'envconf_secret VALKEY_PASSWORD')
+	expect_contains "  ...naming the NUL" "${out}" "NUL"
+done
+{ printf '\000\377'; cat "${TMP}/secret-64k"; } >"${TMP}/secret-64k-nul"
+out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-64k-nul" \
+	run "a _FILE over 64 KiB with a NUL aborts" 78 'envconf_secret VALKEY_PASSWORD')
+expect_contains "  ...naming the size" "${out}" "larger than 65536 bytes"
+
 # Kubernetes secret volumes are symlinks into ..data.
 ln -s "${TMP}/secret" "${TMP}/secret-link"
 out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-link" \
 	run "a _FILE symlink is followed" 0 'envconf_secret VALKEY_PASSWORD')
 expect_equals "  ...value" "${out}" "from-file"
+
+# A secret rotated while it is being read, as the kubelet swaps ..data: this od
+# reads the file, then replaces it with bytes the checks refuse. What comes
+# back must be what was checked; a second open of the path returns the swap.
+printf 'before-rotation' >"${TMP}/secret-rotated"
+mkdir "${TMP}/shim"
+cat >"${TMP}/shim/od" <<EOF
+#!/bin/sh
+$(command -v od) "\$@"
+rc=\$?
+printf 'after\000\377' >"${TMP}/secret-rotated"
+exit \$rc
+EOF
+chmod +x "${TMP}/shim/od"
+out=$(PATH="${TMP}/shim:${PATH}" VALKEY_PASSWORD_FILE="${TMP}/secret-rotated" \
+	run "a _FILE rotated mid-read returns the bytes that were checked" 0 \
+	'envconf_secret VALKEY_PASSWORD | od -An -c')
+expect_equals "  ...value" "${out}" "$(printf 'before-rotation' | od -An -c)"
 
 # --- summary --------------------------------------------------------------
 
