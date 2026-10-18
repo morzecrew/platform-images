@@ -169,7 +169,45 @@ trap - EXIT
 
 echo "Validating Caddy config..."
 caddy fmt --overwrite /etc/caddy/Caddyfile
-caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+config=$(caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile)
+
+# Every WAF `Include` in the adapted config, fragments included, one per line.
+# The directives are a JSON string, so a line break in them is a literal `\n`.
+waf_includes() {
+	printf '%s' "$1" | grep -oE '"directives":"([^"\\]|\\.)*"' | awk '
+		{
+			n = split($0, line, /\\n/)
+			for (i = 1; i <= n; i++) {
+				s = line[i]
+				sub(/^"directives":"/, "", s)
+				sub(/^(\\t| )+/, "", s)
+				if (match(s, /^[Ii][Nn][Cc][Ll][Uu][Dd][Ee](\\t| )+/)) {
+					s = substr(s, RLENGTH + 1)
+					sub(/[ "\\].*$/, "", s)
+					print s
+				}
+			}
+		}
+	'
+}
+
+# shellcheck disable=SC2086 # expanding the glob is the point
+glob_matches() {
+	set -- $1
+	[ -e "$1" ]
+}
+
+# Coraza skips an Include that matches no file, logs `empty glob result` as a
+# warning, and runs without those rules: that is how this image served with no
+# CRS at all (EXECUTION-LOG D-068). overrides/ ships a placeholder, so the
+# image's own block always matches.
+while IFS= read -r pattern; do
+	[ -n "${pattern}" ] || continue
+	glob_matches "${pattern}" ||
+		envconf_die "the WAF includes ${pattern}, which matches no file. Coraza would skip it and run without those rules. A mounted directory needs at least one .conf file; a comment-only one will do."
+done <<EOF
+$(waf_includes "${config}")
+EOF
 
 # The WAF buffers a body to inspect it and refuses one past a limit of its own.
 # Set apart from CADDY_REQUEST_BODY_MAX_SIZE, that limit was a second, smaller

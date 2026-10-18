@@ -73,6 +73,7 @@ COPY --from=crs /opt/coraza /opt/coraza
 COPY --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 
 COPY rootfs/waf/ /opt/coraza/config/
+COPY rootfs/overrides/ /opt/coraza/overrides/
 COPY rootfs/snippets/ /etc/caddy/snippets/
 COPY rootfs/Caddyfile /etc/caddy/Caddyfile
 COPY rootfs/entrypoint.sh /entrypoint.sh

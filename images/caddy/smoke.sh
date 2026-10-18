@@ -107,7 +107,9 @@ echo "summary: one row for each of ${#CURATED[@]} curated variables"
 # RFC 0001 §6: the whole summary appears before the server's first log line.
 # Caddy logs JSON; the summary is plain text on stderr.
 last_summary=$(grep -n '^\[envconf\]' <<<"${logs}" | tail -1 | cut -d: -f1)
-first_caddy=$(grep -n '^{"level"' <<<"${logs}" | head -1 | cut -d: -f1)
+# -m1, not `| head -1`: under pipefail, grep killed by SIGPIPE once its output
+# passes one write fails the script with 141.
+first_caddy=$(grep -n -m1 '^{"level"' <<<"${logs}" | cut -d: -f1)
 [ -n "${first_caddy}" ] || { echo "FAIL: no Caddy log line found at all"; exit 1; }
 [ "${last_summary}" -lt "${first_caddy}" ] ||
 	{ echo "FAIL: summary line ${last_summary} comes after Caddy's first log line ${first_caddy}"; exit 1; }
@@ -294,6 +296,23 @@ for probe in "id=1%27%20OR%20%271%27%3D%271" "q=%3Cscript%3Ealert(1)%3C%2Fscript
 	[ "${code}" = "403" ] || { echo "FAIL: WAF let ?${probe} through with ${code}, expected 403"; exit 1; }
 done
 echo "waf: CRS refuses an SQLi and an XSS probe, a plain request passes"
+
+# That warning was the only sign, and it cannot stand out if every start logs
+# one: the empty overrides directory did, until it shipped a placeholder.
+expect_not_in "a default start logs no empty glob" "$(logs_of)" "empty glob result"
+
+# An Include that matches nothing refuses to start, wherever it is: the image's
+# own block with overrides/ mounted empty, and a fragment with the old include.
+mkdir -p "${WORK}/empty"
+refuse "an empty overrides directory" -v "${WORK}/empty:/opt/coraza/overrides:ro,Z"
+expect_in "refusal names the glob" "$(cat "${REFUSE_OUT}")" "/opt/coraza/overrides/*.conf"
+mkdir -p "${WORK}/old-include"
+# shellcheck disable=SC2016 # the backticks are Caddyfile's, not the shell's
+printf 'handle /old/* {\n\tcoraza_waf {\n\t\tdirectives `\n\t\tInclude /opt/coraza/owasp-crs/rules/*.conf\n\t\t`\n\t}\n\trespond "old" 200\n}\n' \
+	>"${WORK}/old-include/10-old.caddy"
+refuse "a fragment including no file" -v "${WORK}/old-include:/etc/caddy/config.d:ro,Z"
+expect_in "refusal names the glob" "$(cat "${REFUSE_OUT}")" "/opt/coraza/owasp-crs/rules/*.conf"
+echo "waf: an Include matching no file refuses to start"
 
 # --- 10. the WAF's body limit is CADDY_REQUEST_BODY_MAX_SIZE -----------------
 
