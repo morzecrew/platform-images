@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=../schemas/provider.json
+# The ModelStudio token plan, as torve's own seats use it.
+name: modelstudio
+key_env: MODELSTUDIO_CODING_API_KEY
+via_proxy: false
+request_timeout_s: 600
+stream_idle_timeout_s: 120
+
+routes:
+  openai:
+    base_url: https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    compat:
+      thinking_format: deepseek
+  anthropic:
+    base_url: https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic
+
+models:
+  qwen3.8-flash:
+    context_window: 1000000
+    max_tokens: 65536
+    reasoning: [none, minimal, low, medium, high, xhigh, max]
+  deepseek-v4-flash-0731:
+    reasoning: [none, minimal, low, medium, high, xhigh, max]
+  deepseek-v4.1-flash:
+    reasoning: [minimal, low, medium, high, xhigh, max, ultra]
