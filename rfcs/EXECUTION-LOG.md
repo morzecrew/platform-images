@@ -3235,3 +3235,18 @@ were read from the code and reproduced here before fixing.
 - `coraza.conf` sets `SecRequestBodyNoFilesLimit 524288`, yet a 600 KB
   urlencoded body and a 600 KB JSON body both passed. It is not enforced as
   written.
+
+## Review round 1 — PR #69, 2026-10-18
+
+| ID | Finding | Class | Resolution |
+|---|---|---|---|
+| R-51 | **`envconf_secret` opened the path once per check and once more to read it**: a file replaced in between, as the kubelet swaps `..data` on a secret rotation, returned bytes no check had seen. | — | Fixed: one `od -tu1 -N 65537` read of the file; the size, NUL and UTF-8 checks and the value all come from it, and the value is rebuilt with `printf` octal escapes. A test whose `od` rotates the file after reading it fails on the old code under bash, dash and busybox. A file swapped for a FIFO after the `-f` check still blocks, since `sh` cannot open without blocking; whoever can do that already chooses the secret. |
+| R-52 | **`valkey:9.2` is a release candidate**: upstream's `9.2-alpine` and `9.2.0-rc1-alpine` share a digest, and the published image reports `VALKEY_VERSION=9.2.0-rc1`. The latest stable is 9.1.2. Renovate pinned 9.2 in #51; this wave only matched the `ARG` default and README to it. | — | Acknowledged, separate change: pinning 9.1 also needs a Renovate rule, or the next run proposes 9.2 again. |
+| R-53 | **The README's tuning example reuses rule id 900000**, which `crs-setup.conf` might define. | — | Refuted: CRS v4.30.0's `crs-setup.conf.example` has it commented out, as its template for exactly this setting, and no loaded file defines it. With the example mounted, Caddy starts and `?a=%2525` gets 403 (920230, paranoia level 2); without it, the request passes. |
+
+`shared/test/run.sh` now has 168 cases on bash and busybox, 166 on dash. A
+mutant dropping the size, NUL or UTF-8 check, moving the limit by one byte,
+reporting the first defect instead of envfile-exec's order, or reading the
+value from the path again fails it. Dropping `-N 65537` passes: the bound only
+shows as time spent reading a huge file. The `valkey` and `flyway` smoke tests
+pass on the rebuilt images.
