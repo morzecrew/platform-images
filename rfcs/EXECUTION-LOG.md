@@ -3250,3 +3250,40 @@ reporting the first defect instead of envfile-exec's order, or reading the
 value from the path again fails it. Dropping `-N 65537` passes: the bound only
 shows as time spent reading a huge file. The `valkey` and `flyway` smoke tests
 pass on the rebuilt images.
+
+# Wave 13 · Valkey back to a stable release
+
+Branch `fix/valkey-stable-pin`, R-52's separate change.
+
+**Drift count: 1**: D-073.
+
+## D-073 — Renovate read upstream's `X.Y` alias as a release
+
+- **Seen:** upstream tags `9.2-alpine` as soon as `9.2.0-rc1-alpine` exists,
+  with the same digest, and the annotation's `^(?<version>.+)-alpine$` turned
+  that alias into version 9.2. Renovate proposed it in #51 and it merged, so
+  `valkey:9.2` has run a release candidate since 2026-09-17.
+- **Built:** bake, the Dockerfile's `ARG` default and the README pin 9.1
+  (9.1.2). The annotation now reads versions from patch tags only,
+  `^(?<version>\d+\.\d+)\.\d+-alpine$`, so a minor appears once it has a stable
+  `X.Y.Z` release. The value keeps its `X.Y` form, and so does the published
+  tag.
+- **Downgrade:** 9.1.2 cannot read what 9.2.0-rc1 persisted. With
+  `VALKEY_PERSISTENCE=rdb` or `aof`, `:9.1` on a volume `:9.2` wrote exits with
+  `Can't handle RDB format version 81`. The README says so under "Data".
+  `:9.2` stays published and is no longer rebuilt.
+- **Class:** `drift`.
+
+### Verified
+
+- Renovate 44.167.1, `--platform=local`, lookup only: from 9.1 the old
+  annotation proposes 9.2 and the new one nothing; from 9.0 the new one
+  proposes 9.1.
+- `valkey` smoke test passes on 9.1.2.
+- The downgrade above, with both persistence modes.
+
+### Residue
+
+- When 9.2.0 ships, Renovate proposes 9.2 and the `:9.2` tag is rebuilt on the
+  stable release. Whether 9.2.0 reads 9.2.0-rc1's files is upstream's promise,
+  not tested here.
