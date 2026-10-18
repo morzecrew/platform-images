@@ -3250,3 +3250,42 @@ reporting the first defect instead of envfile-exec's order, or reading the
 value from the path again fails it. Dropping `-N 65537` passes: the bound only
 shows as time spent reading a huge file. The `valkey` and `flyway` smoke tests
 pass on the rebuilt images.
+
+# Wave 14 · An empty WAF include stops the container
+
+Branch `fix/caddy-crs-guard`. P1 of wave 12 also asked to consider failing
+startup when the CRS glob matches nothing; wave 12 shipped the smoke test and
+left that open.
+
+**Drift count: 0**.
+
+## D-074 — Every WAF `Include` has to match a file
+
+- **Seen:** after wave 12 a default start still logged one `empty glob result`,
+  from the empty `/opt/coraza/overrides/`. That warning was the only sign of
+  D-068, and it cannot stand out when every start logs one.
+- **Built:** `overrides/` ships `00-placeholder.conf`, comment-only. The
+  entrypoint reads the `Include` lines of every WAF block in the adapted config,
+  fragments included, and refuses to start, naming the glob, when one matches no
+  file. It checks the config, not the CRS directory: D-068's files were present
+  and the include missed them.
+- **Not built:** a check of the CRS directory alone, which D-068 would have
+  passed.
+- **Cost:** a directory mounted over `overrides/` with no `.conf` in it now
+  stops the container. The refusal and the README say to add a comment-only
+  file.
+- **Also:** `smoke.sh` read Caddy's first log line with `grep | head -1` under
+  `pipefail`, which exits 141 once grep's output passes one write. It failed
+  that way here, before any WAF case ran; `grep -m1` now.
+- **Class:** `spec-gap`.
+
+### Verified
+
+- `caddy` smoke test: a default start logs no `empty glob result`; an empty
+  directory mounted over `overrides/`, and a fragment whose WAF block includes
+  `/opt/coraza/owasp-crs/rules/*.conf` (D-068's include), each refuse to start
+  naming the glob. The published `caddy:2.11.7` logs the warning and keeps
+  running in both cases.
+- The `Include` extraction agrees under busybox awk and GNU awk on the adapted
+  config and on directives with quoted `SecRule` arguments, a commented-out
+  `Include`, a lowercase `include` and two WAF blocks.
