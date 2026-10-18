@@ -272,9 +272,12 @@ target "npm-builder" {
 
 # ....................... #
 
-# renovate: datasource=docker depName=valkey/valkey extractVersion=^(?<version>.+)-alpine$
+# Versions come from patch tags only: upstream points `X.Y-alpine` at a release
+# candidate before X.Y.0 ships (`9.2-alpine` was `9.2.0-rc1-alpine`), so a
+# minor appears here once it has a stable release.
+# renovate: datasource=docker depName=valkey/valkey extractVersion=^(?<version>\d+\.\d+)\.\d+-alpine$
 variable "VALKEY_VERSION" {
-  default = "9.2"
+  default = "9.1"
 }
 
 target "valkey" {
