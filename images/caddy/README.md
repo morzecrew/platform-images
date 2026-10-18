@@ -29,7 +29,7 @@ Image: `ghcr.io/morzecrew/caddy:2.11.7`.
 - Writable locations (typical volume mounts): **`/config`**, **`/data`**, **`/srv`** (e.g. static assets).
 - **`/docker-entrypoint.d/*.sh`** — optional shell hooks sourced in lexical order before config validation (same idea as other official images).
 - **`gettext`** is installed if you want `envsubst`-style templating in those hooks or sidecar steps; the stock entrypoint does not rewrite the Caddyfile.
-- **Coraza** loads `/opt/coraza/config/coraza.conf`, the body limit, CRS's `crs-setup.conf` (upstream's template, unmodified), **`/opt/coraza/overrides/*.conf`** (optional; mount or bake files there), then the CRS rules in `/opt/coraza/owasp-crs/`. See [WAF](#waf-coraza-and-owasp-crs).
+- **Coraza** loads `/opt/coraza/config/coraza.conf`, the body limit, CRS's `crs-setup.conf` (upstream's template, unmodified), **`/opt/coraza/overrides/*.conf`** (a placeholder ships there; add files beside it), then the CRS rules in `/opt/coraza/owasp-crs/`. See [WAF](#waf-coraza-and-owasp-crs).
 
 ## Configuration
 
@@ -226,6 +226,8 @@ SecRule REQUEST_URI "@beginsWith /v1/files" "id:1000,phase:1,pass,t:none,nolog,c
 ```
 
 That second one is worth knowing about: CRS refuses a request carrying `Expect` (rule 920450), and curl sends `Expect: 100-continue` with any body over 1 MiB. `curl -H 'Expect:'` drops it.
+
+**An `Include` that matches no file stops the container.** Coraza would skip it with an `empty glob result` warning and run without those rules, which is how the D-068 images served with no CRS. The entrypoint checks every WAF `Include` in the adapted config, fragments included, and refuses to start naming the glob. `overrides/` ships `00-placeholder.conf` for this reason: mount single files beside it, or mount a directory holding at least one `.conf`, even a comment-only one.
 
 **The body limit** is `CADDY_REQUEST_BODY_MAX_SIZE`, for the WAF too. The WAF has to refuse an oversized body itself: one that runs into `request_body`'s cap while the WAF is reading it comes back as `500` rather than `413`. So the entrypoint sets the WAF's limit from the variable, and prints it before Caddy starts:
 
