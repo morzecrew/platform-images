@@ -1,0 +1,111 @@
+# yaml-language-server: $schema=../../schemas/document.json
+id: S-0001
+title: Standing decisions
+kind: convention
+status: draft
+implementation: complete
+depends_on: []
+informed_by: []
+supersedes: []
+superseded_by: null
+owner: Lev Litvinov
+schema_version: 4
+summary: |-
+  The rules platform-images is governed by today, read from its RFCs, its execution log and the tree, as rows torve can hand a task.
+
+  Every row is ASSUMED until the owner grades it. Each row's rationale names its source and the grade that source gave it. The last question lists the rows whose RFC grade was LOCKED and whose boundary the history shows defended.
+motivation: >-
+  torve hands a task the rows of accepted documents, graded and with paths. This repository's
+  decisions live in the decision tables of nine RFCs and in a 3,300-line execution
+  log, which torve cannot read as rows. A task minted today inherits nothing, and
+  the silence check has no paths to watch.
+current_state: >-
+  `rfcs/` at 9c0d6f7: 0001, 0002, 0003, 0004 and 0006 complete, 0009 in progress,
+  0005 and 0007 drafts, and 0008 superseded. Each has a `| # | Grade | Decision |`
+  table. `rfcs/EXECUTION-LOG.md` records every departure from those tables, wave by
+  wave. Its classes are discovery, spec-gap, drift and irreducible, and each entry
+  carries a proposed row the author ratifies by merging. Waves 10 to 14 have no reconciliation
+  table, so what they settled is held in the tree with no RFC row. torve's gates check
+  what needs no Docker daemon. `torve survey --last 40` replays the last 40 landings,
+  and none fires a gate.
+goals: |-
+  - Every rule an agent editing this tree must respect, as a row with the narrowest paths that hold it.
+  - The RFC rows that govern today's tree carried over, with their source and grade named.
+  - What waves 10 to 14 settled without a row, put in front of the owner.
+non_goals: |-
+  - Grading: every row is ASSUMED, and LOCKED is the owner's call (Q-7).
+  - Retiring `rfcs/` or rewriting its tables: the RFCs stay the record of how each design was reached.
+  - The draft RFCs 0005 and 0007, and the superseded 0008 except its Python-pair coupling (D-22).
+  - Phasing: this document governs; work goes in later documents.
+design:
+  - key: sources
+    md: >-
+      A row's rationale cites its source as `RFC NNNN row N`, meaning that RFC's decision
+      table, which the RFCs also call "decision N". It cites an execution-log entry
+      by the log's own id with the hyphen dropped: `D073` is the log's departure numbered
+      073 and `A48` its self-audit entry 48. torve reads a hyphenated `D-n` or `A-n`
+      as this document's own row or amendment. The log's review (`R-n`) and earlier-wave
+      (`W-n`) ids keep their hyphen. A row whose RFC grade differs from what the tree
+      holds says so.
+  - key: checks
+    md: |-
+      The checks a row can name today are the ones a sandbox runs without a daemon:
+      - `sh shared/test/run.sh -v`, the env-config helper's suite;
+      - `docker buildx bake --print`, which resolves the bake file;
+      - `python3 .agents/skills/rfc-writer/scripts/rfc_index.py check`.
+
+      The smoke and extension tests build and run images. They become checks when torve's gates sandbox gets a Docker daemon.
+tests: >-
+  None: this document records what the tree already holds, and its checks are the
+  gates the repository already runs.
+docs: ''
+out_of_scope: |-
+  - The drafts RFC 0005 (OpenTelemetry Collector) and RFC 0007 (ClickHouse), which `images/README.md` records as refused on 2026-08-12.
+  - Dated-tag retention (RFC 0002 §8), which no row owns.
+risks: >-
+  A row carried from an RFC may say what the RFC said while the tree has moved on.
+  Where the tree and the RFC disagree, the row states the tree and its rationale names
+  the disagreement; Q-1 to Q-6 are the ones that need the owner.
+questions:
+  - id: Q-1
+    text: >-
+      RFC 0001 row 4 (LOCKED) says `_FILE` covers every secret, while row 1 leaves
+      `POSTGRES_PASSWORD` to upstream. The tree holds the narrowed form (D-16): image-owned
+      and declared names only. Self-audit entry A21 has asked the author to narrow
+      row 4 since 2026-08-17. Narrow it?
+  - id: Q-2
+    text: >-
+      `ALTER SYSTEM` in postgres and `CONFIG REWRITE` in valkey form a fourth configuration
+      layer that RFC 0001 row 3 (LOCKED) does not name (W-3, D045). Should postgres
+      ship `-c allow_alter_system=off`?
+  - id: Q-3
+    text: >-
+      Waves 10 to 14 have no reconciliation table. Several outcomes are held in the
+      tree with no RFC row; this document carries them as D-9, D-10, D-16, D-22, D-23
+      and D-24: - arm64 everywhere (D057, D058); - the exit-78 `_FILE` contract (D063,
+      D065, D071); - the two-layer `build-uv-app` (D067); - patch-tag-only Renovate
+      (D073); - the WAF include guard (D074). Are these rows the reconciliation, or
+      does each wave still owe its table?
+  - id: Q-4
+    text: >-
+      RFC 0002 §4 and §8 still list arm64 as a non-goal, but the tree builds, smokes
+      and publishes both platforms (D-9). Amend the RFC text, or let D-9 stand as
+      the record?
+  - id: Q-5
+    text: |-
+      Some docs contradict the tree. When docs and tree disagree, which wins? - `images/README.md` calls the D018 redaction and the D022 aliases "proposed",
+        though the wave-5 reconciliation ratified them in #31.
+      - `images/README.md` says a missing `smoke.sh` goes silently unsmoked, though CI
+        now fails on it.
+      - The schedule comment in `publish.yaml` contradicts that file's concurrency block. The draft states the tree. Should those docs be fixed in a follow-up document?
+  - id: Q-6
+    text: >-
+      `rfcs/INDEX.md` lists 0005 and 0007 as drafts, while `images/README.md` records
+      both images as refused on 2026-08-12. Mark them refused?
+  - id: Q-7
+    text: |-
+      Which rows become LOCKED? The candidates are the rows whose RFC grade was LOCKED and whose boundary the execution log shows defended: - D-2, D-4, D-5, D-6 and D-8: admission, tags, attestations, the publish gate
+        and registry mutation;
+      - D-12 to D-15: naming channels, allowlist, collisions and precedence; - D-19 to D-21: the postgres extensions, the valkey defaults and the npm-builder
+        contract.
+      D-16 is LOCKED in its RFC but under review (Q-1). D-18 is LOCKED in its RFC but only held consistently, never defended.

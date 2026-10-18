@@ -1,0 +1,397 @@
+# yaml-language-server: $schema=../../schemas/decisions.json
+decisions:
+  - id: D-1
+    grade: ASSUMED
+    text: >-
+      An image is `images/<name>/` holding a `Dockerfile`, a `README.md`, a `smoke.sh`
+      and an optional `rootfs/`, and that directory is its build context. A variant
+      is a bake target over the same directory and shares its `smoke.sh`.
+    paths: [images/*/Dockerfile, images/*/README.md, images/*/smoke.sh]
+    consequence: >-
+      an image is read in one directory, and CI refuses an image with no smoke test
+    rationale: >-
+      README §Layout and images/README.md touchpoints 1 and 9; RFC 0004 row 18 (ASSUMED).
+      Defended: D042, where CI skipped variants and publish refused them; bake.yaml
+      now fails on a missing script. images/README.md still says "silently unsmoked"
+      and "omit rootfs, e.g. Flyway", both stale.
+  - id: D-2
+    grade: ASSUMED
+    text: >-
+      Admitting an image takes the nine touchpoints `images/README.md` lists. Every
+      target needs a `DESCRIPTIONS` entry, because the bake indexes it directly, and
+      `PACKAGES` and the `default` group are kept in step by hand.
+    paths:
+      - docker-bake.hcl
+      - .github/workflows/cleanup-images.yaml
+      - README.md
+      - images/README.md
+    consequence: >-
+      a target with no description fails every bake, and a package missing from `PACKAGES`
+      escapes cleanup
+    rationale: >-
+      RFC 0002 row 16 (LOCKED). Defended: R-4 (stale docs), R-25 (one description
+      wrong for two variants), A38 (a missing admissions row).
+  - id: D-3
+    grade: ASSUMED
+    text: >-
+      Versions live in `docker-bake.hcl`, where one variable feeds both an image's
+      tag and its build argument. A Dockerfile's `ARG` default copies the bake value
+      by hand.
+    paths: [docker-bake.hcl, images/*/Dockerfile]
+    consequence: >-
+      a version moves in one place for the published image, and a local `docker build`
+      lags until its default is moved too
+    rationale: >-
+      README §Layout; RFC 0004 row 17 and RFC 0009 row 9 (ASSUMED). Defended: D072,
+      where six `ARG` defaults and READMEs lagged; R-7 led to D041. Nothing syncs
+      the defaults.
+  - id: D-4
+    grade: ASSUMED
+    text: >-
+      Two tags are published per image: `:<version>`, which moves, and `:<version>-<yyyymmdd>-<run_id>.<run_attempt>`,
+      which does not and exists only when CI sets `BUILD_STAMP`. There is no `latest`,
+      and the docs call the digest the only true pin.
+    paths: [docker-bake.hcl, .github/workflows/publish.yaml, README.md]
+    consequence: >-
+      a consumer can pin a build that never changes, and a local build carries only
+      the moving tag
+    rationale: >-
+      RFC 0002 rows 1, 11 and 17 (LOCKED); row 6 superseded. Defended: D002 and then
+      D009, `run_id` alone, caught by both reviewers on #27. README still writes the
+      loose form `-<run>`.
+  - id: D-5
+    grade: ASSUMED
+    text: >-
+      Every target inherits `_attested`, written in list form, `attest = ["type=provenance,mode=max",
+      "type=sbom"]`, never in the shorthand. The attestations are described everywhere
+      as unsigned evidence.
+    paths: [docker-bake.hcl, README.md]
+    consequence: >-
+      every image carries max-mode provenance and an SBOM, and nobody reads them as
+      a signature
+    rationale: >-
+      RFC 0002 rows 2, 4 and 13 (LOCKED) and 15 (ASSUMED). Defended: row 13, where
+      the shorthand was silently dropped; R-45, where promotion now asserts a mode=max
+      `buildConfig` and an SPDX SBOM on each leg.
+  - id: D-6
+    grade: ASSUMED
+    text: >-
+      Each platform builds once on a native runner and pushes by digest, untagged.
+      It then pulls that digest and runs the context's `smoke.sh`. A promote job runs
+      `imagetools create` only after both legs pass and a dry-run index shows both
+      platforms with matching attestations. A target with no `smoke.sh` is refused
+      before anything builds.
+    paths: [.github/workflows/publish.yaml]
+    consequence: >-
+      no tag ever names an image that was not smoke-tested on its own platform
+    rationale: >-
+      RFC 0002 rows 10 and 20 (LOCKED); log D058. Defended: D010 rejected the OCI-layout
+      sketch; D060; R-45; R-46.
+  - id: D-7
+    grade: ASSUMED
+    text: >-
+      Publishing is CI's. `just publish` refuses unless `I_KNOW_THIS_IS_UNGATED=1`,
+      and `just push` only moves a tag that already exists.
+    paths: [justfile, README.md, images/README.md]
+    consequence: >-
+      a local publish cannot skip the smoke gate or the attestations by accident
+    rationale: >-
+      RFC 0002 row 22 (ASSUMED) and row 20's consequence. Defended: R-10, where the
+      docs still advertised the old publish (#28).
+  - id: D-8
+    grade: ASSUMED
+    text: >-
+      Publish and cleanup share `concurrency: ghcr-mutations` with `cancel-in-progress:
+      false`. Cleanup runs Monday 04:00 UTC and the uncached scheduled rebuild Monday
+      05:00 UTC. A failed scheduled rebuild comments on one reused issue.
+    paths: [.github/workflows/publish.yaml, .github/workflows/cleanup-images.yaml]
+    consequence: >-
+      the registry is never mutated by two workflows at once, and a broken weekly
+      rebuild is one issue, not a pile
+    rationale: >-
+      RFC 0002 row 21 (ASSUMED) and rows 3, 8 and 12 (LOCKED). Defended: R-9, where
+      separate groups left the cron offset covering one of four interleavings. publish.yaml's
+      schedule comment still says the offset is the only thing (Q-5).
+  - id: D-9
+    grade: ASSUMED
+    text: >-
+      Every target is built, smoked and published for linux/amd64 and linux/arm64,
+      each on a native runner and never under QEMU; `just publish` forces both.
+    paths: [.github/workflows/publish.yaml, .github/workflows/bake.yaml, justfile]
+    consequence: >-
+      an arm64 host pulls a tested image, and promotion refuses a single-platform
+      index
+    rationale: >-
+      Execution-log D057 and D058 (discovery, ungraded). RFC 0002 §4 and §8 still
+      list arm64 as a non-goal (Q-4). Defended: the arm64 leg found D060 and D061.
+  - id: D-10
+    grade: ASSUMED
+    text: >-
+      Both workflows' path filters cover `docker-bake.hcl`, `images/**`, `shared/**`
+      and their own file, and leave out READMEs. The required check "Bake Images (build
+      only)" is an `if: always()` aggregate. Actions are pinned by full SHA with a
+      version comment, every checkout sets `persist-credentials: false`, and values
+      reach `run:` through `env:`.
+    paths: [.github/workflows/*.yaml]
+    consequence: >-
+      a change under `shared/` runs CI, and an automerged update cannot skip the required
+      check
+    rationale: >-
+      Execution-log D066 (drift: a `shared/`-only pull request ran nothing), R-44
+      (the required check never existed, so Renovate pull requests were merged by
+      hand), A45 (a value interpolated into `run:`), R-50.
+  - id: D-11
+    grade: ASSUMED
+    text: >-
+      A smoke script takes one image reference, exits non-zero on failure and runs
+      under rootless Podman. It reads its expectations from the artifact's labels
+      and manifest, and asserts what must be absent as well as what must be present.
+      A build-stage image is smoked for its toolchain and helpers, not for `--help`.
+      A multi-build battery lives in `test-*.sh`.
+    paths: [images/*/smoke.sh, images/*/test-*.sh]
+    consequence: >-
+      a smoke test fails on an image that lies about itself, not only on one that
+      will not start
+    rationale: >-
+      RFC 0002 rows 5 and 18 and RFC 0004 row 18 (ASSUMED). Defended: R-2, R-3, R-8
+      (found by sabotage), A22.
+  - id: D-12
+    grade: ASSUMED
+    text: >-
+      Configuration comes through two channels: curated `<PREFIX>_<NAME>` and passthrough
+      `<PREFIX>_CONF__<key>`. An upstream name is never intercepted. caddy has no
+      passthrough, so `CADDY_CONF__*` is reported, and its nine unprefixed names work
+      as aliases with a warning.
+    paths:
+      - shared/rootfs/lib/envconf.sh
+      - images/*/rootfs/entrypoint.sh
+      - images/*/README.md
+    consequence: >-
+      an operator configures every image the same way, and an upstream variable keeps
+      its upstream meaning
+    rationale: >-
+      RFC 0001 rows 1 and 20 (LOCKED) and 22 (ASSUMED). Defended: D022, a conflict
+      inside the RFC that the author decided at the plan gate.
+  - id: D-13
+    grade: ASSUMED
+    text: >-
+      Passthrough is allowlisted, never denylisted. An unknown key aborts under `_CONF_STRICT=fail`,
+      and a missing allowlist always aborts. The allowlist holds upstream's canonical
+      spelling. An unknown `<PREFIX>_*` name warns, except control names and `_FILE`.
+      postgres keeps `PG_CONF_STRICT_MODE` and `PG_CONF_ALLOWLIST_PATH` beside the
+      contract's names.
+    paths:
+      - images/*/rootfs/allowlist.conf
+      - images/*/rootfs/denylist.conf
+      - shared/rootfs/lib/envconf.sh
+    consequence: >-
+      a setting no allowlist names never reaches the server's configuration
+    rationale: >-
+      RFC 0001 rows 2, 9 and 15 (LOCKED) and 10 and 24 (ASSUMED). Defended: A11 (drift:
+      LOCKED row 9 was never built, then fixed).
+  - id: D-14
+    grade: ASSUMED
+    text: >-
+      A curated and a passthrough setting for one key, or two spellings of one name,
+      abort startup naming both. The wire format is NUL-delimited and a value with
+      a newline is refused. Values are read through `awk ENVIRON`, never `eval`.
+    paths:
+      - shared/rootfs/lib/envconf.sh
+      - images/caddy/rootfs/entrypoint.sh
+      - images/postgres/rootfs/entrypoint.sh
+      - images/valkey/rootfs/entrypoint.sh
+    consequence: >-
+      no value can add configuration it does not name, and no ambiguity is resolved
+      silently
+    rationale: >-
+      RFC 0001 rows 11 and 12 (LOCKED) and 21 (ASSUMED); log D016. Defended: R-12
+      (drift: a newline in a caddy value added a server block); D016 (`eval` misread
+      dashed names); the wave-5 sabotage pass, where removing the collision refusal
+      fails the tests.
+  - id: D-15
+    grade: ASSUMED
+    text: >-
+      Precedence is baked, then mounted, then environment. A startup summary goes
+      to stderr before `exec`: keys printed, values of secret-like keys redacted (`!secret`,
+      and PASSWORD, TOKEN, SECRET, KEY as a segment, HEADERS). `source=` is required
+      only where the layers can be enumerated. postgres prints a fourth layer, `ALTER
+      SYSTEM` (`source=sql`), and caddy prints `image default < environment`.
+    paths:
+      - shared/rootfs/lib/envconf.sh
+      - images/*/rootfs/entrypoint.sh
+      - images/postgres/rootfs/conf.d/*
+    consequence: >-
+      an operator reads where each setting came from in the container's log, and no
+      secret appears there
+    rationale: >-
+      RFC 0001 rows 3, 8 and 13 (LOCKED) and 14, 16, 18 and 23 (ASSUMED). The tree
+      departs from "one order in every image" for postgres and caddy (Q-2). Defended:
+      A7, R-23 and D036, each drift fixed.
+  - id: D-16
+    grade: ASSUMED
+    text: >-
+      `<NAME>_FILE` wins over `<NAME>` for an image-owned or declared name. A file
+      that is missing, unreadable, not regular, over 64 KiB, not UTF-8 or holds a
+      NUL exits 78, naming the variable and the path and never the content, and the
+      file is read once. postgres keeps upstream's handling, and python-distroless
+      resolves only `ENVFILE_NAMES` through the opt-in `envfile-exec`.
+    paths:
+      - shared/rootfs/lib/envconf.sh
+      - images/flyway/rootfs/entrypoint.sh
+      - images/valkey/rootfs/entrypoint.sh
+      - images/python-distroless/rootfs/envfile-exec
+    consequence: >-
+      a secret mounted as a file is read safely or the container refuses to start
+    rationale: >-
+      RFC 0001 row 4 (LOCKED, under review: Q-1) and RFC 0006 row 4 (LOCKED); log
+      D063, D065, D071. Defended: D064 (drift: a directory gave an empty secret),
+      R-48 (NUL), R-49 (FIFO race), R-51 (check-then-read race).
+  - id: D-17
+    grade: ASSUMED
+    text: >-
+      `shared/` holds only files two or more images use. They reach an image through
+      the bake's named context `contexts = { shared = "./shared" }`, never by copy.
+      The helper is POSIX sh and runs under busybox, dash and bash.
+    paths: [shared/**, docker-bake.hcl]
+    consequence: >-
+      a fix to the shared helper reaches every image that uses it at its next build
+    rationale: >-
+      RFC 0001 rows 6 and 7 (ASSUMED); shared/README.md. Held consistently: caddy,
+      flyway, postgres and valkey each declare the context.
+  - id: D-18
+    grade: ASSUMED
+    text: >-
+      No entrypoint renders configuration through a templating engine; each image
+      uses its server's native expansion.
+    paths:
+      - images/*/rootfs/entrypoint.sh
+      - images/caddy/rootfs/Caddyfile
+      - images/caddy/Dockerfile
+    consequence: >-
+      configuration is read by the server that owns it, with no second syntax in between
+    rationale: >-
+      RFC 0001 row 5 (LOCKED). Held consistently, never defended. caddy's Dockerfile
+      installs `gettext` (envsubst) "for hooks", which is in tension with it.
+  - id: D-19
+    grade: ASSUMED
+    text: >-
+      `PG_EXTENSIONS` is checked against the five-column manifest, and an unknown
+      name fails the build. The preload line and the `io.morze.postgres.extensions`
+      label are generated from that one argument, the label in the Dockerfile. A variant
+      is a tag suffix on one package, its set written literally in its target, and
+      there are at most three variants with the default; the unsuffixed tag is cron
+      and pgroonga.
+    paths:
+      - images/postgres/Dockerfile
+      - images/postgres/rootfs/*extensions*
+      - images/postgres/test-extensions.sh
+      - docker-bake.hcl
+    consequence: >-
+      an image's extensions are what its label says, and adding one is a manifest
+      line and a target
+    rationale: >-
+      RFC 0004 rows 1 to 4, 7, 10 and 13 (LOCKED) and 14, 16 and 17 (ASSUMED). Defended:
+      A1, A2, R-7 (led to D041), D040 (the label lied under `--set`), R-25.
+  - id: D-20
+    grade: ASSUMED
+    text: >-
+      valkey's `maxmemory` is 75% of the cgroup's `memory.max`, with a warned 256
+      MiB fallback. One switch sets persistence, `off`, `rdb` or `aof`. Persistence
+      with an `allkeys-*` or implicit eviction policy is refused, judged on the assembled
+      configuration. `FLUSHALL`, `FLUSHDB` and `KEYS` are renamed. The base is Alpine.
+    paths: [images/valkey/**]
+    consequence: >-
+      a valkey container neither outgrows its memory limit nor evicts data it was
+      told to persist
+    rationale: >-
+      RFC 0006 rows 1, 2, 4 and 6 (LOCKED), 7 and 8 (ASSUMED), 9 and 10 (decided).
+      Defended: A8 (a fragment bypassed the refusal).
+  - id: D-21
+    grade: ASSUMED
+    text: >-
+      npm-builder installs with `npm ci` against a lockfile and writes to `/srv`,
+      `BUILD_OUTPUT_DIR` defaulting to `dist`. An empty output, no `index.html`, or
+      output no newer than a pre-build marker fails the build. `NODE_ENV` and `CI`
+      stay unset and the npm cache is `/cache`. Node is the Active LTS major and is
+      never automerged. The runtime is `caddy`, never a Node image.
+    paths: [images/npm-builder/**]
+    consequence: >-
+      a stale or empty bundle cannot ship as a build's output
+    rationale: >-
+      RFC 0009 rows 1 to 4 and 11 (LOCKED) and 5 to 10 and 12 to 14 (ASSUMED); the
+      RFC is in progress. Defended: R-28 and R-29 (a stale bundle shipped), A41 (Node
+      automerge), D048 (the Node 22 premise was false), D052.
+  - id: D-22
+    grade: ASSUMED
+    text: >-
+      One exact-patch `DISTROLESS_PYTHON_VERSION` drives both uv-builder and python-distroless,
+      and uv-builder's tag is the minor.
+    paths:
+      - docker-bake.hcl
+      - images/uv-builder/Dockerfile
+      - images/python-distroless/Dockerfile
+    consequence: >-
+      an application built on uv-builder runs on the same Python patch in python-distroless
+    rationale: >-
+      Execution-log D059, the Python half of RFC 0008 §5.4 kept through its supersession
+      (ungraded). Defended: D059 measured a 3.14.8 builder against a 3.14.6 runtime.
+      The bake's validation block rejects anything but an exact patch.
+  - id: D-23
+    grade: ASSUMED
+    text: >-
+      Versions are tracked only through `# renovate:` annotations directly above a
+      `variable` or `ARG` line in `docker-bake.hcl`. The dockerfile manager is off
+      except for `docker/dockerfile`, Renovate reads patch tags only, and automerge
+      is on except for Node.
+    paths: [.github/renovate.json, docker-bake.hcl]
+    consequence: >-
+      a version without its annotation is invisible to Renovate, and an RC never ships
+      as a release
+    rationale: >-
+      Execution-log A42 (a comment gap unhooked python-distroless), D072, D073 (drift:
+      an RC shipped as valkey 9.2).
+  - id: D-24
+    grade: ASSUMED
+    text: >-
+      caddy's WAF includes CRS from `/opt/coraza/owasp-crs/*.conf` with upstream's
+      setup example unmodified. Every WAF `Include` must match a file or startup refuses,
+      and `overrides/` ships a placeholder. The Coraza body limit is derived from
+      `CADDY_REQUEST_BODY_MAX_SIZE`.
+    paths: [images/caddy/rootfs/**, images/caddy/Dockerfile]
+    consequence: >-
+      the WAF never runs without its rules, and one body limit applies
+    rationale: >-
+      Execution-log D068 (drift: the WAF ran without CRS), D070 (drift: a second,
+      smaller body cap), D074 (ungraded).
+  - id: D-25
+    grade: ASSUMED
+    text: >-
+      An image is admitted by route 1, hand-rolled in two or more projects, or route
+      2, the same upstream run and diverged in two or more; a pair counts once. Refusals
+      are recorded under "Admissions on record". An image unused for a year is deleted,
+      its package frozen by default and kept in `PACKAGES`. The annual workflow opens
+      the review issue on 8 January with a consumer scan.
+    paths:
+      - images/README.md
+      - .github/workflows/annual-image-review.yaml
+      - .github/workflows/cleanup-images.yaml
+    consequence: >-
+      an image enters and leaves by a rule, not by whoever needs it first
+    rationale: >-
+      RFC 0003 rows 1, 2, 3, 6, 9 and 10 (LOCKED) and 4, 5, 11 and 12 (ASSUMED). Defended:
+      A38 (a missing row), R-35 and A48 (the scan searched names that never existed),
+      A47.
+  - id: D-26
+    grade: ASSUMED
+    text: >-
+      An executor never edits a LOCKED row. A departure goes into the append-only
+      execution log with a class and a proposed row, ratified by merging its pull
+      request. An RFC's status block moves with the work, and `rfcs/INDEX.md` stays
+      in step.
+    paths: [rfcs/*.md]
+    consequence: >-
+      a design and what was built from it never silently disagree
+    rationale: >-
+      EXECUTION-LOG.md's header and classes. Defended: A21 was left open rather than
+      flipped (R-22); status lags W-1, D044 and R-26 were corrected. `python3 .agents/skills/rfc-writer/scripts/rfc_index.py
+      check` passes.
