@@ -337,7 +337,7 @@ if [ "$(id -u)" = "0" ]; then
 	echo "  skip unreadable _FILE aborts (running as root, chmod 000 is not a barrier)"
 else
 	out=$(VALKEY_PASSWORD=plain VALKEY_PASSWORD_FILE="${TMP}/unreadable" \
-		run "an unreadable _FILE aborts, it does not fall back" 1 \
+		run "an unreadable _FILE aborts, it does not fall back" 78 \
 		'envconf_secret VALKEY_PASSWORD')
 	expect_contains "  ...does not leak the fallback" "${out}" "not readable"
 	case "${out}" in
@@ -351,20 +351,75 @@ fi
 # started with it.
 mkdir "${TMP}/secret-dir"
 out=$(VALKEY_PASSWORD=plain VALKEY_PASSWORD_FILE="${TMP}/secret-dir" \
-	run "a _FILE naming a directory aborts" 1 'envconf_secret VALKEY_PASSWORD')
+	run "a _FILE naming a directory aborts" 78 'envconf_secret VALKEY_PASSWORD')
 expect_contains "  ...names the variable" "${out}" "VALKEY_PASSWORD_FILE"
 
 printf 'pass\000word' >"${TMP}/secret-nul"
 out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-nul" \
-	run "a _FILE holding a NUL aborts, it is not silently shortened" 1 \
+	run "a _FILE holding a NUL aborts, it is not silently shortened" 78 \
 	'envconf_secret VALKEY_PASSWORD')
 expect_contains "  ...says why" "${out}" "NUL"
+
+# envfile-exec's limit, at the boundary: 64 KiB is a secret, one byte more is not.
+head -c 65536 /dev/zero | tr '\000' a >"${TMP}/secret-64k"
+head -c 65537 /dev/zero | tr '\000' a >"${TMP}/secret-64k1"
+VALKEY_PASSWORD_FILE="${TMP}/secret-64k" \
+	run "a 64 KiB _FILE is read" 0 'envconf_secret VALKEY_PASSWORD' >/dev/null
+out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-64k1" \
+	run "a _FILE over 64 KiB aborts" 78 'envconf_secret VALKEY_PASSWORD')
+expect_contains "  ...says why" "${out}" "larger than 65536 bytes"
+
+# Valid multi-byte text passes; each of the rest is a way bytes fail to be
+# UTF-8 that a looser check lets through: a stray continuation byte, a
+# sequence cut short at the end of the file, an overlong `/`, an encoded
+# surrogate, and a code point above U+10FFFF.
+printf 'p\303\244ss \342\202\254 \360\237\224\221\n' >"${TMP}/secret-utf8"
+out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-utf8" \
+	run "a multi-byte UTF-8 _FILE is read" 0 'envconf_secret VALKEY_PASSWORD')
+expect_equals "  ...value" "${out}" "$(printf 'p\303\244ss \342\202\254 \360\237\224\221')"
+for bytes in '\200' 'ab\303' '\300\257' '\355\240\200' '\364\220\200\200'; do
+	printf "pass${bytes}" >"${TMP}/secret-bad-utf8"
+	out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-bad-utf8" \
+		run "a _FILE holding ${bytes} aborts as not UTF-8" 78 'envconf_secret VALKEY_PASSWORD')
+	expect_contains "  ...says why" "${out}" "not valid UTF-8"
+done
+
+# Several defects at once get the reason envfile-exec gives: size, then NUL,
+# then UTF-8, wherever in the file each one is.
+for bytes in '\377' '\303('; do
+	printf "${bytes}pass\000" >"${TMP}/secret-nul-bad-utf8"
+	out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-nul-bad-utf8" \
+		run "a _FILE with ${bytes} before a NUL aborts" 78 'envconf_secret VALKEY_PASSWORD')
+	expect_contains "  ...naming the NUL" "${out}" "NUL"
+done
+{ printf '\000\377'; cat "${TMP}/secret-64k"; } >"${TMP}/secret-64k-nul"
+out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-64k-nul" \
+	run "a _FILE over 64 KiB with a NUL aborts" 78 'envconf_secret VALKEY_PASSWORD')
+expect_contains "  ...naming the size" "${out}" "larger than 65536 bytes"
 
 # Kubernetes secret volumes are symlinks into ..data.
 ln -s "${TMP}/secret" "${TMP}/secret-link"
 out=$(VALKEY_PASSWORD_FILE="${TMP}/secret-link" \
 	run "a _FILE symlink is followed" 0 'envconf_secret VALKEY_PASSWORD')
 expect_equals "  ...value" "${out}" "from-file"
+
+# A secret rotated while it is being read, as the kubelet swaps ..data: this od
+# reads the file, then replaces it with bytes the checks refuse. What comes
+# back must be what was checked; a second open of the path returns the swap.
+printf 'before-rotation' >"${TMP}/secret-rotated"
+mkdir "${TMP}/shim"
+cat >"${TMP}/shim/od" <<EOF
+#!/bin/sh
+$(command -v od) "\$@"
+rc=\$?
+printf 'after\000\377' >"${TMP}/secret-rotated"
+exit \$rc
+EOF
+chmod +x "${TMP}/shim/od"
+out=$(PATH="${TMP}/shim:${PATH}" VALKEY_PASSWORD_FILE="${TMP}/secret-rotated" \
+	run "a _FILE rotated mid-read returns the bytes that were checked" 0 \
+	'envconf_secret VALKEY_PASSWORD | od -An -c')
+expect_equals "  ...value" "${out}" "$(printf 'before-rotation' | od -An -c)"
 
 # --- summary --------------------------------------------------------------
 

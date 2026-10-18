@@ -45,8 +45,10 @@ COPY src/ /app/src/
 RUN build-uv-app app
 
 FROM ghcr.io/morzecrew/python-distroless:3.14.8
-COPY --from=deps /opt/venv /opt/venv   # changes only with the lock
-COPY --from=app  /opt/app  /opt/app    # changes with the code
+# Changes only with the lock.
+COPY --from=deps /opt/venv /opt/venv
+# Changes with the code.
+COPY --from=app /opt/app /opt/app
 ENTRYPOINT ["/opt/app/bin/myapp"]
 ```
 

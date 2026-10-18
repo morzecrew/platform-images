@@ -21,7 +21,7 @@ ENGINE="${ENGINE:-podman}"
 # deleted on cleanup -- pointing it at a real tag would silently destroy the
 # local copy of a published image.
 BUILDER="localhost/npm-builder:scratch"
-CADDY="${CADDY_REF:-ghcr.io/morzecrew/caddy:2.11.4}"
+CADDY="${CADDY_REF:-ghcr.io/morzecrew/caddy:2.11.7}"
 WORK="$(mktemp -d)"
 CTR="njs-test-$$"
 FIXTURE="localhost/njs-fixture:$$"

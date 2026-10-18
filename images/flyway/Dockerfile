@@ -2,11 +2,11 @@
 
 # ....................... #
 
-ARG FLYWAY_VERSION=12.5
+ARG FLYWAY_VERSION=13.10
 FROM flyway/flyway:${FLYWAY_VERSION}-alpine
 
-ARG POSTGRES_JDBC_VERSION=42.7.11
-ARG CLICKHOUSE_JDBC_VERSION=0.9.8
+ARG POSTGRES_JDBC_VERSION=42.7.14
+ARG CLICKHOUSE_JDBC_VERSION=0.10.0
 
 RUN wget -qO "/flyway/drivers/postgresql-${POSTGRES_JDBC_VERSION}.jar" \
     "https://jdbc.postgresql.org/download/postgresql-${POSTGRES_JDBC_VERSION}.jar" \

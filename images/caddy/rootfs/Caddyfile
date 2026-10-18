@@ -22,9 +22,10 @@ import {$CADDY_SNIPPET_DEFS_DIR}/*.caddy
 	coraza_waf {
 		directives `
 		Include /opt/coraza/config/coraza.conf
+		SecRequestBodyLimit {$CADDY_WAF_REQUEST_BODY_LIMIT:30000000}
 		Include /opt/coraza/config/crs-setup.conf
 		Include /opt/coraza/overrides/*.conf
-		Include /opt/coraza/owasp-crs/rules/*.conf
+		Include /opt/coraza/owasp-crs/*.conf
 		`
 	}
 

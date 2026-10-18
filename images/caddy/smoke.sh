@@ -276,4 +276,73 @@ while IFS= read -r pair; do
 done <<<"${readme_table}"
 echo "defaults: entrypoint, Dockerfile and README agree"
 
+# --- 9. the WAF runs CRS -----------------------------------------------------
+
+# The include once named a directory that did not exist. Coraza logged an
+# empty glob, a warning, and ran without CRS, so both probes below reached the
+# upstream. Fixing the include alone made every request 500, health included:
+# the image's own crs-setup.conf had replaced upstream's and lacked the
+# version marker CRS refuses to run without.
+mkdir -p "${WORK}/app"
+printf 'handle /v1/* {\n\trespond "upstream" 200\n}\n' >"${WORK}/app/10-app.caddy"
+start 18080:8080 -e CADDY_REQUEST_BODY_MAX_SIZE=1000 -v "${WORK}/app:/etc/caddy/config.d:ro,Z"
+wait_health "http://127.0.0.1:18080/__platform_healthz"
+code=$(http_code "http://127.0.0.1:18080/v1/x?id=1")
+[ "${code}" = "200" ] || { echo "FAIL: a plain request got ${code}, expected 200"; exit 1; }
+for probe in "id=1%27%20OR%20%271%27%3D%271" "q=%3Cscript%3Ealert(1)%3C%2Fscript%3E"; do
+	code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:18080/v1/x?${probe}")
+	[ "${code}" = "403" ] || { echo "FAIL: WAF let ?${probe} through with ${code}, expected 403"; exit 1; }
+done
+echo "waf: CRS refuses an SQLi and an XSS probe, a plain request passes"
+
+# --- 10. the WAF's body limit is CADDY_REQUEST_BODY_MAX_SIZE -----------------
+
+# The WAF had a fixed 12.5 MiB limit of its own. Under a smaller cap it is
+# worse than a second limit: a body that runs into request_body's cap while the
+# WAF reads it is a 500. So the WAF must refuse first, at the cap.
+body_code() {
+	# body_code <bytes>: POST a JSON body of exactly that size
+	printf '{"a":"%s"}' "$(head -c $(($1 - 8)) /dev/zero | tr '\000' x)" >"${WORK}/body.json"
+	curl -s -o /dev/null -w '%{http_code}' -H 'Host: app.example' \
+		-H 'Content-Type: application/json' --data-binary "@${WORK}/body.json" \
+		"http://127.0.0.1:18080/v1/x"
+}
+for pair in 999=200 1000=413 5000=413; do
+	code=$(body_code "${pair%=*}")
+	[ "${code}" = "${pair#*=}" ] ||
+		{ echo "FAIL: a ${pair%=*}-byte body under a 1000-byte cap got ${code}, expected ${pair#*=}"; exit 1; }
+done
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+echo "waf: the body limit is the cap, and an oversized body is 413, not 500"
+
+# Caddy parses the size, so its units mean what they mean to request_body.
+for pair in 30MiB=31457280 1.5GB=1073741824 0=1073741824; do
+	out=$("${ENGINE}" run --rm -e "CADDY_REQUEST_BODY_MAX_SIZE=${pair%=*}" "${IMAGE}" true 2>&1)
+	expect_in "CADDY_REQUEST_BODY_MAX_SIZE=${pair%=*} gives the WAF ${pair#*=}" "${out}" \
+		"WAF request body limit: ${pair#*=} bytes"
+done
+
+# --- 11. CADDY_AUTO_HTTPS=on leaves automatic HTTPS on -----------------------
+
+# Caddy has no `auto_https on`, and an empty value means the default, `off`, so
+# a site serving a real domain had no way to say "on". local_certs keeps the
+# certificate offline.
+mkdir -p "${WORK}/servers"
+printf 'local_certs\nskip_install_trust\n' >"${WORK}/servers/10-local.caddy"
+start 18443:8443 -e CADDY_AUTO_HTTPS=on -e CADDY_EDGE_ADDRESS=app.example.test:8443 \
+	-v "${WORK}/servers:/etc/caddy/servers.d:ro,Z"
+for _ in $(seq 1 15); do
+	logs="$(logs_of)"
+	case "${logs}" in *"enabling automatic TLS certificate management"*) break ;; esac
+	sleep 1
+done
+expect_in "on: certificates are managed" "${logs}" "enabling automatic TLS certificate management"
+expect_in "on: the summary says on" "${logs}" "CADDY_AUTO_HTTPS = on"
+expect_not_in "on: automatic HTTPS is not disabled" "${logs}" "automatic HTTPS is completely disabled"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+out=$("${ENGINE}" run --rm -e CADDY_EDGE_ADDRESS=app.example.test:8443 "${IMAGE}" \
+	caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1)
+expect_in "default: automatic HTTPS stays off" "${out}" '"automatic_https":{"disable":true}'
+
 echo "PASS: caddy"

@@ -3125,3 +3125,128 @@ follow-up, branch `fix/envfile-review-findings`.
 | R-49 | **`envfile-exec` checked the path with `os.stat`, then opened it**: a path swapped for a FIFO in between would block startup. | — | Fixed: opened with `O_NONBLOCK`, type checked with `fstat` on the descriptor. A FIFO case with a timeout pins it; a launcher without `O_NONBLOCK` hangs there and fails. |
 | R-50 | **A change to `shared/README.md` alone started a full multi-platform publish**, since D-066 added `shared/**` with no README exclusion. | — | Fixed: `!shared/README.md` in both filters |
 
+# Wave 12 · Requests from the ERP bundle
+
+Branch `fix/erp-bundle-requests`. Five requests from designing erp-standalone on
+`main` at `556989c`, P1 to P5 below; P1 and P2 were tested downstream, the rest
+were read from the code and reproduced here before fixing.
+
+**Drift count: 3**: D-068, D-070 and D-072.
+
+## D-068 — The WAF never loaded OWASP CRS
+
+- **Touches:** `images/caddy` ("Caddy with Coraza WAF and OWASP CRS")
+- **Seen:** the Caddyfile included `/opt/coraza/owasp-crs/rules/*.conf`, but
+  the Dockerfile copies CRS's `rules/` directory *to* `/opt/coraza/owasp-crs`.
+  Coraza logged `empty glob result`, a warning, and ran `coraza.conf`'s three
+  rules alone. On `caddy:2.11.7`, `?id=1' OR '1'='1` and a `<script>` probe
+  reached the upstream with 200. Every image on it was affected.
+- **Behind it:** fixing the include alone made every request 500, the health
+  check included. `rootfs/waf/crs-setup.conf` replaced CRS's own setup file and
+  lacked the `tx.crs_setup_version` marker that rule 901001 refuses to run
+  without. Its three settings were CRS's defaults anyway, one under the CRS 3
+  name `tx.paranoia_level`, which CRS 4 does not read.
+- **Built:** the include names `/opt/coraza/owasp-crs/*.conf`, and the image
+  ships CRS's `crs-setup.conf.example` unmodified, so its marker follows
+  `CRS_VERSION`. Tuning goes in `/opt/coraza/overrides/`, as the README shows.
+- **Also wrong:** the README said the health check runs before `request_body`
+  and Coraza. `caddy adapt` orders them `request_body`, `waf`, `encode`, then
+  the handlers. A plain probe scores under the threshold, so only the sentence
+  changed.
+- **Class:** `drift`. The smoke test never sent a request the WAF should refuse.
+
+## D-069 — `CADDY_AUTO_HTTPS=on`
+
+- **Touches:** `images/caddy` README, `CADDY_AUTO_HTTPS`
+- **Seen:** the variable holds a global-options line, defaulting to
+  `auto_https off`, and an empty value falls back to that default, as every
+  curated variable's does. Caddy has no `auto_https on`, so an image serving a
+  real domain had to put some unrelated option there (erp's bundle used
+  `grace_period 10s`).
+- **Built:** `on` is accepted and becomes an empty line in the Caddyfile. The
+  summary shows `on`. Empty keeps meaning "the default", for consistency with
+  the other eight variables.
+- **Class:** `spec-gap`.
+
+## D-070 — The WAF's body limit was a second, smaller cap
+
+- **Touches:** `CADDY_REQUEST_BODY_MAX_SIZE` ("`request_body` max size")
+- **Seen:** `coraza.conf` fixed `SecRequestBodyLimit 13107200` with `Reject`,
+  under the 30MB default, so a 14 MB body got 413. erp-backend #122 had to set
+  both.
+- **Not simply raised:** a body that hits `request_body`'s cap while Coraza is
+  reading it fails the read, and coraza-caddy answers 500, not 413. Measured with
+  a 1000-byte cap: a WAF limit of 1001 gives 500 above the cap; 1000 gives 413
+  from 1000 bytes up.
+- **Built:** the entrypoint asks Caddy for the cap in bytes (`caddy adapt` on a
+  one-directive Caddyfile, so `30MB`, `30MiB` and `1.5GB` parse as
+  `request_body` parses them) and the Caddyfile sets `SecRequestBodyLimit` from
+  it. Coraza accepts 1 byte to 1 GiB, so a cap of `0` (unlimited) or over 1 GiB
+  gives 1 GiB.
+- **Class:** `drift`. The variable was documented as the site's limit, and
+  under the default it never was.
+
+## D-071 — A shell image's `_FILE` refusal is the launcher's
+
+- **Touches:** wave 11 residue; `envconf_secret`, RFC 0001 decision 4 (`LOCKED`)
+- **Built:** `envconf_secret` refuses a file over 64 KiB or not UTF-8, as
+  `envfile-exec` does, and every refusal exits 78 rather than 1. That is
+  `flyway` and `valkey` alike, so an operator reads one contract. Decision 4
+  says "exits non-zero" and is unchanged.
+- **How UTF-8 is checked in busybox:** `od -tu1` feeds byte values to awk, which
+  applies RFC 3629's table. No regex engine and no locale are involved, and
+  busybox has no `iconv`. Fuzzed against Python's decoder: 3000 inputs, 926 of
+  them valid, identical verdicts under GNU awk and busybox awk.
+- **Class:** `spec-gap`.
+
+## D-072 — READMEs and `ARG` defaults lagged `docker-bake.hcl`
+
+- **Seen:** tags in READMEs (flyway 12.7, caddy and npm-builder's caddy 2.11.4,
+  valkey 9.0) and `ARG` defaults in six Dockerfiles behind bake.
+  `uv-builder`'s two-layer example had comments after `COPY`, which Docker reads
+  as more sources, so the example did not build.
+- **Built:** all synced to bake; the comments moved onto their own lines.
+- **Class:** `drift`. Renovate updates `docker-bake.hcl` alone, its `dockerfile`
+  manager being disabled on purpose, so nothing moves the `ARG` defaults.
+
+### Verified
+
+- `caddy` smoke test: an SQLi and an XSS probe get 403 and a plain request 200;
+  under a 1000-byte cap, bodies of 999, 1000 and 5000 bytes get 200, 413 and
+  413; `30MiB`, `1.5GB` and `0` give the WAF 31457280, 1073741824 and
+  1073741824; `on` with a domain and `local_certs` manages certificates, and
+  the default adapts to `"automatic_https":{"disable":true}`. Against the
+  published `caddy:2.11.7` it fails at the SQLi probe.
+- `shared/test/run.sh`: 160 pass on bash and on busybox, non-root. Seven
+  mutants of the new checks (no UTF-8 check, the size limit one byte off, exit
+  1, surrogates, overlong forms, truncation, above U+10FFFF) each fail it.
+- `flyway` smoke test: a missing file, a directory, a non-UTF-8 file and a 64
+  KiB + 1 file each exit 78. Against the published `flyway:13.10` it fails at
+  the first, which exits 1.
+
+### Residue
+
+- The `ARG` defaults will lag again at the next Renovate update. Annotating
+  them for the custom manager would keep them in step; dropping them would make
+  a build without bake fail rather than build old versions.
+- CRS 4 refuses requests carrying `Expect` (920450), which curl sends with any
+  body over 1 MiB. The README shows the exclusion; whether to ship one is for
+  each application.
+- `coraza.conf` sets `SecRequestBodyNoFilesLimit 524288`, yet a 600 KB
+  urlencoded body and a 600 KB JSON body both passed. It is not enforced as
+  written.
+
+## Review round 1 — PR #69, 2026-10-18
+
+| ID | Finding | Class | Resolution |
+|---|---|---|---|
+| R-51 | **`envconf_secret` opened the path once per check and once more to read it**: a file replaced in between, as the kubelet swaps `..data` on a secret rotation, returned bytes no check had seen. | — | Fixed: one `od -tu1 -N 65537` read of the file; the size, NUL and UTF-8 checks and the value all come from it, and the value is rebuilt with `printf` octal escapes. A test whose `od` rotates the file after reading it fails on the old code under bash, dash and busybox. A file swapped for a FIFO after the `-f` check still blocks, since `sh` cannot open without blocking; whoever can do that already chooses the secret. |
+| R-52 | **`valkey:9.2` is a release candidate**: upstream's `9.2-alpine` and `9.2.0-rc1-alpine` share a digest, and the published image reports `VALKEY_VERSION=9.2.0-rc1`. The latest stable is 9.1.2. Renovate pinned 9.2 in #51; this wave only matched the `ARG` default and README to it. | — | Acknowledged, separate change: pinning 9.1 also needs a Renovate rule, or the next run proposes 9.2 again. |
+| R-53 | **The README's tuning example reuses rule id 900000**, which `crs-setup.conf` might define. | — | Refuted: CRS v4.30.0's `crs-setup.conf.example` has it commented out, as its template for exactly this setting, and no loaded file defines it. With the example mounted, Caddy starts and `?a=%2525` gets 403 (920230, paranoia level 2); without it, the request passes. |
+
+`shared/test/run.sh` now has 168 cases on bash and busybox, 166 on dash. A
+mutant dropping the size, NUL or UTF-8 check, moving the limit by one byte,
+reporting the first defect instead of envfile-exec's order, or reading the
+value from the path again fails it. Dropping `-N 65537` passes: the bound only
+shows as time spent reading a huge file. The `valkey` and `flyway` smoke tests
+pass on the rebuilt images.

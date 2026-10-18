@@ -161,14 +161,14 @@ elsewhere by environment — moving it would silently strand existing data.
 ```yaml
 services:
   cache:
-    image: ghcr.io/morzecrew/valkey:9.0
+    image: ghcr.io/morzecrew/valkey:9.2
     environment:
       VALKEY_MAXMEMORY_PERCENT: "60"
     secrets: [valkey_password]
     mem_limit: 512m
 
   queue:
-    image: ghcr.io/morzecrew/valkey:9.0
+    image: ghcr.io/morzecrew/valkey:9.2
     environment:
       VALKEY_PERSISTENCE: aof
       VALKEY_MAXMEMORY_POLICY: noeviction   # required; see the refusals

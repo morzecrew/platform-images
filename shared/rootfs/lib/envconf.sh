@@ -575,9 +575,50 @@ envconf_refuse_newline() {
 	fi
 }
 
+# The refusals below exit 78 (EX_CONFIG), not envconf_die's 1, and check what
+# python-distroless's envfile-exec checks: one contract for a secret file,
+# whichever image reads it.
+_envconf_secret_die() {
+	echo "FATAL: $*" >&2
+	exit 78
+}
+
+# Reads `od -tu1` output on stdin and exits with the defect envfile-exec would
+# report: 2 more than 65536 bytes, else 3 a NUL byte, else 4 not UTF-8. UTF-8
+# is RFC 3629, the same rule Python's decoder applies: no overlong forms, no
+# surrogates, nothing above U+10FFFF. Judged on byte values, so no awk's or
+# regex engine's idea of the locale is involved.
+_envconf_secret_check() {
+	awk '
+		{
+			for (i = 1; i <= NF; i++) {
+				b = $i + 0
+				if (++n > 65536) { big = 1; exit }
+				if (b == 0) nul = 1
+				if (bad) continue
+				if (need) {
+					if (b < lo || b > hi) bad = 1
+					lo = 128; hi = 191; need--
+				} else if (b < 128) {
+					continue
+				} else if (b >= 194 && b <= 223) {
+					need = 1; lo = 128; hi = 191
+				} else if (b >= 224 && b <= 239) {
+					need = 2; lo = (b == 224) ? 160 : 128; hi = (b == 237) ? 159 : 191
+				} else if (b >= 240 && b <= 244) {
+					need = 3; lo = (b == 240) ? 144 : 128; hi = (b == 244) ? 143 : 191
+				} else {
+					bad = 1
+				}
+			}
+		}
+		END { exit big ? 2 : (nul ? 3 : ((bad || need) ? 4 : 0)) }
+	'
+}
+
 envconf_secret() {
 	local name="$1"
-	local file_var file value
+	local file_var file bytes value rc
 
 	[ -n "${name}" ] || envconf_die "envconf_secret: no name given"
 
@@ -586,19 +627,41 @@ envconf_secret() {
 
 	if [ -n "${file}" ]; then
 		[ -r "${file}" ] ||
-			envconf_die "${file_var} is set to '${file}', which is not readable"
-		# A directory passes -r, `cat` on it fails inside the substitution
-		# below, and the secret came back empty with status 0.
+			_envconf_secret_die "${file_var} is set to '${file}', which is not readable"
+		# A directory passes -r, `cat` on one failed inside a command
+		# substitution, and the secret came back empty with status 0. A FIFO
+		# would block the read below.
 		[ -f "${file}" ] ||
-			envconf_die "${file_var} is set to '${file}', which is not a regular file"
-		# A command substitution drops NUL bytes, which would change the secret
-		# without a word. Counted rather than matched: no shell can hold one.
-		[ "$(tr -d '\000' <"${file}" | wc -c)" -eq "$(wc -c <"${file}")" ] ||
-			envconf_die "${file_var} is set to '${file}', which contains a NUL byte"
+			_envconf_secret_die "${file_var} is set to '${file}', which is not a regular file"
+		# The file is opened once: every check below and the value itself come
+		# from this one read, so a secret rotated in between (the kubelet swaps
+		# ..data) cannot hand back bytes that were never checked. One byte past
+		# the limit is enough to refuse, so nothing reads a huge file. As
+		# decimal bytes, because a shell variable cannot hold a NUL.
+		bytes=$(od -An -v -tu1 -N 65537 <"${file}") ||
+			_envconf_secret_die "${file_var} is set to '${file}', which could not be read"
+		# A secret is a password or a key, not a payload; 64 KiB is
+		# envfile-exec's limit. A command substitution drops NUL bytes, which
+		# would change the secret without a word. And the value lands in an
+		# environment or a config file that a program decodes as text, and
+		# what it does with bytes that are not text is its own business:
+		# refused here rather than found at the database.
+		rc=0
+		printf '%s\n' "${bytes}" | _envconf_secret_check || rc=$?
+		case "${rc}" in
+		0) ;;
+		2) _envconf_secret_die "${file_var} is set to '${file}', which is larger than 65536 bytes" ;;
+		3) _envconf_secret_die "${file_var} is set to '${file}', which contains a NUL byte" ;;
+		4) _envconf_secret_die "${file_var} is set to '${file}', which is not valid UTF-8" ;;
+		*) _envconf_secret_die "${file_var} is set to '${file}', which could not be checked" ;;
+		esac
+		# Back to bytes through printf's octal escapes; awk's %c would encode
+		# anything above 127 by its locale.
+		# shellcheck disable=SC2059
+		value=$(printf "$(printf '%s\n' "${bytes}" |
+			awk '{ for (i = 1; i <= NF; i++) printf "\\%03o", $i }')X")
 		# Strip a single trailing newline: every editor adds one and no secret
 		# wants it. Embedded newlines are the file's business, not ours.
-		value=$(cat "${file}" && printf X) ||
-			envconf_die "${file_var} is set to '${file}', which could not be read"
 		value=${value%X}
 		value=${value%"$_ENVCONF_NL"}
 		printf '%s' "${value}"

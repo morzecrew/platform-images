@@ -2,10 +2,10 @@
 
 # ....................... #
 
-ARG CADDY_VERSION="2.11"
-ARG CORAZA_CADDY_VERSION="v2.1.0"
-ARG CRS_VERSION="v4.24.0"
-ARG MHOLT_RL_SHA="b8d8c9a9d99ee352d675cbbe416ec2b489fc8cab"
+ARG CADDY_VERSION="2.11.7"
+ARG CORAZA_CADDY_VERSION="v2.6.2"
+ARG CRS_VERSION="v4.30.0"
+ARG MHOLT_RL_SHA="16aecbbcb8ca07dc1c671e263379606ff9493c55"
 
 # ....................... #
 # Build with Coraza WAF + mholt/caddy-ratelimit

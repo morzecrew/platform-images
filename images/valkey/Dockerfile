@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.28
 
-ARG VALKEY_VERSION=9.0
+ARG VALKEY_VERSION=9.2
 
 # Alpine, so RFC 0001's POSIX-sh helper runs unmodified with no added bash
 # (RFC 0006 decision 9, RFC 0001 decision 7).

@@ -73,7 +73,7 @@ FROM ghcr.io/morzecrew/npm-builder:24 AS build
 COPY . .
 RUN --mount=type=cache,target=/cache,sharing=locked build-js-app
 
-FROM ghcr.io/morzecrew/caddy:2.11.4
+FROM ghcr.io/morzecrew/caddy:2.11.7
 COPY --from=build /srv /srv
 COPY spa.caddy /etc/caddy/config.d/
 ```
