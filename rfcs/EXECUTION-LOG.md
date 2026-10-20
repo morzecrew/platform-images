@@ -3354,6 +3354,12 @@ filed after its move to python-distroless `3.14.8` and uv-builder `3.14`.
   uv bumps, as every mutable tag moves with its rebuilds; the stamped tag is
   the one that does not.
 - **Cost:** two more tags per publish, `:3.14.8` and `:3.14.8-<BUILD_STAMP>`.
+- **Also:** `bake.yaml` exports each target to an OCI tarball for `podman
+  load`, and with two tags the index names one image twice, which `podman
+  load` refuses: `payload does not match any of the supported image formats`.
+  This PR's first CI run failed that way on both platforms. Each tarball now
+  carries the target's first tag only, the one every later step uses.
+  `publish.yaml` clears the tags and pushes by digest, so it was never affected.
 - **Class:** `spec-gap`.
 
 ## D-076 — `python` in a running container was not the venv's
@@ -3373,6 +3379,20 @@ filed after its move to python-distroless `3.14.8` and uv-builder `3.14`.
   the venv's interpreter where it used to run the bare one.
 - **Class:** `spec-gap`.
 
+## D-083 — The builder tests ran on the published images
+
+- **Seen:** with the tarball fixed, D-076's new case still failed against this
+  branch's python-distroless. A `podman build` with more than one stage pulled
+  its base from the registry although the same name was loaded locally, so
+  `ghcr.io/morzecrew/python-distroless:3.14.8` moved to the published image
+  mid-test. A single-stage build used the local one. `test-build-uv-app.sh`
+  has two stages, and so does `test-build-js-app.sh`'s caddy handoff, whose
+  comment says it keeps the caddy CI built.
+- **Built:** both builds take `--pull=never`; each script already has the
+  image locally when it builds.
+- **Cost:** until now, both steps passed on images this commit had not built.
+- **Class:** `discovery`.
+
 ### Verified
 
 - `bake --print uv-builder`: `uv-builder:3.14` and `uv-builder:3.14.8`; with
@@ -3387,3 +3407,9 @@ filed after its move to python-distroless `3.14.8` and uv-builder `3.14`.
   `/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`.
   The `python-distroless` and `uv-builder` smoke tests pass, `envfile-exec`'s
   cases included.
+- From tarballs exported the way `bake.yaml` now does, loaded into a store
+  holding neither image: `test-build-uv-app.sh` passes, and both tags still
+  name the loaded images afterwards. Without `--pull=never` the same run fails
+  D-076's case, with `python-distroless:3.14.8` moved to the published image.
+  A two-stage build `FROM` a loaded caddy does the same to `caddy:2.11.7`,
+  and keeps the loaded one with the flag.
