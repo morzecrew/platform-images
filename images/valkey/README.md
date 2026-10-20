@@ -57,7 +57,8 @@ reader can see that the visible path was taken.
 3. Otherwise **268435456 (256 MiB)**, with a warning naming the reason.
 
 Step 3 is reached on cgroup v1, in an unconstrained container (a Compose
-service without `mem_limit`), and where `memory.max` reads `max`. It warns rather than proceeding quietly, because a
+service with neither `mem_limit` nor `deploy.resources.limits.memory`), and
+where `memory.max` reads `max`. It warns rather than proceeding quietly, because a
 silent fallback to a small number looks exactly like a working cache until the
 working set outgrows it. Set `VALKEY_MAXMEMORY` explicitly to make it a
 decision rather than a default.
