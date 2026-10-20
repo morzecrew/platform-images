@@ -77,7 +77,9 @@ build() {
 	printf 'import dep\nVALUE = %s\ndef main():\n    print(VALUE, dep.__name__)\n' "$1" \
 		>"${WORK}/src/layerapp/__init__.py"
 	local out
-	out="$("${ENGINE}" build --network none -f "${WORK}/Containerfile" \
+	# --pull=never: with more than one stage, Podman pulled a base it already
+	# had, so CI tested the published images instead of the two it had built.
+	out="$("${ENGINE}" build --pull=never --network none -f "${WORK}/Containerfile" \
 		--build-arg "BUILDER=${BUILDER}" --build-arg "RUNTIME=${RUNTIME}" \
 		-t "${FIXTURE}:$1" "${WORK}" 2>&1)" || { echo "${out}"; die "fixture build $1 failed"; }
 }
