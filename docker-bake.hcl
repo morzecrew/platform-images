@@ -229,12 +229,17 @@ variable "UV_VERSION" {
 }
 
 # Python comes from DISTROLESS_PYTHON_VERSION below, the exact patch both images
-# build on. The tag stays the minor, which is what consumers pin.
+# build on. Tagged with the minor and with that patch: the patch tag is what
+# lets a consumer pin the builder to the python-distroless it runs on. The minor
+# stays first, because CI and publish.yaml read the repository from tags[0].
 target "uv-builder" {
   inherits   = ["_attested"]
   context    = "./images/uv-builder"
   dockerfile = "Dockerfile"
-  tags       = tag("uv-builder", regex("^[0-9]+\\.[0-9]+", DISTROLESS_PYTHON_VERSION))
+  tags = concat(
+    tag("uv-builder", regex("^[0-9]+\\.[0-9]+", DISTROLESS_PYTHON_VERSION)),
+    tag("uv-builder", DISTROLESS_PYTHON_VERSION),
+  )
   labels     = label("uv-builder", regex("^[0-9]+\\.[0-9]+", DISTROLESS_PYTHON_VERSION))
   args = {
     PYTHON_VERSION = DISTROLESS_PYTHON_VERSION
