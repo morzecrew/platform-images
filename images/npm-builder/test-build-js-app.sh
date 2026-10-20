@@ -240,7 +240,9 @@ echo "=== 11. the runtime handoff: caddy serves it, deep paths get index.html ==
 #
 # A local image is used as-is rather than re-pulled: CI points CADDY_REF at the
 # caddy it just built and loaded, and pulling that name would replace it with
-# the published one -- or fail, on a platform not yet published.
+# the published one -- or fail, on a platform not yet published. The build
+# below takes --pull=never for the same reason: with two stages, Podman pulled
+# the published caddy over the local one.
 "${ENGINE}" image inspect "${CADDY}" >/dev/null 2>&1 ||
 	"${ENGINE}" pull -q "${CADDY}" >/dev/null 2>&1 ||
 	die "could not pull ${CADDY}; the handoff assertion cannot be skipped (set CADDY_REF to override)"
@@ -264,7 +266,7 @@ FROM ${CADDY}
 COPY --from=build /srv /srv
 COPY spa.caddy /etc/caddy/config.d/
 DOCKER
-	"${ENGINE}" build -t "${FIXTURE}" "${d}" >/dev/null ||
+	"${ENGINE}" build --pull=never -t "${FIXTURE}" "${d}" >/dev/null ||
 		die "the two-stage handoff did not build"
 	"${ENGINE}" rm -f "${CTR}" >/dev/null 2>&1 || true
 	"${ENGINE}" run -d --name "${CTR}" -p 18080:8080 "${FIXTURE}" >/dev/null

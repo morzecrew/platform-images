@@ -3332,3 +3332,84 @@ left that open.
 | ID | Finding | Class | Resolution |
 |---|---|---|---|
 | R-54 | **The guard's `-e` accepts a directory**, so an `overrides/nested.conf/` directory passes it. | — | Refuted: Coraza fails closed on one. Caddy exits 1 with `failed to readfile: read /opt/coraza/overrides/nested.conf: is a directory`, alone or beside a real `.conf`. The guard exists for the case Coraza lets through, a glob that matches nothing. |
+
+# Wave 15 · Requests from eis-backend: the Python pair
+
+Branch `fix/python-pair-patch-tag`. Items 6 and 7 of eis-backend's requests,
+filed after its move to python-distroless `3.14.8` and uv-builder `3.14`.
+
+**Drift count: 0**.
+
+## D-075 — uv-builder had no patch tag
+
+- **Seen:** python-distroless publishes `3.14.8`; uv-builder published only
+  `3.14`. A consumer could pin the runtime to a patch but not the builder, so
+  after a bump its venv could be built on one patch and run on another until
+  both were rebuilt.
+- **Built:** uv-builder is also tagged `DISTROLESS_PYTHON_VERSION`, the patch it
+  already builds on. The minor stays `tags[0]`: CI and `publish.yaml` read the
+  repository from it, and `promote` applies every tag in the list. The README's
+  two-stage example pins `uv-builder:3.14.8` beside `python-distroless:3.14.8`.
+- **Not built:** a tag naming the uv version as well. The patch tag moves with
+  uv bumps, as every mutable tag moves with its rebuilds; the stamped tag is
+  the one that does not.
+- **Cost:** two more tags per publish, `:3.14.8` and `:3.14.8-<BUILD_STAMP>`.
+- **Also:** `bake.yaml` exports each target to an OCI tarball for `podman
+  load`, and with two tags the index names one image twice, which `podman
+  load` refuses: `payload does not match any of the supported image formats`.
+  This PR's first CI run failed that way on both platforms. Each tarball now
+  carries the target's first tag only, the one every later step uses.
+  `publish.yaml` clears the tags and pushes by digest, so it was never affected.
+- **Class:** `spec-gap`.
+
+## D-076 — `python` in a running container was not the venv's
+
+- **Seen:** with the documented flow, `docker exec <container> python -c
+  'import <app>'` failed with `ModuleNotFoundError`. `PATH` was upstream's,
+  without `/opt/venv/bin`, so `python` was the bare interpreter, and there is
+  no shell in the image to fix it from.
+- **Built:** python-distroless puts `/opt/venv/bin` first on `PATH`.
+  `envfile-exec` names `/usr/local/bin/python3` in its shebang, so it is
+  unaffected. An image without a venv finds nothing there and falls through to
+  upstream's `python`.
+- **Not built:** `APP_PATH/bin` on `PATH` as well. Console scripts are run by
+  absolute path in the entrypoint, and the venv's `python` already imports the
+  application through the `.pth` that `build-uv-app deps` writes.
+- **Cost:** an image built on this one whose command is a bare `python` now runs
+  the venv's interpreter where it used to run the bare one.
+- **Class:** `spec-gap`.
+
+## D-083 — The builder tests ran on the published images
+
+- **Seen:** with the tarball fixed, D-076's new case still failed against this
+  branch's python-distroless. A `podman build` with more than one stage pulled
+  its base from the registry although the same name was loaded locally, so
+  `ghcr.io/morzecrew/python-distroless:3.14.8` moved to the published image
+  mid-test. A single-stage build used the local one. `test-build-uv-app.sh`
+  has two stages, and so does `test-build-js-app.sh`'s caddy handoff, whose
+  comment says it keeps the caddy CI built.
+- **Built:** both builds take `--pull=never`; each script already has the
+  image locally when it builds.
+- **Cost:** until now, both steps passed on images this commit had not built.
+- **Class:** `discovery`.
+
+### Verified
+
+- `bake --print uv-builder`: `uv-builder:3.14` and `uv-builder:3.14.8`; with
+  `BUILD_STAMP=20261020-1.1`, those two and their `-20261020-1.1` forms, minor
+  first.
+- `test-build-uv-app.sh` gained a case running the fixture with `--entrypoint
+  python`, the bare name resolved through `PATH`, importing the application and
+  its path dependency. Against the python-distroless built before this change
+  it fails with `ModuleNotFoundError: No module named 'layerapp'`; against this
+  branch's build it passes, with the rest of the script.
+- The new image's `PATH` is
+  `/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`.
+  The `python-distroless` and `uv-builder` smoke tests pass, `envfile-exec`'s
+  cases included.
+- From tarballs exported the way `bake.yaml` now does, loaded into a store
+  holding neither image: `test-build-uv-app.sh` passes, and both tags still
+  name the loaded images afterwards. Without `--pull=never` the same run fails
+  D-076's case, with `python-distroless:3.14.8` moved to the published image.
+  A two-stage build `FROM` a loaded caddy does the same to `caddy:2.11.7`,
+  and keeps the loaded one with the flag.
