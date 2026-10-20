@@ -80,6 +80,11 @@ jobs:
       # never sees. Podman resolves the runnable manifest and ignores the
       # attestation one on load.
       #
+      # One tag per tarball, the first: a target with two (uv-builder's minor
+      # and patch) exports an index naming one image twice, which `podman load`
+      # refuses ("payload does not match any of the supported image formats").
+      # Every later step refers to an image by its first tag.
+      #
       # --allow: the tarball lands outside the bake context, which buildx treats
       # as a privileged filesystem write and refuses without an explicit grant.
       # Scoped to the one directory rather than BUILDX_BAKE_ENTITLEMENTS_FS=0,
@@ -87,12 +92,15 @@ jobs:
       - name: Build and load images into Podman
         run: |
           set -euo pipefail
-          targets=$(docker buildx bake --print \
+          plan="$(docker buildx bake --print)"
+          targets=$(echo "${plan}" \
             | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')
           echo "targets: ${targets}"
           for target in ${targets}; do
             echo "::group::build ${target}"
-            docker buildx bake --allow=fs.write=/tmp \
+            tag="$(echo "${plan}" \
+              | python3 -c "import json,sys; print(json.load(sys.stdin)['target']['${target}']['tags'][0])")"
+            docker buildx bake --allow=fs.write=/tmp --set "${target}.tags=${tag}" \
               --set "${target}.output=type=oci,dest=/tmp/img-${target}.tar" "${target}"
             podman load -i "/tmp/img-${target}.tar"
             rm -f "/tmp/img-${target}.tar"

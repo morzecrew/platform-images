@@ -25,11 +25,19 @@ import {$CADDY_SNIPPET_DEFS_DIR}/*.caddy
 		SecRequestBodyLimit {$CADDY_WAF_REQUEST_BODY_LIMIT:30000000}
 		Include /opt/coraza/config/crs-setup.conf
 		Include /opt/coraza/overrides/*.conf
+		SecRuleEngine {$CADDY_WAF_ENGINE}
 		Include /opt/coraza/owasp-crs/*.conf
 		`
 	}
 
 	import {$CADDY_CONFIG_DIR}/*.caddy
+
+	# Marks the WAF's 403, and no other, with Coraza's unique_id from the audit
+	# log. A fragment's own handle_errors still writes the response.
+	handle_errors 403 {
+		@waf expression `{err.message} == "interruption triggered"`
+		header @waf X-Waf-Blocked {err.id}
+	}
 
 	handle {
 		respond "No configuration injected" 501

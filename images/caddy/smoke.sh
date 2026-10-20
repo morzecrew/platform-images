@@ -63,7 +63,7 @@ expect_not_in() {
 	esac
 }
 
-# The nine curated variables, canonical spelling, in the order the entrypoint
+# The ten curated variables, canonical spelling, in the order the entrypoint
 # declares them.
 CURATED=(
 	CADDY_EDGE_ADDRESS
@@ -75,6 +75,7 @@ CURATED=(
 	CADDY_SERVERS_DIR
 	CADDY_BUILTIN_SNIPPETS_DIR
 	CADDY_SNIPPET_DEFS_DIR
+	CADDY_WAF_ENGINE
 )
 
 # --- 1. it serves, and falls through where it says it does -----------------
@@ -286,7 +287,8 @@ echo "defaults: entrypoint, Dockerfile and README agree"
 # the image's own crs-setup.conf had replaced upstream's and lacked the
 # version marker CRS refuses to run without.
 mkdir -p "${WORK}/app"
-printf 'handle /v1/* {\n\trespond "upstream" 200\n}\n' >"${WORK}/app/10-app.caddy"
+printf 'handle /v1/forbidden {\n\trespond "app" 403\n}\nhandle /v1/denied {\n\terror 403\n}\nhandle /v1/* {\n\trespond "upstream" 200\n}\n' \
+	>"${WORK}/app/10-app.caddy"
 start 18080:8080 -e CADDY_REQUEST_BODY_MAX_SIZE=1000 -v "${WORK}/app:/etc/caddy/config.d:ro,Z"
 wait_health "http://127.0.0.1:18080/__platform_healthz"
 code=$(http_code "http://127.0.0.1:18080/v1/x?id=1")
@@ -296,6 +298,44 @@ for probe in "id=1%27%20OR%20%271%27%3D%271" "q=%3Cscript%3Ealert(1)%3C%2Fscript
 	[ "${code}" = "403" ] || { echo "FAIL: WAF let ?${probe} through with ${code}, expected 403"; exit 1; }
 done
 echo "waf: CRS refuses an SQLi and an XSS probe, a plain request passes"
+
+# CRS allows GET HEAD POST OPTIONS unless told otherwise, and scores any other
+# method at the threshold: every PUT, PATCH and DELETE was a 403.
+api() {
+	# api <method> <path> [curl args...]: the status, with a name in Host
+	local method="$1" path="$2"
+	shift 2
+	curl -s -o /dev/null -w '%{http_code}' -X "${method}" -H 'Host: app.example' "$@" \
+		"http://127.0.0.1:18080${path}"
+}
+for method in PUT PATCH DELETE; do
+	code=$(api "${method}" /v1/x -H 'Content-Type: application/json' -d '{"a":1}')
+	[ "${code}" = "200" ] || { echo "FAIL: ${method} got ${code}, expected 200"; exit 1; }
+done
+code=$(api FOO /v1/x)
+[ "${code}" = "403" ] || { echo "FAIL: method FOO got ${code}, expected 403"; exit 1; }
+echo "waf: PUT, PATCH and DELETE pass, a method outside the list does not"
+
+# The WAF's 403 names its audit-log entry; the application's, and Caddy's own,
+# say nothing.
+headers=$(curl -s -D - -o /dev/null -H 'Host: app.example' "http://127.0.0.1:18080/v1/x?id=1%27%20OR%20%271%27%3D%271")
+marker=$(awk 'tolower($1) == "x-waf-blocked:" { print $2 }' <<<"${headers}" | tr -d '\r')
+[ -n "${marker}" ] || { echo "FAIL: a WAF block has no X-Waf-Blocked"; echo "${headers}"; exit 1; }
+expect_in "the marker is the audit log's unique_id" "$(logs_of)" "\"unique_id\":\"${marker}\""
+for path in /v1/forbidden /v1/denied; do
+	headers=$(curl -s -D - -o /dev/null -H 'Host: app.example' "http://127.0.0.1:18080${path}")
+	expect_in "${path} is a 403" "${headers}" " 403"
+	expect_not_in "${path} is not marked" "${headers,,}" "x-waf-blocked"
+done
+
+# What the optional exclusions (section 13) change, refused by default.
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:18080/v1/x")
+[ "${code}" = "403" ] || { echo "FAIL: a bodiless POST to a numeric Host got ${code}, expected 403"; exit 1; }
+for body in '{"filter":{"$and":[{"a":{"$like":"x%"}}]}}' '{"password":"<script>Ab1\"or 1=1"}'; do
+	code=$(api POST /v1/x -H 'Content-Type: application/json' -d "${body}")
+	[ "${code}" = "403" ] || { echo "FAIL: ${body} got ${code}, expected 403 by default"; exit 1; }
+done
+echo "waf: a WAF 403 is marked and no other is"
 
 # That warning was the only sign, and it cannot stand out if every start logs
 # one: the empty overrides directory did, until it shipped a placeholder.
@@ -363,5 +403,57 @@ expect_not_in "on: automatic HTTPS is not disabled" "${logs}" "automatic HTTPS i
 out=$("${ENGINE}" run --rm -e CADDY_EDGE_ADDRESS=app.example.test:8443 "${IMAGE}" \
 	caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1)
 expect_in "default: automatic HTTPS stays off" "${out}" '"automatic_https":{"disable":true}'
+
+# --- 12. CADDY_WAF_ENGINE=DetectionOnly blocks nothing, and says so ---------
+
+# The variable is set after overrides/, so a file setting SecRuleEngine loses,
+# and is named rather than ignored in silence.
+printf 'SecRuleEngine On\n' >"${WORK}/engine.conf"
+start 18080:8080 -e CADDY_WAF_ENGINE=DetectionOnly -v "${WORK}/app:/etc/caddy/config.d:ro,Z" \
+	-v "${WORK}/engine.conf:/opt/coraza/overrides/50-engine.conf:ro,Z"
+wait_health "http://127.0.0.1:18080/__platform_healthz"
+code=$(api GET "/v1/x?id=1%27%20OR%20%271%27%3D%271")
+[ "${code}" = "200" ] || { echo "FAIL: DetectionOnly answered an SQLi probe with ${code}, expected 200"; exit 1; }
+logs="$(logs_of)"
+expect_in "detection: the summary shows the mode" "${logs}" "CADDY_WAF_ENGINE = DetectionOnly"
+expect_in "detection: a warning says nothing is blocked" "${logs}" "blocks nothing"
+expect_in "detection: the probe is logged" "${logs}" "SQL Injection Attack Detected"
+expect_in "detection: an override's SecRuleEngine is named" "${logs}" \
+	"/opt/coraza/overrides/50-engine.conf sets SecRuleEngine"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+refuse "an engine Coraza takes and this image does not" -e CADDY_WAF_ENGINE=Off
+expect_in "refusal names the value" "$(cat "${REFUSE_OUT}")" "CADDY_WAF_ENGINE=Off is not On or DetectionOnly"
+echo "waf: DetectionOnly logs and passes, and an unknown engine refuses"
+
+# --- 13. the optional exclusions do what they say, and only that ------------
+
+# Taken from the image, so this tests what ships. A fragment's handle_errors
+# rides along: it still writes the WAF's 403, and the marker is added.
+mkdir -p "${WORK}/optional" "${WORK}/errors"
+for name in ip-host mongo-operators password-fields; do
+	"${ENGINE}" run --rm --entrypoint cat "${IMAGE}" "/opt/coraza/optional/${name}.conf" \
+		>"${WORK}/optional/${name}.conf"
+done
+cp "${WORK}/app/10-app.caddy" "${WORK}/errors/"
+printf 'handle_errors {\n\trespond "custom {err.status_code}" {err.status_code}\n}\n' >"${WORK}/errors/20-errors.caddy"
+start 18080:8080 -v "${WORK}/errors:/etc/caddy/config.d:ro,Z" \
+	-v "${WORK}/optional/ip-host.conf:/opt/coraza/overrides/ip-host.conf:ro,Z" \
+	-v "${WORK}/optional/mongo-operators.conf:/opt/coraza/overrides/mongo-operators.conf:ro,Z" \
+	-v "${WORK}/optional/password-fields.conf:/opt/coraza/overrides/password-fields.conf:ro,Z"
+wait_health "http://127.0.0.1:18080/__platform_healthz"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:18080/v1/x")
+[ "${code}" = "200" ] || { echo "FAIL: ip-host.conf: a bodiless POST to a numeric Host got ${code}"; exit 1; }
+for body in '{"filter":{"$and":[{"a":{"$like":"x%"}}]}}' '{"password":"<script>Ab1\"or 1=1"}' \
+	'{"new_password":"<b>x</b>\" OR \"1\"=\"1"}'; do
+	code=$(api POST /v1/x -H 'Content-Type: application/json' -d "${body}")
+	[ "${code}" = "200" ] || { echo "FAIL: ${body} got ${code} with the exclusions, expected 200"; exit 1; }
+done
+code=$(api POST /v1/x -H 'Content-Type: application/json' -d '{"username":"1'"'"' OR '"'"'1'"'"'='"'"'1"}')
+[ "${code}" = "403" ] || { echo "FAIL: password-fields.conf let SQLi in another field through with ${code}"; exit 1; }
+headers=$(curl -s -D - -H 'Host: app.example' "http://127.0.0.1:18080/v1/x?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E")
+expect_in "a fragment's handle_errors still writes the WAF's 403" "${headers}" "custom 403"
+expect_in "and the marker is added to it" "${headers,,}" "x-waf-blocked: "
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+echo "waf: each exclusion passes its case, and a field it does not name is still checked"
 
 echo "PASS: caddy"

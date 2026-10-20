@@ -3333,6 +3333,87 @@ left that open.
 |---|---|---|---|
 | R-54 | **The guard's `-e` accepts a directory**, so an `overrides/nested.conf/` directory passes it. | — | Refuted: Coraza fails closed on one. Caddy exits 1 with `failed to readfile: read /opt/coraza/overrides/nested.conf: is a directory`, alone or beside a real `.conf`. The guard exists for the case Coraza lets through, a glob that matches nothing. |
 
+# Wave 15 · Requests from eis-backend: the Python pair
+
+Branch `fix/python-pair-patch-tag`. Items 6 and 7 of eis-backend's requests,
+filed after its move to python-distroless `3.14.8` and uv-builder `3.14`.
+
+**Drift count: 0**.
+
+## D-075 — uv-builder had no patch tag
+
+- **Seen:** python-distroless publishes `3.14.8`; uv-builder published only
+  `3.14`. A consumer could pin the runtime to a patch but not the builder, so
+  after a bump its venv could be built on one patch and run on another until
+  both were rebuilt.
+- **Built:** uv-builder is also tagged `DISTROLESS_PYTHON_VERSION`, the patch it
+  already builds on. The minor stays `tags[0]`: CI and `publish.yaml` read the
+  repository from it, and `promote` applies every tag in the list. The README's
+  two-stage example pins `uv-builder:3.14.8` beside `python-distroless:3.14.8`.
+- **Not built:** a tag naming the uv version as well. The patch tag moves with
+  uv bumps, as every mutable tag moves with its rebuilds; the stamped tag is
+  the one that does not.
+- **Cost:** two more tags per publish, `:3.14.8` and `:3.14.8-<BUILD_STAMP>`.
+- **Also:** `bake.yaml` exports each target to an OCI tarball for `podman
+  load`, and with two tags the index names one image twice, which `podman
+  load` refuses: `payload does not match any of the supported image formats`.
+  This PR's first CI run failed that way on both platforms. Each tarball now
+  carries the target's first tag only, the one every later step uses.
+  `publish.yaml` clears the tags and pushes by digest, so it was never affected.
+- **Class:** `spec-gap`.
+
+## D-076 — `python` in a running container was not the venv's
+
+- **Seen:** with the documented flow, `docker exec <container> python -c
+  'import <app>'` failed with `ModuleNotFoundError`. `PATH` was upstream's,
+  without `/opt/venv/bin`, so `python` was the bare interpreter, and there is
+  no shell in the image to fix it from.
+- **Built:** python-distroless puts `/opt/venv/bin` first on `PATH`.
+  `envfile-exec` names `/usr/local/bin/python3` in its shebang, so it is
+  unaffected. An image without a venv finds nothing there and falls through to
+  upstream's `python`.
+- **Not built:** `APP_PATH/bin` on `PATH` as well. Console scripts are run by
+  absolute path in the entrypoint, and the venv's `python` already imports the
+  application through the `.pth` that `build-uv-app deps` writes.
+- **Cost:** an image built on this one whose command is a bare `python` now runs
+  the venv's interpreter where it used to run the bare one.
+- **Class:** `spec-gap`.
+
+## D-083 — The builder tests ran on the published images
+
+- **Seen:** with the tarball fixed, D-076's new case still failed against this
+  branch's python-distroless. A `podman build` with more than one stage pulled
+  its base from the registry although the same name was loaded locally, so
+  `ghcr.io/morzecrew/python-distroless:3.14.8` moved to the published image
+  mid-test. A single-stage build used the local one. `test-build-uv-app.sh`
+  has two stages, and so does `test-build-js-app.sh`'s caddy handoff, whose
+  comment says it keeps the caddy CI built.
+- **Built:** both builds take `--pull=never`; each script already has the
+  image locally when it builds.
+- **Cost:** until now, both steps passed on images this commit had not built.
+- **Class:** `discovery`.
+
+### Verified
+
+- `bake --print uv-builder`: `uv-builder:3.14` and `uv-builder:3.14.8`; with
+  `BUILD_STAMP=20261020-1.1`, those two and their `-20261020-1.1` forms, minor
+  first.
+- `test-build-uv-app.sh` gained a case running the fixture with `--entrypoint
+  python`, the bare name resolved through `PATH`, importing the application and
+  its path dependency. Against the python-distroless built before this change
+  it fails with `ModuleNotFoundError: No module named 'layerapp'`; against this
+  branch's build it passes, with the rest of the script.
+- The new image's `PATH` is
+  `/opt/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`.
+  The `python-distroless` and `uv-builder` smoke tests pass, `envfile-exec`'s
+  cases included.
+- From tarballs exported the way `bake.yaml` now does, loaded into a store
+  holding neither image: `test-build-uv-app.sh` passes, and both tags still
+  name the loaded images afterwards. Without `--pull=never` the same run fails
+  D-076's case, with `python-distroless:3.14.8` moved to the published image.
+  A two-stage build `FROM` a loaded caddy does the same to `caddy:2.11.7`,
+  and keeps the loaded one with the flag.
+
 # Wave 16 · Requests from eis-backend: postgres and valkey docs
 
 Branch `docs/small-instances`. Items 8 and 9 of eis-backend's requests file,
@@ -3392,3 +3473,107 @@ written after moving to postgres 18.6 and valkey 9.1.
 |---|---|---|---|
 | R-55 | **`max_connections` set to the pools' sum leaves them 3 short.** Postgres keeps `superuser_reserved_connections` (3) for superusers. | `spec-gap` | Fixed: the example sets 103 and the text says to add 3. Reproduced on `postgres:18.6` with `max_connections=5`: a role without `SUPERUSER` gets 2 connections, the third gets `remaining connection slots are reserved for roles with the SUPERUSER attribute`. 103 starts as `source=env`. |
 | R-56 | **The fallback is not unconditional without `mem_limit`:** an inherited numeric `memory.max` would be derived from. | `spec-gap` | Partly fixed. A parent's limit is not inherited: under a slice capped at 700M, the container reads `max` and falls back. But `deploy.resources.limits.memory` with no `mem_limit` gives `source=derived maxmemory = 402653175` at 512M, and the README now names it. |
+
+# Wave 17 · Requests from eis-backend: CRS in front of a JSON API
+
+Branch `feat/caddy-json-api-waf`. Items 1 to 5 of eis-backend's requests file:
+`caddy:2.11.7` was the first image to load CRS (D-068), and at CRS's defaults
+it broke a plain JSON REST API.
+
+**Drift count: 1** (D-079).
+
+## D-079 — CRS refused every `PUT`, `PATCH` and `DELETE`
+
+- **Seen:** CRS allows `GET HEAD POST OPTIONS` unless told otherwise, and rule
+  911100 scores any other method 5, the threshold. Schedules, role and
+  password changes and key revocation all got 403 at eis-backend's gateway.
+  The image's own `cors_default` snippet advertises all three methods. The
+  smoke test's WAF probes were all `GET`.
+- **Built:** `coraza.conf` sets `tx.allowed_methods` to CRS's four plus `PUT`,
+  `PATCH` and `DELETE` (rule 200003). `overrides/` loads later and can still
+  change it; eis-backend's own rule for this uses another id and keeps
+  working. The README's upgrade note names the images that refused them.
+- **Not built:** a `CADDY_WAF_ALLOWED_METHODS` variable. A file in
+  `overrides/` already sets the list, and the defect was the default.
+- **Class:** `drift`.
+
+## D-080 — Detection-only had no switch anyone could see
+
+- **Seen:** eis-backend asked for a detection-only rollout without a derived
+  image. A file in `overrides/` saying `SecRuleEngine DetectionOnly` already
+  did it: the SQLi probe got 200. Nothing documented it, and the summary
+  could not show it.
+- **Built:** `CADDY_WAF_ENGINE`, `On` or `DetectionOnly`, a curated variable
+  with no legacy name. The image's WAF block sets `SecRuleEngine` from it
+  after `overrides/`, so the variable wins and the summary stays true. Any
+  other value refuses to start. The entrypoint warns while it is
+  `DetectionOnly`, and names a file in `overrides/` that sets
+  `SecRuleEngine`, since that file is now ignored. `coraza.conf` keeps its
+  `SecRuleEngine On` for a fragment's WAF block that includes it.
+- **Not built:** `Off`, which Coraza also accepts. `DetectionOnly` passes the
+  same requests and still logs them.
+- **Cost:** the curated table's legacy column can be empty now, so the loop
+  reads a legacy name only when there is one.
+- **Class:** `spec-gap`.
+
+## D-081 — A WAF 403 looked like the application's
+
+- **Seen:** the WAF's 403 had no body and no marker, so a frontend could not
+  tell it from the API's own 403 without the gateway's logs.
+- **Built:** a `handle_errors 403` in the site block. It sets
+  `X-Waf-Blocked` to `{err.id}`, Coraza's `unique_id` from the audit log,
+  when `{err.message}` is coraza-caddy's `interruption triggered`. Caddy's
+  other 403 errors and an application's 403 response carry nothing. The body
+  stays empty.
+- **Not built:** a JSON body. A fragment's own `handle_errors` writes the
+  response; the header joins it rather than competing with it.
+- **Class:** `spec-gap`.
+
+## D-082 — The usual JSON-API exclusions, as opt-in files
+
+- **Seen:** reproduced on the published `caddy:2.11.7`: a bodiless `POST` to a
+  numeric `Host` scores 920350 plus 920180, 6, and gets 403 (the same request
+  with a name in `Host` passes); `$and` and `$like` trip 942290; a password
+  with `<`, `>` or quotes trips 941100, 941110, 941160 and 942100.
+- **Built:** `/opt/coraza/optional/` with `ip-host.conf`, `mongo-operators.conf`
+  and `password-fields.conf`, rules 200100 to 200102, each saying what it
+  removes. None loads until copied or mounted into `overrides/`. The README
+  lists them and shows both ways in. It also shows `ctl:requestBodyAccess=Off`
+  for an upload path, and says the image's rules use ids 200000 to 200199.
+- **Not built:** a variable per exclusion, such as `CADDY_WAF_ALLOW_IP_HOST`;
+  one file each does the job. An upload exclusion file, because the path is
+  the application's.
+- **Class:** `spec-gap`.
+
+### Verified
+
+- `caddy` smoke test, amd64:
+  - in section 9, `PUT`, `PATCH` and `DELETE` pass and `FOO` gets 403;
+  - the WAF's 403 carries the `unique_id` of its audit-log entry, while an
+    application's `respond 403` and Caddy's `error 403` carry no marker;
+  - the three exclusion cases are refused by default;
+  - new section 12: `DetectionOnly` passes the SQLi probe, logs it, shows in the
+    summary and warns, and names an override's `SecRuleEngine`; `Off` refuses;
+  - new section 13: with the three files taken from the built image, each case
+    passes, SQLi in a field `password-fields.conf` does not name still gets 403,
+    and a fragment's catch-all `handle_errors` writes the WAF's 403 with the
+    marker added.
+- Eight mutant images, each breaking one piece, fail the smoke test at the
+  assertion for that piece:
+  - no `tx.allowed_methods`;
+  - no marker;
+  - a marker on every 403;
+  - `SecRuleEngine` before `overrides/`;
+  - `Off` accepted;
+  - no override warning;
+  - a `password-fields.conf` that drops the SQLi and XSS rules for every field;
+  - no `/opt/coraza/optional/`.
+- With the published image's Caddyfile plus the marker, a fragment's own
+  catch-all, `403` and `4xx` `handle_errors` each still write the response, with
+  the header added.
+- `DetectionOnly` writes the passed probe to the audit log as well as the error
+  log.
+- `ctl:requestBodyAccess=Off` on a path, with
+  `CADDY_REQUEST_BODY_MAX_SIZE=1000`: a 5000-byte multipart upload through
+  `reverse_proxy` gets 413 there and on any other path. `respond` never reads
+  the body, so behind it the same upload gets 200.

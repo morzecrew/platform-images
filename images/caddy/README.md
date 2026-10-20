@@ -29,7 +29,7 @@ Image: `ghcr.io/morzecrew/caddy:2.11.7`.
 - Writable locations (typical volume mounts): **`/config`**, **`/data`**, **`/srv`** (e.g. static assets).
 - **`/docker-entrypoint.d/*.sh`** — optional shell hooks sourced in lexical order before config validation (same idea as other official images).
 - **`gettext`** is installed if you want `envsubst`-style templating in those hooks or sidecar steps; the stock entrypoint does not rewrite the Caddyfile.
-- **Coraza** loads `/opt/coraza/config/coraza.conf`, the body limit, CRS's `crs-setup.conf` (upstream's template, unmodified), **`/opt/coraza/overrides/*.conf`** (a placeholder ships there; add files beside it), then the CRS rules in `/opt/coraza/owasp-crs/`. See [WAF](#waf-coraza-and-owasp-crs).
+- **Coraza** loads `/opt/coraza/config/coraza.conf`, the body limit, CRS's `crs-setup.conf` (upstream's template, unmodified), **`/opt/coraza/overrides/*.conf`** (a placeholder ships there; add files beside it), `SecRuleEngine` from **`CADDY_WAF_ENGINE`**, then the CRS rules in `/opt/coraza/owasp-crs/`. See [WAF](#waf-coraza-and-owasp-crs).
 
 ## Configuration
 
@@ -50,12 +50,13 @@ Every row below is a **curated** variable in the sense of the [environment confi
 | `CADDY_SERVERS_DIR` | `/etc/caddy/servers.d` | Fragments merged into the **global options** `{ }` block (`import {$CADDY_SERVERS_DIR}/*.caddy`), after `order coraza_waf after rate_limit`. |
 | `CADDY_BUILTIN_SNIPPETS_DIR` | `/etc/caddy/snippets` | Glob `import {$CADDY_BUILTIN_SNIPPETS_DIR}/*.caddy` runs **between** the global `{ }` block and the site block so bundled **`(name) { }`** snippets are real definitions. Point elsewhere only if you replace the shipped tree. |
 | `CADDY_SNIPPET_DEFS_DIR` | `/etc/caddy/snippet_defs.d` | Extra top-level snippet definitions (`*.caddy` containing `(myapp) { ... }`). Empty directory logs a harmless import warning. |
+| `CADDY_WAF_ENGINE` | `On` | `On` refuses a request over the CRS threshold with `403`. `DetectionOnly` logs it and lets it through, for a first release behind CRS. Any other value refuses to start. See [WAF](#waf-coraza-and-owasp-crs). |
 
 Setting a variable to the empty string means "use the image default", which is what Caddy's own `{$VAR:default}` form does.
 
 #### The unprefixed names still work
 
-This image published `EDGE_ADDRESS`, `CONFIG_DIR` and the rest before the `CADDY_<NAME>` rule existed. **Every one of them still works.** Set one and the entrypoint uses it, warns that it is deprecated, and names the replacement:
+This image published `EDGE_ADDRESS`, `CONFIG_DIR` and the rest before the `CADDY_<NAME>` rule existed. **Every one of them still works.** Set one and the entrypoint uses it, warns that it is deprecated, and names the replacement (`CADDY_WAF_ENGINE` came later and has no unprefixed name):
 
 ```text
 WARN: EDGE_ADDRESS is deprecated; use CADDY_EDGE_ADDRESS. Starting with CADDY_EDGE_ADDRESS=:8081.
@@ -214,7 +215,20 @@ Every request passes [OWASP CRS](https://coreruleset.org/) at CRS's defaults: pa
 curl -s -o /dev/null -w '%{http_code}\n' "http://localhost:8080/x?id=1'%20OR%20'1'='1"   # 403
 ```
 
-Images built before [EXECUTION-LOG](../../rfcs/EXECUTION-LOG.md) D-068 did not load the CRS rules (their include named a directory that did not exist), so only `coraza.conf`'s own rules ran. An application moving to a newer tag meets CRS for the first time and should look for false positives in its own traffic, JSON bodies above all.
+`PUT`, `PATCH` and `DELETE` are allowed along with CRS's own `GET HEAD POST OPTIONS`; any other method gets `403` (rule 911100).
+
+**Upgrading.** Images built before [EXECUTION-LOG](../../rfcs/EXECUTION-LOG.md) D-068 did not load the CRS rules (their include named a directory that did not exist), so only `coraza.conf`'s own rules ran. An application moving to a newer tag meets CRS for the first time and should look for false positives in its own traffic, JSON bodies above all. The first images with CRS, built before D-079, also refused every `PUT`, `PATCH` and `DELETE`.
+
+**Detection first.** `CADDY_WAF_ENGINE=DetectionOnly` runs the same rules and blocks nothing: a request CRS would refuse is logged, in the audit log on stdout, and passed on. Run a release that way, read what it would have refused, add the exclusions below, then go back to `On`. The startup summary shows the mode, and the entrypoint warns while it is `DetectionOnly`. A `SecRuleEngine` line in `overrides/` is ignored, with a warning: the variable is set after them.
+
+**A WAF block is marked.** Its `403` carries `X-Waf-Blocked`, set to the transaction's `unique_id` in the audit log, and an empty body:
+
+```text
+HTTP/1.1 403 Forbidden
+X-Waf-Blocked: wPHvsUzYpEEjklaO
+```
+
+An application's own `403` and any other error Caddy raises are left alone. A fragment's own `handle_errors` still writes the response, and the header is added to it.
 
 **Tuning** goes in `/opt/coraza/overrides/*.conf`, which loads after `crs-setup.conf` and before the rules. Settings use CRS's `crs-setup.conf` variables; an exclusion has to be a runtime `ctl:` action, because `SecRuleRemoveById` only removes rules already loaded:
 
@@ -225,7 +239,28 @@ SecAction "id:900000,phase:1,pass,t:none,nolog,setvar:tx.blocking_paranoia_level
 SecRule REQUEST_URI "@beginsWith /v1/files" "id:1000,phase:1,pass,t:none,nolog,ctl:ruleRemoveById=920450"
 ```
 
-That second one is worth knowing about: CRS refuses a request carrying `Expect` (rule 920450), and curl sends `Expect: 100-continue` with any body over 1 MiB. `curl -H 'Expect:'` drops it.
+That second one is worth knowing about: CRS refuses a request carrying `Expect` (rule 920450), and curl sends `Expect: 100-continue` with any body over 1 MiB. `curl -H 'Expect:'` drops it. The image's own rules use ids 200000 to 200199; pick yours elsewhere.
+
+A path that takes binary uploads can skip body inspection altogether. The body limit there is `request_body`'s alone, and a proxied upload over it still gets `413`:
+
+```apache
+SecRule REQUEST_URI "@beginsWith /v1/ingest/files" "id:1001,phase:1,pass,t:none,nolog,ctl:requestBodyAccess=Off"
+```
+
+**Optional exclusions** for JSON APIs ship in `/opt/coraza/optional/`, off until copied into `overrides/`. Each one removes a check, and says which in its header:
+
+| File | Allows | CRS rules |
+|---|---|---|
+| `ip-host.conf` | A numeric IP in `Host`, for a deployment with no DNS yet. Alone it scores 3, so one more warning (a bodiless `POST`, 920180) reaches the threshold. | 920350 |
+| `mongo-operators.conf` | `$and`, `$like` and the other MongoDB operators, anywhere in the request, for an API whose filter grammar uses them. | 942290 |
+| `password-fields.conf` | Anything in a top-level `password`, `current_password` or `new_password`, in JSON, a form or the query string. | every CRS rule, for those fields |
+
+```dockerfile
+FROM ghcr.io/morzecrew/caddy:2.11.7
+RUN cp /opt/coraza/optional/ip-host.conf /opt/coraza/optional/password-fields.conf /opt/coraza/overrides/
+```
+
+Without a derived image, copy one out (`docker run --rm --entrypoint cat ghcr.io/morzecrew/caddy:2.11.7 /opt/coraza/optional/ip-host.conf`) and mount it at `/opt/coraza/overrides/ip-host.conf`. A copy on the host does not change when the image does.
 
 **An `Include` that matches no file stops the container.** Coraza would skip it with an `empty glob result` warning and run without those rules, which is how the D-068 images served with no CRS. The entrypoint checks every WAF `Include` in the adapted config, fragments included, and refuses to start naming the glob. `overrides/` ships `00-placeholder.conf` for this reason: mount single files beside it, or mount a directory holding at least one `.conf`, even a comment-only one.
 
@@ -251,4 +286,5 @@ Use the module’s Caddyfile syntax (`rate_limit { zone ... { key, events, windo
 - `rootfs/Caddyfile` — global `{ }` (`CADDY_AUTO_HTTPS`, **`order coraza_waf after rate_limit`**, **`import {$CADDY_SERVERS_DIR}/*.caddy`**) + top-level **`import {$CADDY_BUILTIN_SNIPPETS_DIR}/*.caddy`** + **`import {$CADDY_SNIPPET_DEFS_DIR}/*.caddy`** + templated site + **`CADDY_HEALTH_PATH`** handle (first) + **`import {$CADDY_CONFIG_DIR}/*.caddy`** + fallback
 - `rootfs/entrypoint.sh` — `docker-entrypoint.d`, validate, exec
 - `rootfs/waf/` — Coraza config copied to `/opt/coraza/config/`
+- `rootfs/optional/` — opt-in CRS exclusions copied to `/opt/coraza/optional/`
 - `rootfs/snippets/` — copied to `/etc/caddy/snippets/`
