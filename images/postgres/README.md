@@ -71,6 +71,33 @@ per group lives; it covers the generated preload line, the include and file-path
 settings this image's precedence rule depends on, the SQL-compatibility
 switches, and `allow_alter_system`.
 
+### A small instance
+
+The baked config is sized for a service's main database: `shared_buffers=1GB`,
+`maintenance_work_mem=256MB`, `min_wal_size=1GB` and `max_wal_size=4GB`, and
+`max_connections=60`. For a small auxiliary database, override them; all five
+are in the allowlist:
+
+```yaml
+environment:
+  PG_CONF__shared_buffers: 128MB
+  PG_CONF__maintenance_work_mem: 64MB
+  PG_CONF__min_wal_size: 80MB
+  PG_CONF__max_wal_size: 1GB
+  PG_CONF__max_connections: "103"   # the clients' pools, plus 3 for superusers
+```
+
+The first four are upstream's own defaults. `max_connections` has no small
+value: set it to the sum of the connection pools that use the database, which
+for a multi-service client can be more than 60, plus 3. Postgres keeps the last
+3 slots for superusers (`superuser_reserved_connections`), so at 100 the
+roles without `SUPERUSER` get 97 between them.
+
+`shm_size` does not belong in this list. `shared_buffers` is not allocated
+from `/dev/shm`; Postgres puts dynamic shared memory there, mostly parallel
+queries' working memory. Both this config and the baked one start under
+Docker's 64 MB default.
+
 ### Secrets
 
 Nothing to add here: the official entrypoint, which this image runs unchanged,

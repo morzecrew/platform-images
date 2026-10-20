@@ -56,8 +56,9 @@ reader can see that the visible path was taken.
 2. Otherwise `VALKEY_MAXMEMORY_PERCENT` (default 75) of `/sys/fs/cgroup/memory.max`.
 3. Otherwise **268435456 (256 MiB)**, with a warning naming the reason.
 
-Step 3 is reached on cgroup v1, in an unconstrained container, and where
-`memory.max` reads `max`. It warns rather than proceeding quietly, because a
+Step 3 is reached on cgroup v1, in an unconstrained container (a Compose
+service with neither `mem_limit` nor `deploy.resources.limits.memory`), and
+where `memory.max` reads `max`. It warns rather than proceeding quietly, because a
 silent fallback to a small number looks exactly like a working cache until the
 working set outgrows it. Set `VALKEY_MAXMEMORY` explicitly to make it a
 decision rather than a default.
@@ -171,6 +172,7 @@ services:
     image: ghcr.io/morzecrew/valkey:9.1
     environment:
       VALKEY_MAXMEMORY_PERCENT: "60"
+      VALKEY_PASSWORD_FILE: /run/secrets/valkey_password
     secrets: [valkey_password]
     mem_limit: 512m
 
@@ -180,4 +182,21 @@ services:
       VALKEY_PERSISTENCE: aof
       VALKEY_MAXMEMORY_POLICY: noeviction   # required; see the refusals
       VALKEY_PASSWORD_FILE: /run/secrets/valkey_password
+    secrets: [valkey_password]
+    mem_limit: 512m                         # without it, maxmemory is 256 MiB
+    volumes: [queue-data:/data]
+
+secrets:
+  valkey_password:
+    file: ./valkey_password.txt
+
+volumes:
+  queue-data:
 ```
+
+Each service needs both lines for the password: `secrets:` mounts the file and
+`VALKEY_PASSWORD_FILE` points the image at it. With only the first, Valkey
+starts without a password and protected mode refuses every client beyond
+loopback. With only the second, the container exits 78. Without `mem_limit`,
+`maxmemory` falls back to 256 MiB, and under `noeviction` a queue that reaches
+it refuses writes. The named volume keeps the queue across `docker compose down`.
