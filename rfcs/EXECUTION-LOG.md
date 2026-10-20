@@ -3332,3 +3332,55 @@ left that open.
 | ID | Finding | Class | Resolution |
 |---|---|---|---|
 | R-54 | **The guard's `-e` accepts a directory**, so an `overrides/nested.conf/` directory passes it. | — | Refuted: Coraza fails closed on one. Caddy exits 1 with `failed to readfile: read /opt/coraza/overrides/nested.conf: is a directory`, alone or beside a real `.conf`. The guard exists for the case Coraza lets through, a glob that matches nothing. |
+
+# Wave 16 · Requests from eis-backend: postgres and valkey docs
+
+Branch `docs/small-instances`. Items 8 and 9 of eis-backend's requests file,
+written after moving to postgres 18.6 and valkey 9.1.
+
+**Drift count: 1** (D-078).
+
+## D-077 — postgres had no small-instance recipe
+
+- **Seen:** eis-backend kept Temporal's database on upstream `postgres`.
+  Reusing this image meant overriding `shared_buffers=1GB` and
+  `max_connections=60`, and they added `shm_size` as well.
+- **Built:** a README section listing the five baked sizes as `PG_CONF__`
+  overrides, all already allowlisted, four of them set to upstream's defaults.
+  It says `max_connections` has no small value, and that `shm_size` is
+  unrelated: `shared_buffers` is not allocated from `/dev/shm`.
+- **Not built:** a `PG_PROFILE=small` switch. The overrides work today and the
+  summary names each one; a profile would be a second way to set the same
+  five, and the one that matters most, `max_connections`, depends on the
+  client rather than the size.
+- **Class:** `spec-gap`.
+
+## D-078 — The valkey README's compose example could not run as written
+
+- **Seen:** item 9 noted that a Compose service without `mem_limit` gets the
+  256 MiB fallback. Running the README's own example found that, and two
+  more faults. `queue` set `VALKEY_PASSWORD_FILE` without mounting the secret,
+  and exits 78. `cache` mounted the secret without `VALKEY_PASSWORD_FILE`, so
+  it starts with no password, and protected mode refuses every client beyond
+  loopback. And `queue`, the `noeviction` store, had no `mem_limit`.
+- **Built:** each service mounts the secret, names it in
+  `VALKEY_PASSWORD_FILE` and sets `mem_limit`; the queue keeps `/data` in a
+  named volume; the top-level `secrets:` and `volumes:` are there. A paragraph
+  says what each line prevents. "How `maxmemory` is derived" names a Compose
+  service without `mem_limit` as an unconstrained container.
+- **Not built:** a change to the fallback. It warns, and the summary prints
+  `source=fallback`; eis-backend asked for the note only.
+- **Class:** `drift`.
+
+### Verified
+
+- Published `postgres:18.6`, under Podman's default 63M `/dev/shm`: the baked
+  config starts. With the five overrides it starts too, the summary prints
+  each as `source=env`, and `pg_settings` shows 128MB, 64MB, 80MB, 1GB and 100.
+- Published `valkey:9.1`, the example as it was: `queue` exits 78 with
+  `FATAL: VALKEY_PASSWORD_FILE is set to '/run/secrets/valkey_password', which
+  is not readable`; `cache` has an empty `requirepass`; a `queue` without
+  `mem_limit` prints `source=fallback maxmemory = 268435456`.
+- The fixed example, extracted from the README and run with Docker Compose
+  5.5.1: both services run, each reaches the other with the password and gets
+  `NOAUTH` without it, and `queue` has `maxmemory` 402653175.
