@@ -74,6 +74,7 @@ COPY --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 
 COPY rootfs/waf/ /opt/coraza/config/
 COPY rootfs/overrides/ /opt/coraza/overrides/
+COPY rootfs/optional/ /opt/coraza/optional/
 COPY rootfs/snippets/ /etc/caddy/snippets/
 COPY rootfs/Caddyfile /etc/caddy/Caddyfile
 COPY rootfs/entrypoint.sh /entrypoint.sh
@@ -113,7 +114,8 @@ ENV CADDY_EDGE_ADDRESS=":8080" \
     CADDY_CONFIG_DIR="/etc/caddy/config.d" \
     CADDY_SERVERS_DIR="/etc/caddy/servers.d" \
     CADDY_BUILTIN_SNIPPETS_DIR="/etc/caddy/snippets" \
-    CADDY_SNIPPET_DEFS_DIR="/etc/caddy/snippet_defs.d"
+    CADDY_SNIPPET_DEFS_DIR="/etc/caddy/snippet_defs.d" \
+    CADDY_WAF_ENGINE="On"
 
 EXPOSE 8080
 

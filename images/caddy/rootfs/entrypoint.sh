@@ -13,7 +13,7 @@ set -e
 # column is the name this image published before that rule reached it; it still
 # works, and setting it is reported rather than silently honoured, because an
 # operator reading only the README would otherwise never learn the name they
-# use is on its way out.
+# use is on its way out. A variable added after the rule has no legacy name.
 #
 # The default column duplicates the Dockerfile's ENV block on purpose: knowing
 # the baked value is what lets the summary distinguish "you set this" from "the
@@ -30,6 +30,7 @@ CADDY_CONFIG_DIR|CONFIG_DIR|/etc/caddy/config.d
 CADDY_SERVERS_DIR|SERVERS_DIR|/etc/caddy/servers.d
 CADDY_BUILTIN_SNIPPETS_DIR|BUILTIN_SNIPPETS_DIR|/etc/caddy/snippets
 CADDY_SNIPPET_DEFS_DIR|SNIPPET_DEFS_DIR|/etc/caddy/snippet_defs.d
+CADDY_WAF_ENGINE||On
 "
 
 # Upstream's own name, set by caddy:*-alpine. RFC 0001 decision 1 says upstream
@@ -81,7 +82,8 @@ while IFS='|' read -r canon legacy default; do
 	known="${known} ${canon}"
 
 	canon_value=$(var_value "${canon}")
-	legacy_value=$(var_value "${legacy}")
+	legacy_value=""
+	[ -z "${legacy}" ] || legacy_value=$(var_value "${legacy}")
 
 	# Caddy substitutes these into the Caddyfile itself, so a newline is not a
 	# corrupt record -- it is a second directive. Measured before this check
@@ -151,9 +153,27 @@ awk 'BEGIN { for (k in ENVIRON) if (index(k, "CADDY_CONF__") == 1) print k }' |
 		envconf_warn "${name} is set, but this image has no CADDY_CONF__ passthrough channel. Caddy is configured by Caddyfile fragments -- see images/caddy/README.md."
 	done
 
+# Caddy substitutes it into the WAF's directives, and Coraza would also take
+# `Off`. Blocking or logging are the two this image offers.
+case "${CADDY_WAF_ENGINE}" in
+On | DetectionOnly) ;;
+*) envconf_die "CADDY_WAF_ENGINE=${CADDY_WAF_ENGINE} is not On or DetectionOnly." ;;
+esac
+
 envconf_summary caddy "${SRCMAP}" \
 	"effective configuration" \
 	"precedence: image default < environment"
+
+[ "${CADDY_WAF_ENGINE}" = On ] ||
+	envconf_warn "CADDY_WAF_ENGINE=DetectionOnly: the WAF logs what it would block and blocks nothing."
+
+# The image's WAF block sets SecRuleEngine after overrides/, so the variable
+# wins and the summary stays true. A file setting it would be ignored silently.
+for f in /opt/coraza/overrides/*.conf; do
+	if grep -qiE '^[[:space:]]*SecRuleEngine' "${f}" 2>/dev/null; then
+		envconf_warn "${f} sets SecRuleEngine, which CADDY_WAF_ENGINE overrides. Set the variable instead."
+	fi
+done
 
 # The trap does not fire across `exec`, so without this the source map sits in
 # the running container's /tmp for the life of the process -- a file describing
