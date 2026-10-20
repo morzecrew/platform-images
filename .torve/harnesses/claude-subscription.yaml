@@ -1,9 +1,9 @@
 # yaml-language-server: $schema=../schemas/harness.json
-# Claude Code in torve's claude seat image. The image's own `/opt/torve/run`
-# starts claude; its definition is copied under `.torve/sandbox/claude/` from
-# torve's `sandboxes/claude/`, so `torve doctor` can compare the two.
+# Claude Code in torve's published claude seat image, tagged with the harness
+# version and the torve release it was built from. The image's own
+# `/opt/torve/run` starts claude.
 adapter: subscription
-image: claude-sandbox:2.1.283
+image: ghcr.io/morzecrew/claude-sandbox:2.1.283-torve0.5.0
 equip_root: ~/.claude/skills
 kinds: [skill, plugin, mcp, hook, agent]
 env:

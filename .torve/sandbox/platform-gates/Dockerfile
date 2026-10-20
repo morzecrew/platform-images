@@ -1,9 +1,10 @@
 # The image torve runs this repository's shell gates in (`runtime.image`):
-# torve's base, plus the static checks `.torve/gates.yaml` names. `bake --print`
-# resolves the bake file without a daemon, so the docker CLI comes without one.
+# torve's base, plus the static checks `.torve/gates.yaml` names. The docker CLI
+# comes without a daemon: `bake --print` needs none, and `bake-smoke` drives the
+# task's nested daemon through `DOCKER_HOST`.
 #
-#   docker build -t platform-gates-sandbox:1 .torve/sandbox/platform-gates
-ARG BASE=sandbox-base:latest
+#   docker build -t platform-gates-sandbox:2 .torve/sandbox/platform-gates
+ARG BASE=ghcr.io/morzecrew/sandbox-base:0.5.0
 FROM hadolint/hadolint:v2.14.0 AS hadolint
 FROM docker:28-cli AS docker
 FROM ${BASE}

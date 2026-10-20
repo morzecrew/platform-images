@@ -2,11 +2,15 @@
 # platform-images under torve: the seats bloomery runs, the lab store, and a
 # pull request per document that a person merges.
 schema_version: 1
-engine: "0.4.0"
+engine: "0.5.0"
 
 runtime:
   adapter: docker
-  image: platform-gates-sandbox:1   # .torve/sandbox/platform-gates/
+  image: platform-gates-sandbox:2   # .torve/sandbox/platform-gates/
+  # The gates sandbox gets a Docker daemon of its own, in a privileged side
+  # container, for `bake-smoke`. Its egress is the host proxy at the bridge
+  # gateway, which `torve doctor` checks.
+  docker: nested
   sandbox_timeout: 2700      # strictly outside agent_timeout, refused otherwise
   agent_timeout: 2200
   network: host              # this host's egress runs through a local proxy

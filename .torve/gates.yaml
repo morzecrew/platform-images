@@ -1,9 +1,11 @@
 # yaml-language-server: $schema=schemas/gates.json
 schema_version: 1
 
-# The smoke and extension tests drive containers, and a sandbox has no Docker
-# daemon until torve S-0111. Until then the shell gates are the checks that
-# need none, and `.github/workflows/bake.yaml` stays the build's only judge.
+# The smoke and extension tests drive containers. Since torve 0.5.0 the gates
+# sandbox runs beside a Docker daemon of its own (`runtime.docker: nested`), so
+# `bake-smoke` builds and smoke-tests the targets a candidate touches. The
+# extension and build-app batteries still run only in
+# `.github/workflows/bake.yaml`.
 tests:
   patterns:
     - "shared/test/**"
@@ -54,6 +56,17 @@ gates:
     state: blocking
     origin: structural
     timeout: 60
+  # The build's own judge, on the task's nested daemon: each bake target the
+  # candidate touches, built once and smoke-tested (`.torve/gates/bake-smoke.sh`).
+  # Enters at shadow and is promoted on its record against bake.yaml's.
+  - name: bake-smoke
+    run: "bash .torve/gates/bake-smoke.sh {base}"
+    input: worktree
+    state: shadow
+    origin: structural
+    # A bake-file change rebuilds every target: 359s for all nine from a cold
+    # daemon, rehearsed on dind 27.5.1 on 2026-10-21. One target took 32s.
+    timeout: 1200
   - name: acceptance
     run: "@task.acceptance"
     state: blocking
