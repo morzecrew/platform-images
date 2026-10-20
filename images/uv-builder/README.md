@@ -4,11 +4,11 @@ Build-stage image for Python applications managed with **[uv](https://docs.astra
 
 ## Contents
 
-**Tag `3.14`** (`linux/amd64`, `linux/arm64`) — `uv` on `python:3.14.8-trixie`, with **`build-uv-app`** (`rootfs/build.sh`) for sync → wheel → slim venv.
+**Tags `3.14` and `3.14.8`** (`linux/amd64`, `linux/arm64`) — `uv` on `python:3.14.8-trixie`, with **`build-uv-app`** (`rootfs/build.sh`) for sync → wheel → slim venv.
 
 Use in a **multi-stage** Dockerfile: mount or copy your project into `/app`, run `build-uv-app`, then copy `/opt/venv` (and your app if needed) into a minimal runtime image such as [`python-distroless`](../python-distroless).
 
-`DISTROLESS_PYTHON_VERSION` in [`docker-bake.hcl`](../../docker-bake.hcl) is the exact Python patch for both this image and [`python-distroless`](../python-distroless), so the venv built here runs on the same CPython build there, on either platform; its major.minor is the tag. `BUILDER_DEBIAN_SUITE` and `UV_VERSION` map to `DEBIAN_SUITE` / `UV_VERSION` in [`Dockerfile`](./Dockerfile).
+`DISTROLESS_PYTHON_VERSION` in [`docker-bake.hcl`](../../docker-bake.hcl) is the exact Python patch for both this image and [`python-distroless`](../python-distroless), so the venv built here runs on the same CPython build there, on either platform. It is tagged twice: with its major.minor, and with the patch itself, so a project can pin the builder to the `python-distroless` tag it runs on. `BUILDER_DEBIAN_SUITE` and `UV_VERSION` map to `DEBIAN_SUITE` / `UV_VERSION` in [`Dockerfile`](./Dockerfile).
 
 ## Building
 
@@ -18,7 +18,7 @@ From the repo root (see [images/README.md](../README.md)):
 just bake uv-builder
 ```
 
-Image: `ghcr.io/morzecrew/uv-builder:3.14`.
+Image: `ghcr.io/morzecrew/uv-builder:3.14` and `ghcr.io/morzecrew/uv-builder:3.14.8`.
 
 ## `build-uv-app`
 
@@ -36,7 +36,7 @@ the application share one layer and every code change re-ships both. The two
 modes split them, so the dependency layer is cached by the lockfile alone:
 
 ```dockerfile
-FROM ghcr.io/morzecrew/uv-builder:3.14 AS deps
+FROM ghcr.io/morzecrew/uv-builder:3.14.8 AS deps
 COPY pyproject.toml uv.lock /app/
 RUN --mount=type=cache,target=/root/.cache/uv build-uv-app deps
 
