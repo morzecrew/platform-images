@@ -3367,7 +3367,8 @@ written after moving to postgres 18.6 and valkey 9.1.
   `VALKEY_PASSWORD_FILE` and sets `mem_limit`; the queue keeps `/data` in a
   named volume; the top-level `secrets:` and `volumes:` are there. A paragraph
   says what each line prevents. "How `maxmemory` is derived" names a Compose
-  service without `mem_limit` as an unconstrained container.
+  service with neither `mem_limit` nor `deploy.resources.limits.memory` as an
+  unconstrained container.
 - **Not built:** a change to the fallback. It warns, and the summary prints
   `source=fallback`; eis-backend asked for the note only.
 - **Class:** `drift`.
@@ -3384,3 +3385,10 @@ written after moving to postgres 18.6 and valkey 9.1.
 - The fixed example, extracted from the README and run with Docker Compose
   5.5.1: both services run, each reaches the other with the password and gets
   `NOAUTH` without it, and `queue` has `maxmemory` 402653175.
+
+## Review round 1 — PR #75, 2026-10-20
+
+| ID | Finding | Class | Resolution |
+|---|---|---|---|
+| R-55 | **`max_connections` set to the pools' sum leaves them 3 short.** Postgres keeps `superuser_reserved_connections` (3) for superusers. | `spec-gap` | Fixed: the example sets 103 and the text says to add 3. Reproduced on `postgres:18.6` with `max_connections=5`: a role without `SUPERUSER` gets 2 connections, the third gets `remaining connection slots are reserved for roles with the SUPERUSER attribute`. 103 starts as `source=env`. |
+| R-56 | **The fallback is not unconditional without `mem_limit`:** an inherited numeric `memory.max` would be derived from. | `spec-gap` | Partly fixed. A parent's limit is not inherited: under a slice capped at 700M, the container reads `max` and falls back. But `deploy.resources.limits.memory` with no `mem_limit` gives `source=derived maxmemory = 402653175` at 512M, and the README now names it. |
