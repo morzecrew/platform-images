@@ -3413,3 +3413,107 @@ filed after its move to python-distroless `3.14.8` and uv-builder `3.14`.
   D-076's case, with `python-distroless:3.14.8` moved to the published image.
   A two-stage build `FROM` a loaded caddy does the same to `caddy:2.11.7`,
   and keeps the loaded one with the flag.
+
+# Wave 17 · Requests from eis-backend: CRS in front of a JSON API
+
+Branch `feat/caddy-json-api-waf`. Items 1 to 5 of eis-backend's requests file:
+`caddy:2.11.7` was the first image to load CRS (D-068), and at CRS's defaults
+it broke a plain JSON REST API.
+
+**Drift count: 1** (D-079).
+
+## D-079 — CRS refused every `PUT`, `PATCH` and `DELETE`
+
+- **Seen:** CRS allows `GET HEAD POST OPTIONS` unless told otherwise, and rule
+  911100 scores any other method 5, the threshold. Schedules, role and
+  password changes and key revocation all got 403 at eis-backend's gateway.
+  The image's own `cors_default` snippet advertises all three methods. The
+  smoke test's WAF probes were all `GET`.
+- **Built:** `coraza.conf` sets `tx.allowed_methods` to CRS's four plus `PUT`,
+  `PATCH` and `DELETE` (rule 200003). `overrides/` loads later and can still
+  change it; eis-backend's own rule for this uses another id and keeps
+  working. The README's upgrade note names the images that refused them.
+- **Not built:** a `CADDY_WAF_ALLOWED_METHODS` variable. A file in
+  `overrides/` already sets the list, and the defect was the default.
+- **Class:** `drift`.
+
+## D-080 — Detection-only had no switch anyone could see
+
+- **Seen:** eis-backend asked for a detection-only rollout without a derived
+  image. A file in `overrides/` saying `SecRuleEngine DetectionOnly` already
+  did it: the SQLi probe got 200. Nothing documented it, and the summary
+  could not show it.
+- **Built:** `CADDY_WAF_ENGINE`, `On` or `DetectionOnly`, a curated variable
+  with no legacy name. The image's WAF block sets `SecRuleEngine` from it
+  after `overrides/`, so the variable wins and the summary stays true. Any
+  other value refuses to start. The entrypoint warns while it is
+  `DetectionOnly`, and names a file in `overrides/` that sets
+  `SecRuleEngine`, since that file is now ignored. `coraza.conf` keeps its
+  `SecRuleEngine On` for a fragment's WAF block that includes it.
+- **Not built:** `Off`, which Coraza also accepts. `DetectionOnly` passes the
+  same requests and still logs them.
+- **Cost:** the curated table's legacy column can be empty now, so the loop
+  reads a legacy name only when there is one.
+- **Class:** `spec-gap`.
+
+## D-081 — A WAF 403 looked like the application's
+
+- **Seen:** the WAF's 403 had no body and no marker, so a frontend could not
+  tell it from the API's own 403 without the gateway's logs.
+- **Built:** a `handle_errors 403` in the site block. It sets
+  `X-Waf-Blocked` to `{err.id}`, Coraza's `unique_id` from the audit log,
+  when `{err.message}` is coraza-caddy's `interruption triggered`. Caddy's
+  other 403 errors and an application's 403 response carry nothing. The body
+  stays empty.
+- **Not built:** a JSON body. A fragment's own `handle_errors` writes the
+  response; the header joins it rather than competing with it.
+- **Class:** `spec-gap`.
+
+## D-082 — The usual JSON-API exclusions, as opt-in files
+
+- **Seen:** reproduced on the published `caddy:2.11.7`: a bodiless `POST` to a
+  numeric `Host` scores 920350 plus 920180, 6, and gets 403 (the same request
+  with a name in `Host` passes); `$and` and `$like` trip 942290; a password
+  with `<`, `>` or quotes trips 941100, 941110, 941160 and 942100.
+- **Built:** `/opt/coraza/optional/` with `ip-host.conf`, `mongo-operators.conf`
+  and `password-fields.conf`, rules 200100 to 200102, each saying what it
+  removes. None loads until copied or mounted into `overrides/`. The README
+  lists them and shows both ways in. It also shows `ctl:requestBodyAccess=Off`
+  for an upload path, and says the image's rules use ids 200000 to 200199.
+- **Not built:** a variable per exclusion, such as `CADDY_WAF_ALLOW_IP_HOST`;
+  one file each does the job. An upload exclusion file, because the path is
+  the application's.
+- **Class:** `spec-gap`.
+
+### Verified
+
+- `caddy` smoke test, amd64:
+  - in section 9, `PUT`, `PATCH` and `DELETE` pass and `FOO` gets 403;
+  - the WAF's 403 carries the `unique_id` of its audit-log entry, while an
+    application's `respond 403` and Caddy's `error 403` carry no marker;
+  - the three exclusion cases are refused by default;
+  - new section 12: `DetectionOnly` passes the SQLi probe, logs it, shows in the
+    summary and warns, and names an override's `SecRuleEngine`; `Off` refuses;
+  - new section 13: with the three files taken from the built image, each case
+    passes, SQLi in a field `password-fields.conf` does not name still gets 403,
+    and a fragment's catch-all `handle_errors` writes the WAF's 403 with the
+    marker added.
+- Eight mutant images, each breaking one piece, fail the smoke test at the
+  assertion for that piece:
+  - no `tx.allowed_methods`;
+  - no marker;
+  - a marker on every 403;
+  - `SecRuleEngine` before `overrides/`;
+  - `Off` accepted;
+  - no override warning;
+  - a `password-fields.conf` that drops the SQLi and XSS rules for every field;
+  - no `/opt/coraza/optional/`.
+- With the published image's Caddyfile plus the marker, a fragment's own
+  catch-all, `403` and `4xx` `handle_errors` each still write the response, with
+  the header added.
+- `DetectionOnly` writes the passed probe to the audit log as well as the error
+  log.
+- `ctl:requestBodyAccess=Off` on a path, with
+  `CADDY_REQUEST_BODY_MAX_SIZE=1000`: a 5000-byte multipart upload through
+  `reverse_proxy` gets 413 there and on any other path. `respond` never reads
+  the body, so behind it the same upload gets 200.
