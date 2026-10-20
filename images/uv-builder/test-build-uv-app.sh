@@ -98,6 +98,11 @@ got="$("${ENGINE}" run --rm "${FIXTURE}:2")"
 [ "${got}" = "2 dep" ] || die "entry point printed '${got}', want '2 dep'"
 echo "  ok: the console script runs on python-distroless"
 
+# A bare `python`, found on PATH, as `docker exec <container> python` finds it.
+"${ENGINE}" run --rm --entrypoint python "${FIXTURE}:2" -c 'import layerapp, dep' ||
+	die "a bare python on PATH is not the venv's: it cannot import the application"
+echo "  ok: python on PATH is the venv's"
+
 # Both layers' bytecode is what the runtime loads, not a recompile.
 trace="$("${ENGINE}" run --rm --entrypoint /opt/venv/bin/python "${FIXTURE}:2" -v -c 'import layerapp' 2>&1)"
 for want in "/opt/app/layerapp/" "/opt/venv/lib/python3.*/site-packages/dep/"; do

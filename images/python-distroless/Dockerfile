@@ -45,6 +45,11 @@ ENV PYTHONUNBUFFERED=1 \
     XDG_CACHE_HOME=${APP_TMP_DIR}/.cache \
     LD_LIBRARY_PATH=/usr/lib
 
+# uv-builder's venv, first: there is no shell to fix PATH in, so without this
+# `docker exec <container> python` is the bare interpreter and cannot import
+# the application. envfile-exec names its interpreter absolutely.
+ENV PATH=/opt/venv/bin:${PATH}
+
 COPY --from=deps /etc/ssl/certs /etc/ssl/certs
 # `*-linux-gnu` is the Debian multiarch directory, which differs per platform
 # (x86_64-, aarch64-). The deps stage has exactly one, so each glob matches once.

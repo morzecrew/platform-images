@@ -6,7 +6,7 @@ Minimal **runtime** image for Python workloads: [`al3xos/python-distroless`](htt
 
 **Tag `3.14.8`** — distroless Python on `al3xos/python-distroless`, with libmagic, CA certs, and common runtime libs from bookworm.
 
-- Intended as the **final stage** after a builder such as [`uv-builder`](../uv-builder): copy `/opt/venv` from the build stage and set `PATH` to the venv’s `bin` if you run your app as the main process.
+- Intended as the **final stage** after a builder such as [`uv-builder`](../uv-builder): copy `/opt/venv` from the build stage. `PATH` starts with `/opt/venv/bin`, so `python`, in the entrypoint or in `docker exec <container> python`, is the venv’s.
 - **User** `65532:65532` by default (overridable via **`APP_UID`** / **`APP_GID`** build args).
 - **Environment** `LANG` / `LC_ALL` `C.UTF-8`, `TZ=UTC`, `PYTHONUNBUFFERED=1`, `PYTHONFAULTHANDLER=1`, plus **`APP_RUNTIME_DIR`**, **`APP_TMP_DIR`** (defaults `/srv/runtime` and `/srv/runtime/tmp`).
 - **Writable temp**: `TMPDIR` is **`APP_TMP_DIR`** (default `/srv/runtime/tmp`); `XDG_CACHE_HOME` is `${TMPDIR}/.cache`. Mount a volume over those paths if you need a writable layer at runtime.
