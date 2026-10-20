@@ -225,7 +225,7 @@ variable "BUILDER_DEBIAN_SUITE" {
 
 # renovate: datasource=docker depName=ghcr.io/astral-sh/uv versioning=docker
 variable "UV_VERSION" {
-  default = "0.13.3"
+  default = "0.13.4"
 }
 
 # Python comes from DISTROLESS_PYTHON_VERSION below, the exact patch both images
