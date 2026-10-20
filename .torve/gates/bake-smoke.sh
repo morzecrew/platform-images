@@ -21,10 +21,16 @@ set -euo pipefail
 base="${1:?usage: bake-smoke.sh <base>}"
 
 plan="$(docker buildx bake --print 2>/dev/null)"
-changed="$(git diff --name-only "${base}" HEAD)"
+# Against the tree, not HEAD, with untracked files: a candidate run by hand
+# need not have committed what it changed.
+changed="$(
+	git diff --name-only "${base}"
+	git ls-files --others --exclude-standard
+)"
 
 # A target is touched when a changed path lies under its context or under one
-# of its local named contexts. A change to the bake file touches every target.
+# of its local named contexts. A change to any definition file bake loads
+# without `-f`, overrides included, touches every target.
 targets="$(
 	PLAN="${plan}" CHANGED="${changed}" python3 -c '
 import json, os, posixpath
@@ -38,7 +44,15 @@ def local(ref):
 def under(path, directory):
     return path == directory or path.startswith(directory.rstrip("/") + "/")
 
-everything = "docker-bake.hcl" in changed
+# The default file lookup of buildx, which the bare docker buildx bake in CI uses.
+definitions = {
+    "compose.yaml", "compose.yml", "docker-compose.yml", "docker-compose.yaml",
+    "docker-bake.json", "docker-bake.hcl",
+    "compose.override.yaml", "compose.override.yml",
+    "docker-compose.override.yml", "docker-compose.override.yaml",
+    "docker-bake.override.json", "docker-bake.override.hcl",
+}
+everything = any(path in definitions for path in changed)
 
 for name, target in sorted(plan.items()):
     roots = [target["context"], *(ref for ref in (target.get("contexts") or {}).values() if local(ref))]
