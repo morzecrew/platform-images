@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=../../schemas/document.json
+id: S-0002
+title: Service images and the drift CI cannot see
+kind: design
+change:
+  type: feat
+  scope: images
+status: draft
+implementation: none
+depends_on: [S-0001]
+informed_by: []
+supersedes: []
+superseded_by: null
+owner: Lev Litvinov
+schema_version: 4
+summary: |-
+  Two new images, rustfs and pgbouncer, each admitted by route 2. Two repairs to what the bake publishes: Dockerfile `ARG` defaults that drifted from the bake with nothing to notice, and a python-distroless that stopped publishing its minor tag and copies bookworm libraries into a trixie runtime.
+
+  It is the first document torve serves on this repository. The four phases are sized for one night, and phases 1 and 2 share no file, so two workers can run them side by side.
+motivation: >-
+  A scan of the morzecrew projects on 2026-10-21 found two services run from upstream images
+  in two or more active projects, configured apart: RustFS in eis-backend and erp-backend,
+  and edoburu's PgBouncer in eis-backend, erp-backend and the erp-standalone bundle. MinIO,
+  which the bundle and morze-crm-backend still name, can no longer be pulled. The same scan
+  found three projects pinned to `python-distroless:3.14`, a tag that has not moved since
+  2026-08-01, and two Dockerfiles whose `ARG` defaults no longer match what the bake builds.
+current_state: >-
+  Nine targets in `docker-bake.hcl`, none for object storage or connection pooling.
+  `bake.yaml` builds and smoke-tests every target through the bake, which overrides every
+  `ARG` default, so a drifted default is invisible to CI. python-distroless publishes only
+  `3.14.8`. torve serves this repository at 0.6.0 with a nested Docker daemon per sandbox;
+  `bake-smoke` builds and smoke-tests the targets a candidate touches and is blocking from
+  this document on.
+goals: |-
+  - rustfs and pgbouncer images a consumer can switch to by changing its `image:` line and renaming its environment.
+  - A CI check that fails when a Dockerfile's `ARG` default and the bake disagree.
+  - `python-distroless:3.14` moving again, and its copied libraries matching its runtime's Debian.
+non_goals: |-
+  - Switching any consumer to the new images. That work lives in each consumer's repository.
+  - A Temporal image: three projects run it apart, but it is the largest of the candidates and deserves its own document.
+  - Creating buckets in the rustfs image: every consumer creates its own at startup (D-7).
+  - Accepting edoburu's unprefixed names in the pgbouncer image as aliases.
+  - An RFC under `rfcs/` for either image: this document is their design record.
+design:
+  - key: phases
+    md: |-
+      | Phase | Owns | Runs beside |
+      |---|---|---|
+      | 1 | `.github/scripts/arg-defaults*.sh`, `bake.yaml`, flyway's and uv-builder's Dockerfiles | 2 |
+      | 2 | python-distroless, its bake target, the root README | 1 |
+      | 3 | `images/rustfs/`, the bake, cleanup, both READMEs | — |
+      | 4 | `images/pgbouncer/`, `shared/`, the bake, cleanup, both READMEs | — |
+
+      Phases 2, 3 and 4 all edit `docker-bake.hcl` and the READMEs, so the planner runs them one at a time. No phase waits on another by declaration.
+  - key: judging
+    md: >-
+      `bake-smoke` is the judge of every phase that touches an image: it builds each bake
+      target the candidate touches on the task's nested daemon and runs its `smoke.sh`, as
+      `bake.yaml` does. A phase's acceptance names only what that gate does not: the static
+      checks over its new files, its test script, and the bake resolving its target.
+  - key: env-contract
+    md: >-
+      Both images follow S-0001/D-12 to S-0001/D-16: curated `<PREFIX>_*` keys with defaults,
+      allowlisted `<PREFIX>_CONF__*` passthrough, `_FILE` for the credential, a redacted
+      startup summary and no templating. rustfs departs from S-0001/D-16 in one place, recorded in
+      D-6: a credential set both as a value and as a file is refused, as upstream refuses
+      it, rather than the file winning.
+tests: |-
+  - Phase 1: `.github/scripts/test-arg-defaults.sh` against fixtures, and the script itself against the tree.
+  - Phase 2: python-distroless's smoke test round-trips through `zlib`, `lzma` and `bz2`.
+  - Phases 3 and 4: each image's `smoke.sh` asserts the refusals as much as the happy path, as S-0001/D-11 asks; phase 4's renderer is covered by `shared/test/`.
+docs: >-
+  Each image's README carries its environment table, its passthrough rules and its health
+  check. The root README's images table and `images/README.md`'s admissions table get a row
+  each.
+out_of_scope: ''
+risks: |-
+  - edoburu's tags move: the local `v1.25.1-p0` runs PgBouncer 1.25.2. D-9's smoke comparison of the label with `pgbouncer --version` catches it at build time, not at pull time.
+  - eis-backend gives Postgres `max_connections=30` and PgBouncer a pool of 30 plus a reserve of 10. The image keeps those defaults; the consumer's switch should size them against its database.
+alternatives:
+  - option: Build PgBouncer from Alpine's package rather than taking edoburu's build.
+    rejected_because: >-
+      edoburu's image is what every consumer runs today, already carries psql 18 for the
+      smoke test, and tracks PgBouncer releases within days. The image replaces only its
+      entrypoint, so moving to Alpine's package later changes one `FROM`.
+  - option: A floating `3.14` tag for python-distroless built from a minor-valued variable, as before 420566d.
+    rejected_because: >-
+      S-0001/D-22 needs one exact patch driving both halves of the Python pair. Tagging the
+      minor beside the patch, as uv-builder does, gives consumers the floating tag without
+      letting the pair drift apart.
+  - option: Per-image bake files, so that adding an image no longer edits the shared `docker-bake.hcl`.
+    rejected_because: >-
+      buildx replaces a group defined in two files rather than merging it (checked on
+      buildx 0.36.1), so CI would have to name every target. At four phases a night the
+      serial queue costs less than that restructure.
+questions:
+  - id: Q-1
+    text: >-
+      Should the pgbouncer image also accept edoburu's unprefixed names (`DB_HOST`,
+      `POOL_MODE`, …) with a warning, as caddy accepts its legacy names, so a consumer can
+      switch by changing only its `image:` line?
+    status: open

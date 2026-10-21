@@ -1,0 +1,197 @@
+# yaml-language-server: $schema=../../schemas/decisions.json
+decisions:
+  - id: D-1
+    grade: ASSUMED
+    text: >-
+      For every bake target named after its own directory under `images/`, each `ARG`
+      default in its Dockerfile equals the value the bake passes for that argument.
+      `.github/scripts/arg-defaults.sh` compares every such pair from `docker buildx bake
+      --print` and exits non-zero naming each one that differs. The bake workflow runs
+      it on every platform leg. A variant target over the same directory, such as
+      `postgres-pgvector`, passes its own values on purpose and is not compared.
+    paths: [.github/scripts/arg-defaults.sh, .github/workflows/bake.yaml]
+    consequence: >-
+      a Renovate pull request that moves a bake variable and leaves the Dockerfile's
+      copy behind goes red in CI, rather than leaving a `docker build` outside the bake
+      on the old version
+    rationale: >-
+      S-0001/D-3 keeps the `ARG` default as a hand copy of the bake value, and S-0001/D-23
+      lets Renovate edit only the bake. On 2026-10-21 two copies had drifted: flyway's
+      `CLICKHOUSE_JDBC_VERSION` was 0.10.0 against the bake's 0.11.0 after #81, and
+      uv-builder's `UV_VERSION` was 0.13.1 against 0.13.4. Neither was caught, because
+      the bake overrides both and every check builds through the bake.
+    cites: [S-0001/D-3, S-0001/D-23]
+    check: bash .github/scripts/arg-defaults.sh
+  - id: D-2
+    grade: ASSUMED
+    text: >-
+      python-distroless is tagged with the minor of `DISTROLESS_PYTHON_VERSION` and
+      with the exact patch, the minor first, as uv-builder is. Its labels keep naming the
+      exact patch.
+    paths: [docker-bake.hcl, images/python-distroless/README.md]
+    consequence: >-
+      a consumer pinning `python-distroless:3.14` gets the weekly rebuild again without
+      an edit, and a consumer pinning the patch keeps it
+    rationale: >-
+      The target was tagged with its version variable while that variable held a minor.
+      420566d (2026-08-01) made it an exact patch for uv-builder's sake, and the `3.14`
+      tag stopped moving as a side effect. bx-backend, tb-chat-analysis and
+      backend-template still pin `3.14`. uv-builder kept its minor tag under
+      S-0001/D-22, and #76 gave it the patch tag beside it.
+    cites: [S-0001/D-4, S-0001/D-22]
+  - id: D-3
+    grade: ASSUMED
+    text: >-
+      python-distroless's `deps` stage builds from `debian:${DEBIAN_VERSION}-slim`, the
+      Debian release its runtime names, so the libraries and CA bundle it copies come from
+      the same release as the runtime's glibc. Its smoke test imports `zlib`, `lzma` and
+      `bz2` and round-trips data through each, beside the libmagic check it already makes.
+    paths: [images/python-distroless/Dockerfile, images/python-distroless/smoke.sh]
+    consequence: >-
+      CPython's compression modules load the libraries of the release they were built
+      against. `LD_LIBRARY_PATH=/usr/lib` no longer puts bookworm's `libz`, `liblzma` and
+      `libbz2` ahead of the runtime's own.
+    rationale: >-
+      The stage is `debian:bookworm-slim`, hard-coded, so Renovate does not track it. The
+      runtime is `al3xos/python-distroless:3.14.8-debian13`, which is trixie. Docker Hub
+      tags Debian by number as well as by suite, so the stage can follow the runtime's
+      own `DEBIAN_VERSION` with no mapping.
+    cites: [S-0001/D-22]
+  - id: D-4
+    grade: ASSUMED
+    text: >-
+      `rustfs` is admitted by route 2 and recorded under "Admissions on record" in
+      `images/README.md`. eis-backend and erp-backend both run `rustfs/rustfs:1.0.1`, and
+      they have diverged on its health path and on where its logs go. MinIO, which the
+      erp-standalone bundle and morze-crm-backend still name, no longer publishes an image.
+    paths: [images/README.md]
+    consequence: >-
+      the projects that store objects have one image to land on, and MinIO's consumers have
+      a destination when they move
+    rationale: >-
+      eis-backend `compose/compose.yml:276-288` checks `/health/live` and sends logs to
+      stdout. erp-backend `compose/compose.yml:117-129` checks `/minio/health/live` and
+      leaves upstream's `/logs`, so its server log never reaches `docker logs`. morzer's
+      `test/dockerlab/dockerlab.go:55-58` records `minio/minio` going silent in September
+      2026 and `quay.io/minio/minio` refusing every pull by 2026-09-29.
+    cites: [S-0001/D-25]
+  - id: D-5
+    grade: ASSUMED
+    text: >-
+      `images/rustfs` builds `FROM rustfs/rustfs:${RUSTFS_VERSION}`, a Renovate-tracked
+      bake variable starting at 1.0.1, and its tag is that version. Its entrypoint sources
+      the shared helper, exports what it decides and then execs upstream's
+      `/entrypoint.sh`, which keeps creating the data directories and running as uid 10001.
+      Upstream owns every `RUSTFS_*` name, so the curated keys are upstream names whose
+      defaults the image changes: `RUSTFS_CONSOLE_ENABLE=false`, `RUSTFS_OBS_LOG_DIRECTORY`
+      empty so the server logs to stdout, and `RUSTFS_ADDRESS=:9000`.
+    paths: [images/rustfs/Dockerfile, images/rustfs/rootfs/**]
+    consequence: >-
+      nothing listens on the console port unless a consumer asks, and the server's log is
+      in `docker logs`
+    rationale: >-
+      Probed on the local `rustfs/rustfs:1.0.1`: the console listens on 9001 by default,
+      and the image's `RUSTFS_OBS_LOG_DIRECTORY=/logs` sends everything but three
+      entrypoint lines to a file in the container. No consumer publishes 9001. caddy
+      already exports curated values into upstream's names (S-0001/D-12).
+    cites: [S-0001/D-1, S-0001/D-12, S-0001/D-15]
+  - id: D-6
+    grade: ASSUMED
+    text: >-
+      `RUSTFS_ACCESS_KEY` and `RUSTFS_SECRET_KEY` are required, each through its value or
+      upstream's own `_FILE`. Startup aborts when either is missing, empty or upstream's
+      built-in `rustfsadmin`. Upstream's refusal of a value and its file set together
+      stands. `RUSTFS_ROOT_*` and `MINIO_ROOT_*` credentials are refused, and the secret
+      never reaches the startup summary.
+    paths: [images/rustfs/rootfs/**]
+    consequence: >-
+      a deployment cannot start on a default credential, and there is one place a credential
+      comes from
+    rationale: >-
+      Upstream's `/entrypoint.sh` only warns on a missing or default credential and falls
+      back to `rustfsadmin` (lines 24, 142-153). Its `_FILE` handling exits 1 when both a
+      value and its file are set. That departs from S-0001/D-16, where the file wins: for a
+      name upstream owns and makes mutually exclusive, the execution log's A21 already found
+      that rule cannot hold. The binary also accepts `RUSTFS_ROOT_*` and `MINIO_ROOT_*`,
+      which upstream's script never checks.
+    cites: [S-0001/D-16]
+  - id: D-7
+    grade: ASSUMED
+    text: >-
+      `RUSTFS_CONF__<KEY>` exports `RUSTFS_<KEY>` once the key is on the image's allowlist.
+      `VOLUMES`, the credential names and the unsafe switches (`TLS_KEYLOG`,
+      `UNSAFE_BYPASS_DISK_CHECK`, `KMS_ALLOW_INSECURE_DEV_DEFAULTS`) are refused. The image
+      creates no bucket, and its README gives `/health/ready` as the compose health check.
+    paths: [images/rustfs/rootfs/**, images/rustfs/README.md]
+    consequence: >-
+      a consumer can reach upstream's settings by name, and cannot reach the ones that move
+      its data or weaken it
+    rationale: >-
+      Every consumer creates its own bucket at startup: eis-backend through forze's
+      `s3_bucket_lifecycle_step` (`app/src/wire/execution.py:100`), erp-backend the same
+      (`:183`), morze-crm-backend through ormy. `/health/ready` reports storage, IAM and
+      lock readiness, where `/health/live` reports only that the process answers. Both, and
+      `/minio/health/live`, return 200 without auth.
+    cites: [S-0001/D-13, S-0001/D-18]
+  - id: D-8
+    grade: ASSUMED
+    text: >-
+      `pgbouncer` is admitted by route 2 and recorded under "Admissions on record" in
+      `images/README.md`. eis-backend runs `edoburu/pgbouncer:v1.25.1-p0` and erp-backend
+      `v1.26.0-p0`, with byte-identical environment blocks copied between them and into the
+      erp-standalone bundle.
+    paths: [images/README.md]
+    consequence: >-
+      the three blocks become one image's defaults, and the pool settings change in one
+      place
+    rationale: >-
+      eis-backend `compose/compose.yml:76-104`, erp-backend `compose/compose.yml:40-69`
+      and erp-standalone `bundle/compose.yml.tpl:48-77` differ only in the tag. The local
+      `v1.25.1-p0` runs PgBouncer 1.25.2, so that upstream tag has moved under its consumers.
+    cites: [S-0001/D-25]
+  - id: D-9
+    grade: ASSUMED
+    text: >-
+      `images/pgbouncer` takes PgBouncer from `edoburu/pgbouncer` at a Renovate-tracked bake
+      tag, starting at v1.26.0-p0, and is tagged with PgBouncer's own version. Its own
+      entrypoint writes `pgbouncer.ini` and a 0600 `userlist.txt` on every start, then execs
+      `pgbouncer`. edoburu's script is not run. The prefix is `PGBOUNCER`, and the curated
+      keys default to what every consumer sets today: `DB_HOST` and `DB_USER` required,
+      `DB_PORT=5432`, `DB_NAME=*`, `DB_PASSWORD` required (with `_FILE`),
+      `LISTEN_PORT=6432`, `AUTH_TYPE=scram-sha-256`, `POOL_MODE=transaction`,
+      `MAX_CLIENT_CONN=1000`, `DEFAULT_POOL_SIZE=30`, `MAX_PREPARED_STATEMENTS=200`, and
+      `ADMIN_USERS` and `STATS_USERS` defaulting to `DB_USER`. `AUTH_TYPE` refuses `trust`
+      and `any`. `min_pool_size=5` and `reserve_pool_size=10` are baked. The image's
+      version label is the version `pgbouncer --version` prints, and its smoke test
+      compares the two.
+    paths: [images/pgbouncer/Dockerfile, images/pgbouncer/rootfs/**]
+    consequence: >-
+      a changed environment takes effect on a restart, the password arrives through a file,
+      and a moved upstream tag is caught by the smoke test rather than shipped
+    rationale: >-
+      edoburu's `/entrypoint.sh` writes `pgbouncer.ini` and the userlist only when they are
+      absent (lines 55, 89), so `docker restart` keeps the old configuration. It has no
+      `_FILE` for the password, and it prints values into the ini unquoted and unvalidated.
+      psycopg prepares a statement after five executions, and in transaction mode that
+      works only while `max_prepared_statements` is non-zero. Both tags default it to 200,
+      which no consumer writes down.
+    cites: [S-0001/D-12, S-0001/D-14, S-0001/D-16]
+  - id: D-10
+    grade: ASSUMED
+    text: >-
+      `PGBOUNCER_CONF__<key>` writes `<key> = <value>` into the `[pgbouncer]` section once
+      the key is on the image's allowlist, in PgBouncer's own spelling. `user`,
+      `auth_file`, `auth_hba_file`, `logfile`, `pidfile` and `unix_socket_dir` are refused,
+      as is a value that starts a new section or `%include`. The renderer is a new mode of
+      `shared/rootfs/lib/envconf.sh` beside `valkeyconf` and `pgconf`, covered by the
+      helper's own suite. The README gives `pg_isready -h 127.0.0.1 -p 6432` as the
+      health check and says it proves PgBouncer answers, not that Postgres does.
+    paths: [shared/rootfs/lib/envconf.sh, shared/test/**, images/pgbouncer/README.md]
+    consequence: >-
+      a consumer reaches PgBouncer's settings by name, and nothing in the environment can
+      rewrite the files PgBouncer reads its users from
+    rationale: >-
+      The consumers' health check falls back to `psql` with no password, which fails under
+      scram-sha-256. Neither existing renderer writes an ini section: `pgconf` quotes values
+      the way `postgresql.conf` does.
+    cites: [S-0001/D-13, S-0001/D-14, S-0001/D-17]
