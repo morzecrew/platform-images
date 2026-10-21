@@ -11,14 +11,18 @@ FROM rustfs/rustfs:${RUSTFS_VERSION}
 # this directory: a target that does not declare the context cannot reference
 # it, so the failure is a build error rather than a stale duplicate drifting
 # out of sync (RFC 0001 decision 6).
-COPY --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
+#
+# Modes are set by `--chmod` rather than by a following `RUN chmod`: the base
+# image sets `USER rustfs` (uid 10001), so a `RUN` step is not root and cannot
+# chmod files this layer's `COPY` leaves owned by root. `docker buildx` would
+# fail the build outright rather than ship an entrypoint the runtime cannot
+# execute (`bake-smoke` red on `chmod: Operation not permitted`). `--chmod`
+# also pins the modes whatever a checkout's umask hands the shared context.
+COPY --chmod=0644 --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 
-COPY rootfs/allowlist.conf /etc/rustfs/allowlist.conf
-COPY rootfs/denylist.conf /etc/rustfs/denylist.conf
-COPY rootfs/entrypoint.sh /usr/local/bin/rustfs-entrypoint
-
-RUN chmod 0755 /usr/local/bin/rustfs-entrypoint \
-    && chmod 0644 /usr/local/lib/envconf.sh /etc/rustfs/allowlist.conf /etc/rustfs/denylist.conf
+COPY --chmod=0644 rootfs/allowlist.conf /etc/rustfs/allowlist.conf
+COPY --chmod=0644 rootfs/denylist.conf /etc/rustfs/denylist.conf
+COPY --chmod=0755 rootfs/entrypoint.sh /usr/local/bin/rustfs-entrypoint
 
 # The curated defaults live here as well as in the entrypoint, so `docker
 # inspect` shows them and an entrypoint override still lands on them. The
