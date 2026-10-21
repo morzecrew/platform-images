@@ -13,7 +13,9 @@ phasing:
       does not pass, is not compared. Add `.github/scripts/test-arg-defaults.sh`, which
       builds a fixture bake file and Dockerfile in a temporary directory and asserts the
       script exits 0 on a matching pair and 1 on a drifted one, naming it. Run the script
-      in `.github/workflows/bake.yaml` as a step after "Test the shared env-config helper".
+      in `.github/workflows/bake.yaml` as a step after "Test the shared env-config helper",
+      and add both scripts to that workflow's `pull_request` path filter, so a change to the
+      check alone still runs it.
       Fix the two drifts it finds on this tree: flyway's `CLICKHOUSE_JDBC_VERSION` default
       becomes 0.11.0 and uv-builder's `UV_VERSION` default becomes 0.13.4. Settles D-1.
     scope:
@@ -73,7 +75,8 @@ phasing:
       the container log; a signed path-style request creates a bucket and puts and gets an
       object, while an anonymous request and a wrong secret get 403; neither secret appears
       in the log; and startup aborts on a missing credential, on `rustfsadmin`, on an
-      unreadable credential file, on `RUSTFS_ROOT_USER`, on a passthrough key off the
+      unreadable credential file, on a credential set both as a value and as `_FILE`, on
+      `RUSTFS_ROOT_USER`, on a passthrough key off the
       allowlist and on `RUSTFS_CONF__VOLUMES`. Settles D-4, D-5, D-6 and D-7.
     scope:
       - images/rustfs/**
