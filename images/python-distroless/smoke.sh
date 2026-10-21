@@ -14,6 +14,27 @@ lib = ctypes.util.find_library('magic') or 'libmagic.so.1'; \
 ctypes.CDLL(lib); print('libmagic:', lib)" ||
 	{ echo "FAIL: libmagic did not load"; exit 1; }
 
+# zlib, lzma and bz2 come out of the deps stage, and CPython's compression
+# modules load the libraries of the release they were built against: a deps
+# stage from the wrong release can import and then fail on the first compress().
+# So round-trip real data through each, and print a line naming the module that
+# broke rather than leaving the traceback as the only signal.
+"${ENGINE}" run --rm -i "${IMAGE}" - <<'EOF' || { echo "FAIL: a compression module did not round-trip"; exit 1; }
+payload = b"python-distroless-compression-round-trip" * 64
+failed = False
+for name in ("zlib", "lzma", "bz2"):
+    try:
+        module = __import__(name)
+        if module.decompress(module.compress(payload)) != payload:
+            raise AssertionError("the round-trip changed the payload")
+    except Exception as error:
+        print("FAIL: %s: %s" % (name, error))
+        failed = True
+    else:
+        print("%s: round-trip ok" % name)
+raise SystemExit(1 if failed else 0)
+EOF
+
 # Non-root by construction, and the README says 65532.
 uid=$("${ENGINE}" run --rm "${IMAGE}" -c "import os; print(os.getuid())")
 [ "${uid}" = "65532" ] || { echo "FAIL: running as uid ${uid}, expected 65532"; exit 1; }

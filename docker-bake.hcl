@@ -338,11 +338,20 @@ variable "DISTROLESS_DEBIAN_VERSION" {
   default = "13"
 }
 
+# Tagged with the minor and with the exact patch, the minor first, as uv-builder
+# is. The minor tag is back because a consumer pinning python-distroless:3.14
+# gets the weekly rebuild again without an edit, while a consumer on the patch
+# keeps it; the patch tag is what pins a runtime to the builder that made its
+# venv. tags[0] stays the minor, so CI and publish.yaml keep reading the
+# repository from it. The labels name the exact patch either way.
 target "python-distroless" {
   inherits   = ["_attested"]
   context    = "./images/python-distroless"
   dockerfile = "Dockerfile"
-  tags       = tag("python-distroless", DISTROLESS_PYTHON_VERSION)
+  tags = concat(
+    tag("python-distroless", regex("^[0-9]+\\.[0-9]+", DISTROLESS_PYTHON_VERSION)),
+    tag("python-distroless", DISTROLESS_PYTHON_VERSION),
+  )
   labels     = label("python-distroless", DISTROLESS_PYTHON_VERSION)
   args = {
     PYTHON_VERSION = DISTROLESS_PYTHON_VERSION

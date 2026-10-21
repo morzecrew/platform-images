@@ -7,7 +7,11 @@ ARG APP_GID=65532
 ARG APP_RUNTIME_DIR=/srv/runtime
 ARG APP_TMP_DIR=/srv/runtime/tmp
 
-FROM debian:bookworm-slim AS deps
+# The deps stage must be the Debian release the runtime names, or the libmagic,
+# libz, liblzma and libbz2 copied out of it are built against a different glibc
+# than the runtime loads them with. DEBIAN_VERSION, declared above the first
+# FROM, is the same value the bake passes for the runtime's tag.
+FROM debian:${DEBIAN_VERSION}-slim AS deps
 
 ARG APP_UID
 ARG APP_GID
