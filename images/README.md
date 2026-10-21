@@ -41,6 +41,14 @@ contract. It is normative: image READMEs link here rather than restating it.
 >   `notify-keyspace-events` — a real allowlisted directive. The amendment is
 >   proposed and not yet accepted (EXECUTION-LOG D-018), so the rule below is
 >   still the normative one and this is the gap.
+> - **`rustfs`** implements the whole contract through the shared helper: two
+>   channels, allowlist and denylist, collision refusal, `_FILE` secrets and the
+>   startup summary. Its curated channel is deliberately three settings, because
+>   upstream owns every `RUSTFS_*` name and the image only changes what those
+>   three default to; everything else is passthrough against an allowlist of
+>   upstream's own setting names. One check the contract does not require:
+>   startup aborts on a missing or default credential, which upstream only warns
+>   about.
 > - **`postgres`** implements the passthrough channel, the allowlist, a denylist
 >   file and the startup summary, through the same helper (RFC 0001 P4). It is
 >   the one image that attributes **every** value to the file or variable it came
@@ -261,6 +269,7 @@ author to remember.
 | Node runtime / `node-distroless` | — | Proposed as the other half of the builder pair. No Morze project executes Node in production — all five build static assets and serve them from nginx or Caddy — so the runtime would have been maintained for nobody. See [RFC 0008](../rfcs/0008-javascript-builder-and-distroless-runtime-pair.md) §3.1. | 2026-08-12, **refused** |
 | OpenTelemetry Collector | — | One repository uses it. Route 1 needs two hand-rolled Dockerfiles and route 2 needs two projects that have diverged; one project satisfies neither. See [RFC 0005](../rfcs/0005-opentelemetry-collector-image.md). | 2026-08-12, **refused** |
 | ClickHouse | — | Two compose services, but the deployed instances are managed (Yandex MDB), so the image would be curating config for something we do not run. See [RFC 0007](../rfcs/0007-clickhouse-image.md). | 2026-08-12, **refused** |
+| `rustfs` | 2 (drift) | Two backends run `rustfs/rustfs:1.0.1` and have already fallen out of step: one probes a health path the other does not, and one has moved the server's log off stdout, so the same upstream reference is configured two ways for the same job. The fallback is closed rather than merely unadopted — MinIO no longer publishes an image, so there is no shared upstream reference to land on. See S-0002/D-4. | 2026-10-21, **admitted** |
 
 A refusal is recorded rather than left implicit, because the next person to want
 one of these will otherwise re-derive the case from scratch — and because the

@@ -40,6 +40,7 @@ variable "DESCRIPTIONS" {
     "npm-builder"       = "Node build stage for static assets: frozen npm install, project build, verified bundle to /srv via build-js-app."
     "python-distroless" = "Distroless Python runtime with libmagic and CA bundle."
     "valkey"            = "Valkey with a finite maxmemory, one persistence switch, file-first secrets, and env-generated config."
+    "rustfs"            = "RustFS S3-compatible object storage: console off by default, both credentials required, env-configured."
   }
 }
 
@@ -307,6 +308,38 @@ target "valkey" {
 
 # ....................... #
 
+# Pinned by full patch, not by minor: upstream's floating tags move under a
+# consumer, and this base image is the whole of what the image ships. The
+# variable is passed straight through as the Dockerfile's ARG, so the pin and
+# the build cannot drift apart.
+# renovate: datasource=docker depName=rustfs/rustfs versioning=docker
+variable "RUSTFS_VERSION" {
+  default = "1.0.1"
+}
+
+# A thin image on purpose: three defaults changed, a credential check, and the
+# env contract. It starts upstream's /entrypoint.sh rather than reimplementing
+# it, so the data and log directories come from upstream and not from here.
+target "rustfs" {
+  inherits   = ["_attested"]
+  context    = "./images/rustfs"
+  dockerfile = "Dockerfile"
+  tags       = tag("rustfs", RUSTFS_VERSION)
+  labels     = label("rustfs", RUSTFS_VERSION)
+
+  # The shared env-config helper, as a named context rather than a copy under
+  # images/rustfs/ (RFC 0001 decision 6).
+  contexts = {
+    shared = "./shared"
+  }
+
+  args = {
+    RUSTFS_VERSION = RUSTFS_VERSION
+  }
+}
+
+# ....................... #
+
 # The one Python version for both uv-builder and python-distroless: uv-builder
 # produces /opt/venv and python-distroless executes it, on every platform. It
 # used to be two variables checked for matching major.minor (RFC 0008 sec 5.4),
@@ -364,6 +397,6 @@ target "python-distroless" {
 group "default" {
   targets = [
     "flyway", "caddy", "postgres", "postgres-pgvector", "postgres-cron",
-    "uv-builder", "npm-builder", "python-distroless", "valkey",
+    "uv-builder", "npm-builder", "python-distroless", "valkey", "rustfs",
   ]
 }
