@@ -2,7 +2,7 @@
 id: S-0001
 title: Standing decisions
 kind: convention
-status: draft
+status: accepted
 implementation: complete
 depends_on: []
 informed_by: []

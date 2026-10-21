@@ -5,7 +5,7 @@ kind: design
 change:
   type: feat
   scope: images
-status: draft
+status: accepted
 implementation: none
 depends_on: [S-0001]
 informed_by: []
