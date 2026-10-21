@@ -3,21 +3,21 @@ phasing:
   - phase: 1
     title: ARG defaults follow the bake
     intent: >-
-      Add `.github/scripts/arg-defaults.sh`, a bash script that reads `docker buildx bake
-      --print` (taking an optional `-f <file>` it passes through, so a test can point it at
-      a fixture). For every target whose name is the basename of its `context` under
-      `images/`, it reads each `ARG NAME=value` line of the target's Dockerfile, quoted or
-      not, and compares the default with the value the target passes for `NAME`. Each
-      difference prints one line naming the target, the Dockerfile, the argument and both
-      values, and any difference exits 1. An argument with no default, or one the target
-      does not pass, is not compared. Add `.github/scripts/test-arg-defaults.sh`, which
-      builds a fixture bake file and Dockerfile in a temporary directory and asserts the
-      script exits 0 on a matching pair and 1 on a drifted one, naming it. Run the script
-      in `.github/workflows/bake.yaml` as a step after "Test the shared env-config helper",
-      and add both scripts to that workflow's `pull_request` path filter, so a change to the
-      check alone still runs it.
-      Fix the two drifts it finds on this tree: flyway's `CLICKHOUSE_JDBC_VERSION` default
-      becomes 0.11.0 and uv-builder's `UV_VERSION` default becomes 0.13.4. Settles D-1.
+      Add `.github/scripts/arg-defaults.sh`, a bash script that reads `docker buildx
+      bake --print` (taking an optional `-f <file>` it passes through, so a test can
+      point it at a fixture). For every target whose name is the basename of its `context`
+      under `images/`, it reads each `ARG NAME=value` line of the target's Dockerfile,
+      quoted or not, and compares the default with the value the target passes for
+      `NAME`. Each difference prints one line naming the target, the Dockerfile, the
+      argument and both values, and any difference exits 1. An argument with no default,
+      or one the target does not pass, is not compared. Add `.github/scripts/test-arg-defaults.sh`,
+      which builds a fixture bake file and Dockerfile in a temporary directory and
+      asserts the script exits 0 on a matching pair and 1 on a drifted one, naming
+      it. Run the script in `.github/workflows/bake.yaml` as a step after "Test the
+      shared env-config helper", and add both scripts to that workflow's `pull_request`
+      path filter, so a change to the check alone still runs it. Fix the two drifts
+      it finds on this tree: flyway's `CLICKHOUSE_JDBC_VERSION` default becomes 0.11.0
+      and uv-builder's `UV_VERSION` default becomes 0.13.4. Settles D-1.
     scope:
       - .github/scripts/arg-defaults.sh
       - .github/scripts/test-arg-defaults.sh
@@ -27,106 +27,113 @@ phasing:
     acceptance:
       - bash .github/scripts/test-arg-defaults.sh
       - bash .github/scripts/arg-defaults.sh
-      - shellcheck -S error .github/scripts/arg-defaults.sh .github/scripts/test-arg-defaults.sh
+      - >-
+        shellcheck -S error .github/scripts/arg-defaults.sh .github/scripts/test-arg-defaults.sh
     character: routine
   - phase: 2
-    title: python-distroless keeps its minor tag and builds its libraries on its own Debian
+    title: >-
+      python-distroless keeps its minor tag and builds its libraries on its own Debian
     intent: >-
-      In `docker-bake.hcl`, tag the `python-distroless` target with `concat()` of the minor
-      of `DISTROLESS_PYTHON_VERSION` and the exact patch, the minor first, as the
-      `uv-builder` target does, with a comment saying why the minor is back. Its labels keep
-      naming the exact patch. In `images/python-distroless/Dockerfile` the `deps` stage
-      becomes `FROM debian:${DEBIAN_VERSION}-slim`, with `DEBIAN_VERSION` declared before
-      the first `FROM`, as `PYTHON_VERSION` is. Extend `images/python-distroless/smoke.sh`
-      with one check that imports `zlib`, `lzma` and `bz2` in the image and round-trips a
-      payload through each, failing with a line naming the module that broke. Update the
-      tag line and the deps-stage sentence in `images/python-distroless/README.md`, and
-      any line in the root `README.md` that names python-distroless's tags. Settles D-2 and
-      D-3.
+      In `docker-bake.hcl`, tag the `python-distroless` target with `concat()` of
+      the minor of `DISTROLESS_PYTHON_VERSION` and the exact patch, the minor first,
+      as the `uv-builder` target does, with a comment saying why the minor is back.
+      Its labels keep naming the exact patch. In `images/python-distroless/Dockerfile`
+      the `deps` stage becomes `FROM debian:${DEBIAN_VERSION}-slim`, with `DEBIAN_VERSION`
+      declared before the first `FROM`, as `PYTHON_VERSION` is. Extend `images/python-distroless/smoke.sh`
+      with one check that imports `zlib`, `lzma` and `bz2` in the image and round-trips
+      a payload through each, failing with a line naming the module that broke. Update
+      the tag line and the deps-stage sentence in `images/python-distroless/README.md`,
+      and any line in the root `README.md` that names python-distroless's tags. Settles
+      D-2 and D-3.
     scope:
-      - docker-bake.hcl
+      - /docker-bake.hcl
       - images/python-distroless/Dockerfile
       - images/python-distroless/smoke.sh
       - images/python-distroless/README.md
-      - README.md
+      - /README.md
     acceptance:
       - >-
-        docker buildx bake --print python-distroless | grep -q
-        '"ghcr.io/morzecrew/python-distroless:3.14"'
-      - hadolint -t error images/python-distroless/Dockerfile
-      - shellcheck -S error images/python-distroless/smoke.sh
+        docker buildx bake --print python-distroless | grep -q '"ghcr.io/morzecrew/python-distroless:3.14"'
+      - >-
+        hadolint -t error images/python-distroless/Dockerfile
+      - >-
+        shellcheck -S error images/python-distroless/smoke.sh
     character: routine
   - phase: 3
     title: A rustfs image
     intent: >-
       Admit `rustfs` through the nine touchpoints `images/README.md` lists (S-0001/D-2):
-      `images/rustfs/` with `Dockerfile`, `README.md`, `rootfs/entrypoint.sh`,
-      `rootfs/allowlist.conf`, `rootfs/denylist.conf` and `smoke.sh`; a Renovate-annotated
-      `RUSTFS_VERSION` variable, a target inheriting `_attested` with the `shared` named
-      context, a `DESCRIPTIONS` entry and `default` group membership in `docker-bake.hcl`;
-      `rustfs` in `PACKAGES` in `.github/workflows/cleanup-images.yaml`; a row in the root
-      `README.md` images table; and the admission row under "Admissions on record". The
-      entrypoint follows valkey's shape: it sources `/usr/local/lib/envconf.sh`, settles the
-      curated keys and the passthrough, prints the redacted summary to stderr and execs
-      upstream's `/entrypoint.sh rustfs`. `smoke.sh` takes one image reference, honours
-      `ENGINE` as the other smoke scripts do, and asserts: the server starts with both
-      credentials given only as `_FILE`; `/health/live`, `/health/ready` and
-      `/minio/health/live` answer 200; nothing listens on 9001; the server's own lines reach
-      the container log; a signed path-style request creates a bucket and puts and gets an
-      object, while an anonymous request and a wrong secret get 403; neither secret appears
-      in the log; and startup aborts on a missing credential, on `rustfsadmin`, on an
-      unreadable credential file, on a credential set both as a value and as `_FILE`, on
-      `RUSTFS_ROOT_USER`, on a passthrough key off the
+      `images/rustfs/` with `Dockerfile`, `README.md`, `rootfs/entrypoint.sh`, `rootfs/allowlist.conf`,
+      `rootfs/denylist.conf` and `smoke.sh`; a Renovate-annotated `RUSTFS_VERSION`
+      variable, a target inheriting `_attested` with the `shared` named context, a
+      `DESCRIPTIONS` entry and `default` group membership in `docker-bake.hcl`; `rustfs`
+      in `PACKAGES` in `.github/workflows/cleanup-images.yaml`; a row in the root
+      `README.md` images table; and the admission row under "Admissions on record".
+      The entrypoint follows valkey's shape: it sources `/usr/local/lib/envconf.sh`,
+      settles the curated keys and the passthrough, prints the redacted summary to
+      stderr and execs upstream's `/entrypoint.sh rustfs`. `smoke.sh` takes one image
+      reference, honours `ENGINE` as the other smoke scripts do, and asserts: the
+      server starts with both credentials given only as `_FILE`; `/health/live`, `/health/ready`
+      and `/minio/health/live` answer 200; nothing listens on 9001; the server's own
+      lines reach the container log; a signed path-style request creates a bucket
+      and puts and gets an object, while an anonymous request and a wrong secret get
+      403; neither secret appears in the log; and startup aborts on a missing credential,
+      on `rustfsadmin`, on an unreadable credential file, on a credential set both
+      as a value and as `_FILE`, on `RUSTFS_ROOT_USER`, on a passthrough key off the
       allowlist and on `RUSTFS_CONF__VOLUMES`. Settles D-4, D-5, D-6 and D-7.
     scope:
       - images/rustfs/**
-      - docker-bake.hcl
+      - /docker-bake.hcl
       - .github/workflows/cleanup-images.yaml
-      - README.md
+      - /README.md
       - images/README.md
     acceptance:
       - docker buildx bake --print rustfs >/dev/null
       - hadolint -t error images/rustfs/Dockerfile
-      - shellcheck -S error images/rustfs/smoke.sh images/rustfs/rootfs/entrypoint.sh
-      - grep -qw rustfs .github/workflows/cleanup-images.yaml
+      - >-
+        shellcheck -S error images/rustfs/smoke.sh images/rustfs/rootfs/entrypoint.sh
+      - >-
+        grep -qw rustfs .github/workflows/cleanup-images.yaml
     character: routine
   - phase: 4
     title: A pgbouncer image
     intent: >-
       Add an ini-section renderer to `shared/rootfs/lib/envconf.sh` beside `valkeyconf`
-      and `pgconf`: `key = value` lines, unquoted as PgBouncer reads them, refusing a value
-      that holds a newline, opens a section (`[`) or starts with `%include`. Cover it in
-      `shared/test/`, run by `sh shared/test/run.sh -v`. Then admit `pgbouncer` through the
-      nine touchpoints, as phase 3 admits rustfs: `images/pgbouncer/` with `Dockerfile`,
-      `README.md`, `rootfs/entrypoint.sh`, `rootfs/allowlist.conf`, `rootfs/denylist.conf`
-      and `smoke.sh`; a Renovate-annotated variable naming the edoburu tag, from which the
-      target derives PgBouncer's version for its tag and label; the target, `DESCRIPTIONS`
-      entry and `default` membership; `PACKAGES`; the root README row; and the admission
-      row. The entrypoint writes `/etc/pgbouncer/pgbouncer.ini` and a 0600
-      `/etc/pgbouncer/userlist.txt` on every start, prints the redacted summary and execs
-      `pgbouncer /etc/pgbouncer/pgbouncer.ini`. `smoke.sh` starts a `postgres:18` sidecar
-      with scram-sha-256 on a network of its own, and asserts: `pgbouncer --version`
-      matches the image's version label; a login through 6432 with the password given only
-      as `_FILE` works and a wrong password is refused; `SHOW CONFIG` on the admin console
-      reports `transaction`, `scram-sha-256`, 200, 1000 and 30; a named prepared statement
-      is executed across several transactions (`\parse` and `\bind_named` in psql 18);
-      the password is absent from the log and from `pgbouncer.ini`; a changed environment
-      takes effect on a restart; and startup aborts on a passthrough key off the
-      allowlist, on `PGBOUNCER_CONF__auth_file`, on `PGBOUNCER_POOL_MODE` set beside
-      `PGBOUNCER_CONF__pool_mode`, and on `PGBOUNCER_AUTH_TYPE=trust`. Settles D-8, D-9
-      and D-10.
+      and `pgconf`: `key = value` lines, unquoted as PgBouncer reads them, refusing
+      a value that holds a newline, opens a section (`[`) or starts with `%include`.
+      Cover it in `shared/test/`, run by `sh shared/test/run.sh -v`. Then admit `pgbouncer`
+      through the nine touchpoints, as phase 3 admits rustfs: `images/pgbouncer/`
+      with `Dockerfile`, `README.md`, `rootfs/entrypoint.sh`, `rootfs/allowlist.conf`,
+      `rootfs/denylist.conf` and `smoke.sh`; a Renovate-annotated variable naming
+      the edoburu tag, from which the target derives PgBouncer's version for its tag
+      and label; the target, `DESCRIPTIONS` entry and `default` membership; `PACKAGES`;
+      the root README row; and the admission row. The entrypoint writes `/etc/pgbouncer/pgbouncer.ini`
+      and a 0600 `/etc/pgbouncer/userlist.txt` on every start, prints the redacted
+      summary and execs `pgbouncer /etc/pgbouncer/pgbouncer.ini`. `smoke.sh` starts
+      a `postgres:18` sidecar with scram-sha-256 on a network of its own, and asserts:
+      `pgbouncer --version` matches the image's version label; a login through 6432
+      with the password given only as `_FILE` works and a wrong password is refused;
+      `SHOW CONFIG` on the admin console reports `transaction`, `scram-sha-256`, 200,
+      1000 and 30; a named prepared statement is executed across several transactions
+      (`\parse` and `\bind_named` in psql 18); the password is absent from the log
+      and from `pgbouncer.ini`; a changed environment takes effect on a restart; and
+      startup aborts on a passthrough key off the allowlist, on `PGBOUNCER_CONF__auth_file`,
+      on `PGBOUNCER_POOL_MODE` set beside `PGBOUNCER_CONF__pool_mode`, and on `PGBOUNCER_AUTH_TYPE=trust`.
+      Settles D-8, D-9 and D-10.
     scope:
       - images/pgbouncer/**
       - shared/rootfs/lib/envconf.sh
       - shared/test/**
-      - docker-bake.hcl
+      - /docker-bake.hcl
       - .github/workflows/cleanup-images.yaml
-      - README.md
+      - /README.md
       - images/README.md
     acceptance:
       - sh shared/test/run.sh -v
       - docker buildx bake --print pgbouncer >/dev/null
       - hadolint -t error images/pgbouncer/Dockerfile
-      - shellcheck -S error images/pgbouncer/smoke.sh images/pgbouncer/rootfs/entrypoint.sh
-      - grep -qw pgbouncer .github/workflows/cleanup-images.yaml
+      - >-
+        shellcheck -S error images/pgbouncer/smoke.sh images/pgbouncer/rootfs/entrypoint.sh
+      - >-
+        grep -qw pgbouncer .github/workflows/cleanup-images.yaml
     character: routine
