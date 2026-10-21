@@ -6,7 +6,7 @@ engine: "0.5.0"
 
 runtime:
   adapter: docker
-  image: platform-gates-sandbox:2   # .torve/sandbox/platform-gates/
+  image: platform-claude-sandbox:2.1.283-torve0.5.0   # .torve/sandbox/platform-claude/
   # The gates sandbox gets a Docker daemon of its own, in a privileged side
   # container, for `bake-smoke`. Its egress is the host proxy at the bridge
   # gateway, which `torve doctor` checks.

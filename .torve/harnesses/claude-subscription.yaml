@@ -1,9 +1,10 @@
 # yaml-language-server: $schema=../schemas/harness.json
-# Claude Code in torve's published claude seat image, tagged with the harness
-# version and the torve release it was built from. The image's own
-# `/opt/torve/run` starts claude.
+# Claude Code in this repository's seat image, `.torve/sandbox/platform-claude/`:
+# torve's published claude seat plus the gate tools, tagged with the harness
+# version and the torve release it builds on. The image's own `/opt/torve/run`
+# starts claude.
 adapter: subscription
-image: ghcr.io/morzecrew/claude-sandbox:2.1.283-torve0.5.0
+image: platform-claude-sandbox:2.1.283-torve0.5.0
 equip_root: ~/.claude/skills
 kinds: [skill, plugin, mcp, hook, agent]
 env:
