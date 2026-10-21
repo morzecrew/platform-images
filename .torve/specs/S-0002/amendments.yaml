@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=../../schemas/amendments.json
+amendments:
+  - id: A-1
+    at: '2026-10-21T17:00:25Z'
+    title: Root files in a phase's scope are anchored
+    md: |-
+      Phases 2, 3 and 4 name `docker-bake.hcl` and `README.md` in their scopes, and a scope is read on the gitignore grammar: a pattern with no slash matches at any depth, and a match may be a directory with anything under it. On that reading `docker-bake.hcl` can share a path with every other glob, so the board held phases 2 to 4 behind phase 1 as overlapping although no file is common to them, and the night's second worker was refused with "3 waiting on overlap".
+
+      Both are now written `/docker-bake.hcl` and `/README.md`, anchored to the repository root, which is the file each phase means. Phase 1 can run beside whichever of 2, 3 and 4 the board starts first; 2, 3 and 4 still share the bake file and the README and stay one at a time.
