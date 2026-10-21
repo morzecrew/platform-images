@@ -58,12 +58,17 @@ gates:
     timeout: 60
   # The build's own judge, on the task's nested daemon: each bake target the
   # candidate touches, built once and smoke-tested (`.torve/gates/bake-smoke.sh`).
-  # Enters at shadow and is promoted on its record against bake.yaml's.
+  # Entered at shadow and promoted with S-0002, whose image phases it judges.
+  # Its record on 2026-10-21, under torve 0.6.0 in the lane's sandbox: green on
+  # every run over valkey, caddy, the three postgres targets and uv-builder
+  # (twelve runs, four slots side by side, cold and warm), where bake.yaml is
+  # green too; red on valkey with `FLUSHALL` left enabled, which its smoke test
+  # refuses. A shadow red lands anyway, which is what an image phase cannot have.
   - name: bake-smoke
     run: "bash .torve/gates/bake-smoke.sh {base}"
     input: worktree
-    state: shadow
-    origin: structural
+    state: blocking
+    origin: S-0002
     # A bake-file change rebuilds every target: 359s for all nine from a cold
     # daemon, rehearsed on dind 27.5.1 on 2026-10-21. One target took 32s.
     timeout: 1200
