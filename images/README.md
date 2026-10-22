@@ -41,6 +41,22 @@ contract. It is normative: image READMEs link here rather than restating it.
 >   `notify-keyspace-events` — a real allowlisted directive. The amendment is
 >   proposed and not yet accepted (EXECUTION-LOG D-018), so the rule below is
 >   still the normative one and this is the gap.
+> - **`rustfs`** implements the whole contract through the shared helper: two
+>   channels, allowlist and denylist, collision refusal, `_FILE` secrets and the
+>   startup summary. Its curated channel is deliberately three settings, because
+>   upstream owns every `RUSTFS_*` name and the image only changes what those
+>   three default to; everything else is passthrough against an allowlist of
+>   upstream's own setting names. One check the contract does not require:
+>   startup aborts on a missing or default credential, which upstream only warns
+>   about.
+> - **`pgbouncer`** implements all of it, through the same helper, which gained
+>   an ini renderer for the purpose (`pgbouncerconf`, beside `valkeyconf` and
+>   `pgconf`). Two deltas, both stated in
+>   [`images/pgbouncer/rootfs/denylist.conf`](pgbouncer/rootfs/denylist.conf):
+>   the value-safety refusal covers `[` and a leading `%include` as well as a
+>   newline, because all three are ways a value in an ini file stops being a
+>   value; and the denylist is wider than the six names that decision requires,
+>   adding `auth_ident_file`, `syslog` and the three peering names.
 > - **`postgres`** implements the passthrough channel, the allowlist, a denylist
 >   file and the startup summary, through the same helper (RFC 0001 P4). It is
 >   the one image that attributes **every** value to the file or variable it came
@@ -125,7 +141,8 @@ image, printed at startup.
 
 ### Secrets
 
-`<NAME>_FILE` takes precedence over `<NAME>` for every secret. An unreadable
+`<NAME>_FILE` takes precedence over `<NAME>` for every secret, unless an image's
+README says it refuses the two set at once, as `rustfs` does. An unreadable
 `<NAME>_FILE` **aborts** rather than falling back to the plain variable —
 silently starting with the wrong credential is worse than not starting.
 
@@ -257,10 +274,12 @@ author to remember.
 | Image | Route | Evidence | Decided |
 |---|---|---|---|
 | `valkey` | 2 (drift) | 14 projects running a cache/queue on four distinct upstream references — `redis:7-alpine` (floating), `redis:7.2.3-alpine`, `redis:8.0.3-alpine`, `valkey/valkey:9.0` — with one migration to Valkey already begun and no shared image to land on. See [RFC 0006](../rfcs/0006-valkey-image.md) §3.1. | 2026-08-12, **admitted** |
+| `pgbouncer` | 2 (drift) | Two projects run `edoburu/pgbouncer` on different tags — `v1.25.1-p0` in eis-backend, `v1.26.0-p0` in erp-backend — with environment blocks copied byte-for-byte between them and into the erp-standalone bundle, so one pooler's settings are maintained in three places and there is no shared image to land on. See `eis-backend` `compose/compose.yml:76-104`, `erp-backend` `compose/compose.yml:40-69`, and decision D-8 of the specification. | 2026-10-21, **admitted** |
 | `npm-builder` | 1 | Five projects hand-roll a Node build stage, and they diverge: two use `npm install` rather than `npm ci`, none has a dependency cache mount, one is on end-of-life `node:16`, and two ship byte-identical copies of the same file. See [RFC 0009](../rfcs/0009-javascript-static-asset-builder.md) §2. | 2026-08-12, **admitted** (as RFC 0008; re-cut as RFC 0009 after its gate measurement) |
 | Node runtime / `node-distroless` | — | Proposed as the other half of the builder pair. No Morze project executes Node in production — all five build static assets and serve them from nginx or Caddy — so the runtime would have been maintained for nobody. See [RFC 0008](../rfcs/0008-javascript-builder-and-distroless-runtime-pair.md) §3.1. | 2026-08-12, **refused** |
 | OpenTelemetry Collector | — | One repository uses it. Route 1 needs two hand-rolled Dockerfiles and route 2 needs two projects that have diverged; one project satisfies neither. See [RFC 0005](../rfcs/0005-opentelemetry-collector-image.md). | 2026-08-12, **refused** |
 | ClickHouse | — | Two compose services, but the deployed instances are managed (Yandex MDB), so the image would be curating config for something we do not run. See [RFC 0007](../rfcs/0007-clickhouse-image.md). | 2026-08-12, **refused** |
+| `rustfs` | 2 (drift) | Two backends run `rustfs/rustfs:1.0.1` and have already fallen out of step: one probes a health path the other does not, and one has moved the server's log off stdout, so the same upstream reference is configured two ways for the same job. The fallback is closed rather than merely unadopted — MinIO no longer publishes an image, so there is no shared upstream reference to land on. See S-0002/D-4. | 2026-10-21, **admitted** |
 
 A refusal is recorded rather than left implicit, because the next person to want
 one of these will otherwise re-derive the case from scratch — and because the

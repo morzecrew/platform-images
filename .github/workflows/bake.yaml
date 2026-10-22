@@ -8,6 +8,9 @@ on:
       - images/**
       - shared/**
       - .github/workflows/bake.yaml
+      # The bake-argument check and its own test: a change to the check alone
+      # has to run it.
+      - .github/scripts/**
       - "!images/**/README.md"
       - "!shared/README.md"
       - "!README.md"
@@ -51,6 +54,16 @@ jobs:
       # surface as a container that will not start several minutes later.
       - name: Test the shared env-config helper
         run: sh shared/test/run.sh -v
+
+      # S-0002/D-1: every bake target named after its directory has to keep its
+      # Dockerfile's ARG defaults in step with the values the bake passes, so a
+      # Renovate move that edits one copy and leaves the other fails here rather
+      # than in an image built off the bake.
+      - name: Test the bake-argument check
+        run: bash .github/scripts/test-arg-defaults.sh
+
+      - name: Check bake argument defaults
+        run: bash .github/scripts/arg-defaults.sh
 
       # RFC 0004 §6's build-mechanism tests. They cannot live in smoke.sh, which
       # gets one built image: two assert that a bad PG_EXTENSIONS *fails the

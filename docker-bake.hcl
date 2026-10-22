@@ -40,6 +40,8 @@ variable "DESCRIPTIONS" {
     "npm-builder"       = "Node build stage for static assets: frozen npm install, project build, verified bundle to /srv via build-js-app."
     "python-distroless" = "Distroless Python runtime with libmagic and CA bundle."
     "valkey"            = "Valkey with a finite maxmemory, one persistence switch, file-first secrets, and env-generated config."
+    "rustfs"            = "RustFS S3-compatible object storage: console off by default, both credentials required, env-configured."
+    "pgbouncer"         = "PgBouncer with an entrypoint-generated config, file-first credentials, and allowlist-based overrides via env."
   }
 }
 
@@ -307,6 +309,38 @@ target "valkey" {
 
 # ....................... #
 
+# Pinned by full patch, not by minor: upstream's floating tags move under a
+# consumer, and this base image is the whole of what the image ships. The
+# variable is passed straight through as the Dockerfile's ARG, so the pin and
+# the build cannot drift apart.
+# renovate: datasource=docker depName=rustfs/rustfs versioning=docker
+variable "RUSTFS_VERSION" {
+  default = "1.0.1"
+}
+
+# A thin image on purpose: three defaults changed, a credential check, and the
+# env contract. It starts upstream's /entrypoint.sh rather than reimplementing
+# it, so the data and log directories come from upstream and not from here.
+target "rustfs" {
+  inherits   = ["_attested"]
+  context    = "./images/rustfs"
+  dockerfile = "Dockerfile"
+  tags       = tag("rustfs", RUSTFS_VERSION)
+  labels     = label("rustfs", RUSTFS_VERSION)
+
+  # The shared env-config helper, as a named context rather than a copy under
+  # images/rustfs/ (RFC 0001 decision 6).
+  contexts = {
+    shared = "./shared"
+  }
+
+  args = {
+    RUSTFS_VERSION = RUSTFS_VERSION
+  }
+}
+
+# ....................... #
+
 # The one Python version for both uv-builder and python-distroless: uv-builder
 # produces /opt/venv and python-distroless executes it, on every platform. It
 # used to be two variables checked for matching major.minor (RFC 0008 sec 5.4),
@@ -338,11 +372,20 @@ variable "DISTROLESS_DEBIAN_VERSION" {
   default = "13"
 }
 
+# Tagged with the minor and with the exact patch, the minor first, as uv-builder
+# is. The minor tag is back because a consumer pinning python-distroless:3.14
+# gets the weekly rebuild again without an edit, while a consumer on the patch
+# keeps it; the patch tag is what pins a runtime to the builder that made its
+# venv. tags[0] stays the minor, so CI and publish.yaml keep reading the
+# repository from it. The labels name the exact patch either way.
 target "python-distroless" {
   inherits   = ["_attested"]
   context    = "./images/python-distroless"
   dockerfile = "Dockerfile"
-  tags       = tag("python-distroless", DISTROLESS_PYTHON_VERSION)
+  tags = concat(
+    tag("python-distroless", regex("^[0-9]+\\.[0-9]+", DISTROLESS_PYTHON_VERSION)),
+    tag("python-distroless", DISTROLESS_PYTHON_VERSION),
+  )
   labels     = label("python-distroless", DISTROLESS_PYTHON_VERSION)
   args = {
     PYTHON_VERSION = DISTROLESS_PYTHON_VERSION
@@ -352,9 +395,59 @@ target "python-distroless" {
 
 # ....................... #
 
+# The tag names two things: PgBouncer's version, and edoburu's own packaging
+# revision of it as a `-p<x>` suffix. The suffix is not something the upstream
+# project publishes and not something `versioning=` can be pointed at, so the
+# docker versioning compares the tags as edoburu writes them, and the model
+# below is only what a consumer is choosing between.
+# renovate: datasource=docker depName=edoburu/pgbouncer versioning=docker
+variable "PGBOUNCER_VERSION" {
+  default = "v1.26.0-p0"
+}
+
+# PgBouncer's own version, out of the tag: `v1.26.0-p0` -> `1.26.0`. That is
+# what the image is tagged and labelled with, because it is the version of the
+# pooler inside -- and what `pgbouncer --version` prints, which
+# images/pgbouncer/smoke.sh compares against the label, so a tag whose edoburu
+# suffix moved to another upstream release cannot pass unnoticed.
+#
+# Matched rather than captured: the pattern has no group, so it returns the
+# match itself whichever of `regex`'s two conventions bake's HCL follows.
+# A value with no dotted triple in it fails the build here, naming this
+# function, rather than shipping a tag like `latest`.
+function "pgbouncer_version" {
+  params = [tag]
+  result = regex("[0-9]+\\.[0-9]+\\.[0-9]+", tag)
+}
+
+target "pgbouncer" {
+  inherits   = ["_attested"]
+  context    = "./images/pgbouncer"
+  dockerfile = "Dockerfile"
+  tags       = tag("pgbouncer", pgbouncer_version(PGBOUNCER_VERSION))
+  labels     = label("pgbouncer", pgbouncer_version(PGBOUNCER_VERSION))
+
+  # The shared env-config helper reaches this build as a named context rather
+  # than a copy under images/pgbouncer/ (RFC 0001 decision 6). Every image that
+  # sources envconf.sh declares this line; an image that forgets it fails to
+  # build rather than shipping a stale copy.
+  contexts = {
+    shared = "./shared"
+  }
+
+  # The base image tag, passed under the name the Dockerfile gives it, so
+  # .github/scripts/arg-defaults.sh compares the two and a Renovate bump that
+  # touches only one of them fails the build (S-0002/D-1).
+  args = {
+    PGBOUNCER_IMAGE_TAG = PGBOUNCER_VERSION
+  }
+}
+
+# ....................... #
+
 group "default" {
   targets = [
     "flyway", "caddy", "postgres", "postgres-pgvector", "postgres-cron",
-    "uv-builder", "npm-builder", "python-distroless", "valkey",
+    "uv-builder", "npm-builder", "python-distroless", "valkey", "rustfs", "pgbouncer",
   ]
 }
