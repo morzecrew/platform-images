@@ -3,7 +3,7 @@
 # ....................... #
 
 # renovate: datasource=docker depName=flyway/flyway versioning=docker
-ARG FLYWAY_VERSION=13.10
+ARG FLYWAY_VERSION=13.11
 FROM flyway/flyway:${FLYWAY_VERSION}-alpine
 
 # renovate: datasource=maven depName=org.postgresql:postgresql
