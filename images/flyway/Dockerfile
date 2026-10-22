@@ -2,10 +2,13 @@
 
 # ....................... #
 
+# renovate: datasource=docker depName=flyway/flyway versioning=docker
 ARG FLYWAY_VERSION=13.10
 FROM flyway/flyway:${FLYWAY_VERSION}-alpine
 
+# renovate: datasource=maven depName=org.postgresql:postgresql
 ARG POSTGRES_JDBC_VERSION=42.7.14
+# renovate: datasource=maven depName=com.clickhouse:clickhouse-jdbc
 ARG CLICKHOUSE_JDBC_VERSION=0.11.0
 
 RUN wget -qO "/flyway/drivers/postgresql-${POSTGRES_JDBC_VERSION}.jar" \

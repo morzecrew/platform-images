@@ -1,0 +1,56 @@
+# yaml-language-server: $schema=../../schemas/amendments.json
+amendments:
+  - id: A-1
+    at: '2026-10-22T10:12:41Z'
+    title: >-
+      Renovate moves the Dockerfile ARG default with the bake
+    changes:
+      - subject: D-23
+        field: paths
+        before: [.github/renovate.json, docker-bake.hcl]
+        after: [.github/renovate.json, docker-bake.hcl, images/*/Dockerfile]
+      - subject: D-23
+        field: text
+        before: >-
+          Versions are tracked only through `# renovate:` annotations directly above
+          a `variable` or `ARG` line in `docker-bake.hcl`. The dockerfile manager
+          is off except for `docker/dockerfile`, Renovate reads patch tags only, and
+          automerge is on except for Node.
+        after: >-
+          Versions are tracked only through `# renovate:` annotations directly above
+          a `variable` or `ARG` line in `docker-bake.hcl`, and the same annotation
+          directly above each Dockerfile `ARG` default that copies the value. The
+          dockerfile manager is off except for `docker/dockerfile`, Renovate reads
+          patch tags only, and automerge is on except for Node.
+      - subject: D-23
+        field: fingerprint
+        after: e7b7be3ada85c237/c6970b5335db8cfe
+    md: >-
+      Under the old text every Renovate pull request went red: it moved the bake value,
+      and `.github/scripts/arg-defaults.sh` (S-0002/D-1) failed on the Dockerfile
+      copy it left behind. #89, #90 and #91 sat red on 2026-10-22 and automerge never
+      fired. The regex manager now reads `images/*/Dockerfile` too, and the same annotation
+      over both copies puts both in one pull request.
+  - id: A-2
+    at: '2026-10-22T10:12:42Z'
+    title: >-
+      The Dockerfile ARG default is no longer a hand copy
+    changes:
+      - subject: D-3
+        field: text
+        before: >-
+          Versions live in `docker-bake.hcl`, where one variable feeds both an image's
+          tag and its build argument. A Dockerfile's `ARG` default copies the bake
+          value by hand.
+        after: >-
+          Versions live in `docker-bake.hcl`, where one variable feeds both an image's
+          tag and its build argument. A Dockerfile's `ARG` default copies the bake
+          value under the same `# renovate:` annotation, so one Renovate pull request
+          moves both.
+      - subject: D-3
+        field: fingerprint
+        after: e369bbe3fa8acf3a/86d99eece9c05cfc
+    md: >-
+      The copy stays, so a bare `docker build images/<name>` still works. It is no
+      longer moved by hand: Renovate moves it with the bake value (S-0001/A-1), and
+      S-0002/D-1 still fails a pull request where the two differ.

@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.28
 
+# renovate: datasource=docker depName=valkey/valkey extractVersion=^(?<version>\d+\.\d+)\.\d+-alpine$
 ARG VALKEY_VERSION=9.1
 
 # Alpine, so RFC 0001's POSIX-sh helper runs unmodified with no added bash

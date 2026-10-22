@@ -11,7 +11,7 @@ Admitting an image takes the nine touchpoints `images/README.md` lists. Every ta
 
 ### S-0001/D-3 — `ASSUMED` (Standing decisions)
 
-Versions live in `docker-bake.hcl`, where one variable feeds both an image's tag and its build argument. A Dockerfile's `ARG` default copies the bake value by hand.
+Versions live in `docker-bake.hcl`, where one variable feeds both an image's tag and its build argument. A Dockerfile's `ARG` default copies the bake value under the same `# renovate:` annotation, so one Renovate pull request moves both.
 
 - Paths: `docker-bake.hcl` `images/*/Dockerfile`
 - Consequence: a version moves in one place for the published image, and a local `docker build` lags until its default is moved too
@@ -67,9 +67,9 @@ One exact-patch `DISTROLESS_PYTHON_VERSION` drives both uv-builder and python-di
 
 ### S-0001/D-23 — `ASSUMED` (Standing decisions)
 
-Versions are tracked only through `# renovate:` annotations directly above a `variable` or `ARG` line in `docker-bake.hcl`. The dockerfile manager is off except for `docker/dockerfile`, Renovate reads patch tags only, and automerge is on except for Node.
+Versions are tracked only through `# renovate:` annotations directly above a `variable` or `ARG` line in `docker-bake.hcl`, and the same annotation directly above each Dockerfile `ARG` default that copies the value. The dockerfile manager is off except for `docker/dockerfile`, Renovate reads patch tags only, and automerge is on except for Node.
 
-- Paths: `.github/renovate.json` `docker-bake.hcl`
+- Paths: `.github/renovate.json` `docker-bake.hcl` `images/*/Dockerfile`
 - Consequence: a version without its annotation is invisible to Renovate, and an RC never ships as a release
 
 ### S-0002/D-2 — `ASSUMED` (Service images and the drift CI cannot see)
@@ -89,7 +89,7 @@ Each of these carries a managed `AGENTS.md` section listing the decisions
 and invariants that govern it. `torve spec show S-NNNN/D-n`, `torve spec paths`
 `<file>` and `torve spec tests S-NNNN/D-n` read the same corpus from the worktree.
 
-- `images/` — 12 decision(s)
+- `images/` — 13 decision(s)
 - `images/caddy/` — 2 decision(s)
 - `images/caddy/rootfs/` — 3 decision(s)
 - `images/flyway/` — 0 decision(s)
