@@ -1,0 +1,840 @@
+# yaml-language-server: $schema=../../../schemas/landing.json
+task: T-0004
+phase: 4
+attempt: 7
+base: e5b1680210a7f1dc0dd53653f02c28678f4fe480
+commit: c6132fe7348a7bdd969645e5ef182c8876fbc0d7
+at: '2026-10-22T00:39:57Z'
+agent: session/claude-opus-5-5
+decisions:
+  - id: D-1
+    grade: ASSUMED
+  - id: D-2
+    grade: ASSUMED
+  - id: D-3
+    grade: ASSUMED
+  - id: D-4
+    grade: ASSUMED
+  - id: D-5
+    grade: ASSUMED
+  - id: D-6
+    grade: ASSUMED
+  - id: D-7
+    grade: ASSUMED
+  - id: D-8
+    grade: ASSUMED
+  - id: D-9
+    grade: ASSUMED
+  - id: D-10
+    grade: ASSUMED
+entries:
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T19:40:08Z'
+    claim: >-
+      D-10 says the passthrough channel renders through a new mode of envconf.sh and
+      names neither the mode nor its shape. It is `pgbouncerconf`, and it emits one
+      bare key = value line per pair with no section header of its own: which section
+      a key belongs to is the composing image business, and an ini value is written
+      unquoted because PgBouncer strips surrounding whitespace and one matching quote
+      pair before use, so quoting a value would change it.
+    evidence: >-
+      shared/rootfs/lib/envconf.sh:402 — `_envconf_render_pgbouncerconf`, one line
+      per pair; the format name is registered at shared/rootfs/lib/envconf.sh:302
+      and the value check is shared/rootfs/lib/envconf.sh:387.
+    action: decided
+    proposal: >-
+      D-10 should name the format string and state that the renderer is a line format,
+      so the next image whose config format has sections does not re-derive it.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T19:40:08Z'
+    claim: >-
+      No row describes the [databases] entry, which every client connection depends
+      on. It is one line whose key is PGBOUNCER_DB_NAME (default `*`) and whose value
+      is the connection string built from PGBOUNCER_DB_HOST, PGBOUNCER_DB_PORT and
+      PGBOUNCER_DB_USER. A name outside `_0-9A-Za-z` is written as a quoted SQL identifier,
+      a rule PgBouncer documents and a dash-bearing database name needs, and `pgbouncer`
+      is refused because that name is the admin console and cannot also name a backend.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:171 — the databases line; the identifier
+      quoting is images/pgbouncer/rootfs/entrypoint.sh:77 and the reserved-name refusal
+      is images/pgbouncer/rootfs/entrypoint.sh:98.
+    action: decided
+    proposal: >-
+      D-9 should describe the [databases] line and say that DB_NAME is an identifier,
+      so the quoting rule and the reserved name are the row and not an implementation
+      detail.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T19:40:08Z'
+    claim: >-
+      Three refusals and two baked settings go beyond the values the rows name. The
+      refusals are a non-numeric PGBOUNCER_DB_PORT, whitespace in the backend host,
+      port or user (each is written into a space-separated connection string, where
+      a space silently adds a setting rather than corrupting the line), and PGBOUNCER_DB_NAME=pgbouncer.
+      The settings are listen_addr = 0.0.0.0 and ignore_startup_parameters = extra_float_digits,
+      both of which are what the base image ships today, so no consumer behaviour
+      changes by baking them.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:185 — listen_addr baked, with ignore_startup_parameters
+      at images/pgbouncer/rootfs/entrypoint.sh:210 and the port refusal at images/pgbouncer/rootfs/entrypoint.sh:100.
+    action: decided
+    proposal: >-
+      D-9 should list listen_addr and ignore_startup_parameters among the baked keys,
+      and say that the connection string components are refused for whitespace rather
+      than escaped.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T19:40:08Z'
+    claim: >-
+      Nothing in the rows bounds the allowlist. It carries every key PgBouncer 1.26.0
+      accepts in the [pgbouncer] section, taken from that version own configuration
+      table rather than from the documentation page, which tracks a newer release
+      -- a key the running pgbouncer does not know is a startup error, so a name from
+      a newer version would refuse to start the pooler. Seven keys are deliberately
+      absent so that strict mode refuses them by name: conffile, auth_ident_file,
+      resolv_conf, dns_zone_check_period, peer_id, service_name and job_name.
+    evidence: >-
+      images/pgbouncer/rootfs/allowlist.conf:130 — the deliberately absent list, with
+      the source of the admitted set stated at the head of the file at images/pgbouncer/rootfs/allowlist.conf:1.
+    action: decided
+    proposal: >-
+      D-10 should say the allowlist is the pinned version own settings table minus
+      a stated exclusion list, and that the exclusions are refused by name rather
+      than ignored.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T19:40:08Z'
+    claim: >-
+      D-9 requires a redacted summary but does not say how the credential appears
+      in it, and the summary redacts on the key. The entrypoint therefore reports
+      the client password under the key `password`, a name no [pgbouncer] directive
+      uses, so the value is hidden while the origin names the variable it came from.
+      The same file that holds the credential, userlist.txt, carries no header comment:
+      PgBouncer ini parser skips `#` and `;` alike, but its auth-file parser skips
+      only `;` and refuses the whole file as "broken auth file" on a `#` -- which
+      would leave the user unregistered and every login failing with an error that
+      names neither the file nor the comment.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:227 — the userlist line, with the reason
+      stated at images/pgbouncer/rootfs/entrypoint.sh:220 and the password summary
+      row at images/pgbouncer/rootfs/entrypoint.sh:217.
+    action: decided
+    proposal: >-
+      A row should state that the credential is reported redacted and never written
+      into the world-readable ini, and record that userlist.txt cannot carry a header
+      comment.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T19:40:08Z'
+    claim: >-
+      The row asks for a changed environment to take effect on a restart, which no
+      container engine can arrange -- an environment cannot be changed on start --
+      so the smoke test mounts /etc/pgbouncer from a named volume and starts run 2
+      as a new container over the file run 1 wrote, which is the state a restart preserves
+      and the state the upstream entrypoint writes-only-when-absent logic would have
+      kept. The prepared-statement check is built the same way: it forces the statement
+      onto a second server connection with the admin console RECONNECT and PGBOUNCER_CONF__server_idle_timeout=1,
+      because a statement that never leaves its first connection would pass with max_prepared_statements
+      off and prove nothing.
+    evidence: >-
+      images/pgbouncer/smoke.sh:22 — the volume, mounted in start_pool; the forced
+      reconnect is images/pgbouncer/smoke.sh:203 and the idle timeout is images/pgbouncer/smoke.sh:141.
+    action: decided
+    proposal: >-
+      The smoke row should say the restart case is a new container over the same /etc/pgbouncer
+      volume and that the prepared-statement case has to leave its first server connection
+      to be evidence of anything.
+  - decision: unlisted
+    grade: UNLISTED
+    kind: departed
+    class: spec-gap
+    at: '2026-10-21T20:55:24Z'
+    claim: >-
+      RFC 0001 publishes the helper surface in two enumerated lists — section 5.2
+      gives envconf_render the formats `pgconf | keyvalue | valkeyconf`, and decision
+      17 fixes the function list at six — while S-0002/D-10 requires a fourth renderer.
+      The renderer name `iniconf` and the exported `envconf_refuse_ini_unsafe` are
+      decisions no document lists, and `rfcs/` is outside this task scope, so the
+      two lists cannot be brought into agreement from here.
+    evidence: >-
+      shared/rootfs/lib/envconf.sh:302 — the dispatch gains a fourth case, `iniconf`,
+      which rfcs/0001-shared-env-config-contract.md:239 does not enumerate among its
+      three formats, and envconf_refuse_ini_unsafe at shared/rootfs/lib/envconf.sh:394
+      is a seventh exported function where decision 17 at rfcs/0001-shared-env-config-contract.md:483
+      states the list is six.
+    action: decided
+    proposal: >-
+      Two rows for RFC 0001: `envconf_render` gains the format `iniconf` — `key =
+      value` per line, unquoted, refusing a value that opens a section, starts `%include`
+      or carries a newline — shipping with the pgbouncer image (S-0002/D-10); and
+      section 5.2 function list gains `envconf_refuse_ini_unsafe <label> <value>`,
+      which applies the same value rules to values an image writes itself rather than
+      through the renderer.
+    notes: >-
+      There is no RFC for this image: S-0002 non-goal says the spec is the design
+      record for rustfs and pgbouncer. The repo-visible half of this entry is the
+      pgbouncer bullet under Status in images/README.md, which states the same gap
+      for a reader who never opens the task log.
+  - decision: D-9
+    grade: ASSUMED
+    kind: departed
+    class: spec-gap
+    at: '2026-10-21T20:55:24Z'
+    claim: >-
+      D-9 has the entrypoint write a 0600 userlist.txt from the credential, and PgBouncer
+      delimits both fields of that file with a double quote and specifies no escape.
+      A password containing a `"` is therefore not representable, and D-9 states no
+      rule for one.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:276 — the userlist line is written verbatim
+      as two quoted fields with no escaping applied, and the limit is stated to operators
+      at images/pgbouncer/README.md:111.
+    action: departed
+    proposal: >-
+      A row for D-9: `PGBOUNCER_DB_PASSWORD` and its `_FILE` are refused when the
+      value contains a double quote, for the same reason a newline is refused — the
+      userlist cannot carry it, so writing it verbatim defers the corruption to PgBouncer
+      own parser. What shipped instead is the documented limit, which this row would
+      replace.
+    notes: >-
+      Not implemented as a refusal because the three deployments this image is admitted
+      to replace pass their credential to edoburu image today, and a startup abort
+      on a quote-bearing password would turn a migration into an outage. Whether PgBouncer
+      fails to start or loads a truncated password is not testable here: the sandbox
+      has no container engine and the smoke gate is where the image is first run.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T20:56:13Z'
+    claim: >-
+      Correcting the framing of the first entry, which the log keeps as written: the
+      helper surface being wider than RFC 0001 says is not this task doing. That file
+      defines fourteen functions; decision 17 states the list is six, so eight already
+      sat outside it before envconf_refuse_ini_unsafe, the ninth, and RFC 0001 EXECUTION-LOG
+      A-11 records the same pattern for envconf_warn_unknown. What that entry says
+      about a format stands: `iniconf` is the first format the RFC enumeration does
+      not name.
+    evidence: >-
+      shared/rootfs/lib/envconf.sh:394 — nine of the fourteen functions defined here
+      are outside the six of rfcs/0001-shared-env-config-contract.md:483, so that
+      count was stale before this task; rfcs/EXECUTION-LOG.md:861 records the same
+      pattern for envconf_warn_unknown.
+    action: decided
+    proposal: >-
+      Replace decision 17 with a row making the header block at shared/rootfs/lib/envconf.sh:15-26
+      the authority on the helper surface: a count in the RFC is outgrown by every
+      wave, the header is the copy a reader of the file already has, and section 5.2
+      then needs only the one addition, the `iniconf` format, which the first entry
+      proposes.
+    notes: >-
+      Not an edit of the first entry: entries are append-only, and a reader taking
+      the first entry alone would accept a row for one function while eight stay unnamed.
+  - decision: D-9
+    grade: ASSUMED
+    at: '2026-10-21T21:12:29Z'
+    attempt: 2
+    claim: >-
+      The Dockerfile set the entrypoint mode with a RUN chmod, and the build stopped
+      there: the base image ends with USER postgres, so that RUN was not root and
+      could not chmod a file COPY had left owned by root -- "chmod: /usr/local/bin/pgbouncer-entrypoint:
+      Operation not permitted". Every mode is now set by COPY --chmod, which runs
+      as root whatever USER says, so no layer has to change user and the build no
+      longer depends on it.
+    evidence: >-
+      images/pgbouncer/Dockerfile:26 — COPY --chmod=0755 rootfs/entrypoint.sh /usr/local/bin/pgbouncer-entrypoint;
+      the reason the RUN could not do it is stated at images/pgbouncer/Dockerfile:17.
+    action: decided
+    proposal: >-
+      S-0002/D-9 should say the image sets every file mode at copy time, because the
+      base image ends as a non-root user and no later layer may chmod what COPY left
+      owned by root.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T21:12:29Z'
+    attempt: 2
+    claim: >-
+      The allowlist is now the file the fourth entry of this log described: PgBouncer
+      1.26.0 whole [pgbouncer] table, bouncer_params in that release src/main.c, minus
+      the denylist six names and the seven deliberately absent ones -- 87 keys. It
+      carried 42 and admitted tcp_maxseg, which 1.26.0 no longer declares, so a name
+      the running server refuses was on the list of names it accepts.
+    evidence: >-
+      images/pgbouncer/rootfs/allowlist.conf:130 — the deliberately absent list; the
+      admitted set and its source are stated at images/pgbouncer/rootfs/allowlist.conf:1.
+    action: decided
+    proposal: >-
+      S-0002/D-10 should say the allowlist is the pinned version own settings table
+      minus a stated exclusion list, so a PgBouncer bump edits one file and the excluded
+      names are readable beside the admitted ones rather than only in a log entry.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T21:12:29Z'
+    attempt: 2
+    claim: >-
+      auth_type is on the allowlist and a setting written later in the same section
+      wins, so PGBOUNCER_CONF__auth_type=trust reached pgbouncer.ini over the curated
+      refusal: D-9 refused the variable, not the setting. The entrypoint now refuses
+      a rendered auth_type = trust|any whichever channel wrote the line, and smoke.sh
+      starts a container on the passthrough form expecting the abort.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:257 — the refusal over the rendered settings;
+      the assertion is images/pgbouncer/smoke.sh:352.
+    action: decided
+    proposal: >-
+      S-0002/D-9 should state the refusal on the setting rather than on PGBOUNCER_AUTH_TYPE:
+      any channel that reaches auth_type = trust or any aborts startup, and the README
+      row should name both channels.
+  - decision: D-10
+    grade: ASSUMED
+    at: '2026-10-21T21:12:29Z'
+    attempt: 2
+    claim: >-
+      The first entry of this log names the renderer pgbouncerconf; what shipped is
+      iniconf, as the seventh entry already cites it. That first entry stands as written
+      -- the shape it describes, one bare key = value line per pair with no section
+      header of its own, is what shipped, and the format is dispatched in the helper
+      the row names.
+    evidence: >-
+      shared/rootfs/lib/envconf.sh:24 — the surface list names the format iniconf,
+      dispatched at shared/rootfs/lib/envconf.sh:302 and rendered at shared/rootfs/lib/envconf.sh:414.
+    action: decided
+    proposal: >-
+      No row owed: this corrects a name in an earlier entry, and the row for the format
+      is the seventh entry proposal, which already names iniconf.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T21:22:50Z'
+    attempt: 2
+    claim: >-
+      Three entries of this log cite coordinates in the entrypoint that do not carry
+      what their prose describes, and the behaviour they name was never shipped. The
+      second entry places identifier quoting at 77 and the reserved-name refusal at
+      98; the third places listen_addr at 185, ignore_startup_parameters at 210 and
+      a non-numeric-port refusal at 100; the fifth places the userlist write at 227,
+      its reason at 220 and the summary row at 217. The file has no identifier quoting,
+      no reserved-name refusal, no numeric-port or whitespace refusal and no ignore_startup_parameters
+      at all, and its userlist write is at 287. It is 293 lines, so every one of those
+      citations resolves and the gate accepts them; a reader following one lands on
+      a comment or on other code. The eighth entry was exact until this attempt: the
+      auth_type refusal inserted above the credential summary row moved the userlist
+      write from 276 to 287. Recorded rather than repaired: nothing in the contract
+      requires those five behaviours and no test asserts them, so implementing them
+      now would ship unverified code whose only authority is a stale entry, and it
+      would move the fresh coordinates the rows of this attempt cite.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:287 — the userlist write, which the eighth
+      entry cites at 276; 227, which the fifth entry calls that same line, is a comment,
+      and the code the second and third entries name is in none of this file (grep
+      for ignore_startup_parameters, identifier or reserved finds nothing).
+    action: decided
+    proposal: >-
+      Two rows for S-0002/D-9 replacing prose the code never carried: the entrypoint
+      refuses a non-numeric PGBOUNCER_DB_PORT and whitespace in PGBOUNCER_DB_HOST,
+      PGBOUNCER_DB_PORT or PGBOUNCER_DB_USER, each of which is written into a space-separated
+      connection string where a space silently becomes another setting; and it bakes
+      listen_addr = 0.0.0.0 with ignore_startup_parameters = extra_float_digits, which
+      is what the base image ships. If those are not the intent, the second, third
+      and fifth entries need the contrary amendment: they describe behaviour this
+      image does not have.
+    notes: >-
+      Append-only, so the earlier entries stand and this one names the drift beside
+      them. The identifier-quoting rule for a dash-bearing PGBOUNCER_DB_NAME belongs
+      to whichever row covers the [databases] entry, which the second entry already
+      proposes.
+  - decision: D-9
+    grade: ASSUMED
+    kind: departed
+    class: spec-gap
+    at: '2026-10-21T21:55:57Z'
+    attempt: 3
+    claim: >-
+      The userlist's double-quoted fields do have an escape, and the earlier entry
+      of this log that read them as carrying none is wrong: PgBouncer's auth-file
+      reader treats a doubled quote inside a field as one quote, so a password containing
+      `"` is representable, and the reviewed tree would have loaded a truncated credential
+      for one — the field ends at that quote and the rest of the line is skipped.
+      The entrypoint now doubles the quote in both fields before writing the line,
+      and the smoke test's credential carries a quote, so the login through 6432 is
+      what proves the escape rather than a comment asserting it.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:304-306 — the doubling of the quote in
+      each field, then the two-field userlist line; the reader is PgBouncer 1.26.0
+      `src/loader.c`, `find_quote` skipping a doubled quote and `copy_quoted` collapsing
+      it, and the quote-bearing credential that proves it is images/pgbouncer/smoke.sh:37.
+    action: departed
+    proposal: >-
+      S-0002/D-9 should state the userlist's escape rule beside the newline refusal:
+      a double quote inside either field is written twice, a quote-bearing password
+      therefore authenticates, and the smoke test carries one so the rule is asserted
+      rather than documented.
+    notes: >-
+      The refusal the earlier entry proposed is withdrawn by this one, not edited:
+      a startup abort on a quote-bearing password would have turned a migration off
+      edoburu's image into an outage over a credential this image can carry. The README
+      section that repeated the old reading is rewritten to the escape rule, and its
+      refusals table now names the carriage return beside the newline.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T21:56:04Z'
+    attempt: 3
+    claim: >-
+      The image writes `ignore_startup_parameters = extra_float_digits`, which the
+      reviewed tree had dropped. With the key unset PgBouncer refuses every client
+      whose startup packet carries a parameter it does not track, and its tracked
+      set is a fixed list of Postgres-reported names that does not include this one
+      — pgjdbc sends it, so the reviewed image would have stopped connecting the Java
+      consumers the pooler being replaced serves today. edoburu's script sets the
+      same value in the ini it generates, so baking it keeps a migration's behaviour
+      instead of changing it.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:189 — the baked emit, with the assertion
+      that the running server reports it at images/pgbouncer/smoke.sh:234; upstream's
+      `CF_ABS("ignore_startup_parameters", CF_STR, cf_ignore_startup_params, 0, "")`
+      in PgBouncer 1.26.0 `src/main.c` is the empty default, and the fixed tracked
+      set is `track_extra_parameters` in the same table.
+    action: decided
+    proposal: >-
+      S-0002/D-9 should name `ignore_startup_parameters = extra_float_digits` among
+      the values it lists as baked, beside `min_pool_size` and `reserve_pool_size`:
+      it is what the pooler being replaced ships, and a row naming only the two pool
+      sizes leaves the next reader to rediscover why a Java client would stop connecting.
+    notes: >-
+      This is the setting the third entry of the first attempt proposed and the last
+      entry of the second recorded as absent; it is shipped now, so the row is owed
+      rather than the behaviour being repaired.
+  - decision: D-9
+    grade: ASSUMED
+    kind: departed
+    class: spec-gap
+    at: '2026-10-21T21:56:12Z'
+    attempt: 3
+    claim: >-
+      The prepared-statement case as reviewed would have failed rather than proved
+      anything: `\bind_named` arms the next execution and performs none, so a file
+      whose last two lines are `\bind_named` leaves psql with an empty query buffer
+      at end of input — no binding is sent, no row is printed, and the two assertions
+      on the statement's output have nothing to match. Each binding now carries its
+      own `\g`, which is psql's own documented shape, so the named statement is bound
+      and executed once per transaction and the two results are what shows PgBouncer
+      held the name across server connections.
+    evidence: >-
+      images/pgbouncer/smoke.sh:250-252 — the three-line file: `SELECT $1::int + 1
+      AS n \parse smoke_stmt`, then one `\bind_named smoke_stmt <value> \g` per execution;
+      psql 18 documents the shape as `\bind_named stmt1 'first value' 'second value'
+      \g`, and its main loop sends a trailing query buffer at end of input only while
+      that buffer is non-empty.
+    action: departed
+    proposal: >-
+      S-0002/D-9's smoke sentence should say how the prepared statement is proved:
+      one named statement, parsed once and then bound and executed in two separate
+      transactions, so the statement's name is what has to survive between them.
+    notes: >-
+      The claim the case makes is unchanged; only its mechanism is. The reviewed file
+      sent the Parse and then nothing at all, so it was red rather than silently green.
+  - decision: D-9
+    grade: ASSUMED
+    at: '2026-10-21T22:00:53Z'
+    attempt: 2
+    claim: >-
+      The Dockerfile set the entrypoint mode with a RUN chmod, and the build stopped
+      there: the base image ends with USER postgres, so that RUN was not root and
+      could not chmod a file COPY had left owned by root -- "chmod: /usr/local/bin/pgbouncer-entrypoint:
+      Operation not permitted". Every mode is now set by COPY --chmod, which runs
+      as root whatever USER says, so no layer has to change user and the build no
+      longer depends on it.
+    evidence: >-
+      images/pgbouncer/Dockerfile:26 — COPY --chmod=0755 rootfs/entrypoint.sh /usr/local/bin/pgbouncer-entrypoint;
+      the reason the RUN could not do it is stated at images/pgbouncer/Dockerfile:17.
+    action: decided
+    proposal: >-
+      S-0002/D-9 should say the image sets every file mode at copy time, because the
+      base image ends as a non-root user and no later layer may chmod what COPY left
+      owned by root.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T22:00:53Z'
+    attempt: 2
+    claim: >-
+      The allowlist is now the file the fourth entry of this log described: PgBouncer
+      1.26.0 whole [pgbouncer] table, bouncer_params in that release src/main.c, minus
+      the denylist six names and the seven deliberately absent ones -- 87 keys. It
+      carried 42 and admitted tcp_maxseg, which 1.26.0 no longer declares, so a name
+      the running server refuses was on the list of names it accepts.
+    evidence: >-
+      images/pgbouncer/rootfs/allowlist.conf:130 — the deliberately absent list; the
+      admitted set and its source are stated at images/pgbouncer/rootfs/allowlist.conf:1.
+    action: decided
+    proposal: >-
+      S-0002/D-10 should say the allowlist is the pinned version own settings table
+      minus a stated exclusion list, so a PgBouncer bump edits one file and the excluded
+      names are readable beside the admitted ones rather than only in a log entry.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T22:00:53Z'
+    attempt: 2
+    claim: >-
+      auth_type is on the allowlist and a setting written later in the same section
+      wins, so PGBOUNCER_CONF__auth_type=trust reached pgbouncer.ini over the curated
+      refusal: D-9 refused the variable, not the setting. The entrypoint now refuses
+      a rendered auth_type = trust|any whichever channel wrote the line, and smoke.sh
+      starts a container on the passthrough form expecting the abort.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:257 — the refusal over the rendered settings;
+      the assertion is images/pgbouncer/smoke.sh:352.
+    action: decided
+    proposal: >-
+      S-0002/D-9 should state the refusal on the setting rather than on PGBOUNCER_AUTH_TYPE:
+      any channel that reaches auth_type = trust or any aborts startup, and the README
+      row should name both channels.
+  - decision: D-10
+    grade: ASSUMED
+    at: '2026-10-21T22:00:53Z'
+    attempt: 2
+    claim: >-
+      The first entry of this log names the renderer pgbouncerconf; what shipped is
+      iniconf, as the seventh entry already cites it. That first entry stands as written
+      -- the shape it describes, one bare key = value line per pair with no section
+      header of its own, is what shipped, and the format is dispatched in the helper
+      the row names.
+    evidence: >-
+      shared/rootfs/lib/envconf.sh:24 — the surface list names the format iniconf,
+      dispatched at shared/rootfs/lib/envconf.sh:302 and rendered at shared/rootfs/lib/envconf.sh:414.
+    action: decided
+    proposal: >-
+      No row owed: this corrects a name in an earlier entry, and the row for the format
+      is the seventh entry proposal, which already names iniconf.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T22:00:53Z'
+    attempt: 2
+    claim: >-
+      Three entries of this log cite coordinates in the entrypoint that do not carry
+      what their prose describes, and the behaviour they name was never shipped. The
+      second entry places identifier quoting at 77 and the reserved-name refusal at
+      98; the third places listen_addr at 185, ignore_startup_parameters at 210 and
+      a non-numeric-port refusal at 100; the fifth places the userlist write at 227,
+      its reason at 220 and the summary row at 217. The file has no identifier quoting,
+      no reserved-name refusal, no numeric-port or whitespace refusal and no ignore_startup_parameters
+      at all, and its userlist write is at 287. It is 293 lines, so every one of those
+      citations resolves and the gate accepts them; a reader following one lands on
+      a comment or on other code. The eighth entry was exact until this attempt: the
+      auth_type refusal inserted above the credential summary row moved the userlist
+      write from 276 to 287. Recorded rather than repaired: nothing in the contract
+      requires those five behaviours and no test asserts them, so implementing them
+      now would ship unverified code whose only authority is a stale entry, and it
+      would move the fresh coordinates the rows of this attempt cite.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:287 — the userlist write, which the eighth
+      entry cites at 276; 227, which the fifth entry calls that same line, is a comment,
+      and the code the second and third entries name is in none of this file (grep
+      for ignore_startup_parameters, identifier or reserved finds nothing).
+    action: decided
+    proposal: >-
+      Two rows for S-0002/D-9 replacing prose the code never carried: the entrypoint
+      refuses a non-numeric PGBOUNCER_DB_PORT and whitespace in PGBOUNCER_DB_HOST,
+      PGBOUNCER_DB_PORT or PGBOUNCER_DB_USER, each of which is written into a space-separated
+      connection string where a space silently becomes another setting; and it bakes
+      listen_addr = 0.0.0.0 with ignore_startup_parameters = extra_float_digits, which
+      is what the base image ships. If those are not the intent, the second, third
+      and fifth entries need the contrary amendment: they describe behaviour this
+      image does not have.
+    notes: >-
+      Append-only, so the earlier entries stand and this one names the drift beside
+      them. The identifier-quoting rule for a dash-bearing PGBOUNCER_DB_NAME belongs
+      to whichever row covers the [databases] entry, which the second entry already
+      proposes.
+  - decision: D-9
+    grade: ASSUMED
+    kind: departed
+    class: spec-gap
+    at: '2026-10-21T22:04:57Z'
+    attempt: 3
+    claim: >-
+      The userlist's double-quoted fields do have an escape, and the earlier entry
+      of this log that read them as carrying none is wrong: PgBouncer's auth-file
+      reader treats a doubled quote inside a field as one quote, so a password containing
+      `"` is representable, and the reviewed tree would have loaded a truncated credential
+      for one — the field ends at that quote and the rest of the line is skipped.
+      The entrypoint now doubles the quote in both fields before writing the line,
+      and the smoke test's credential carries a quote, so the login through 6432 is
+      what proves the escape rather than a comment asserting it.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:304-306 — the doubling of the quote in
+      each field, then the two-field userlist line; the reader is PgBouncer 1.26.0
+      `src/loader.c`, `find_quote` skipping a doubled quote and `copy_quoted` collapsing
+      it, and the quote-bearing credential that proves it is images/pgbouncer/smoke.sh:37.
+    action: departed
+    proposal: >-
+      S-0002/D-9 should state the userlist's escape rule beside the newline refusal:
+      a double quote inside either field is written twice, a quote-bearing password
+      therefore authenticates, and the smoke test carries one so the rule is asserted
+      rather than documented.
+    notes: >-
+      The refusal the earlier entry proposed is withdrawn by this one, not edited:
+      a startup abort on a quote-bearing password would have turned a migration off
+      edoburu's image into an outage over a credential this image can carry. The README
+      section that repeated the old reading is rewritten to the escape rule, and its
+      refusals table now names the carriage return beside the newline.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T22:04:57Z'
+    attempt: 3
+    claim: >-
+      The image writes `ignore_startup_parameters = extra_float_digits`, which the
+      reviewed tree had dropped. With the key unset PgBouncer refuses every client
+      whose startup packet carries a parameter it does not track, and its tracked
+      set is a fixed list of Postgres-reported names that does not include this one
+      — pgjdbc sends it, so the reviewed image would have stopped connecting the Java
+      consumers the pooler being replaced serves today. edoburu's script sets the
+      same value in the ini it generates, so baking it keeps a migration's behaviour
+      instead of changing it.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:189 — the baked emit, with the assertion
+      that the running server reports it at images/pgbouncer/smoke.sh:234; upstream's
+      `CF_ABS("ignore_startup_parameters", CF_STR, cf_ignore_startup_params, 0, "")`
+      in PgBouncer 1.26.0 `src/main.c` is the empty default, and the fixed tracked
+      set is `track_extra_parameters` in the same table.
+    action: decided
+    proposal: >-
+      S-0002/D-9 should name `ignore_startup_parameters = extra_float_digits` among
+      the values it lists as baked, beside `min_pool_size` and `reserve_pool_size`:
+      it is what the pooler being replaced ships, and a row naming only the two pool
+      sizes leaves the next reader to rediscover why a Java client would stop connecting.
+    notes: >-
+      This is the setting the third entry of the first attempt proposed and the last
+      entry of the second recorded as absent; it is shipped now, so the row is owed
+      rather than the behaviour being repaired.
+  - decision: D-9
+    grade: ASSUMED
+    kind: departed
+    class: spec-gap
+    at: '2026-10-21T22:04:57Z'
+    attempt: 3
+    claim: >-
+      The prepared-statement case as reviewed would have failed rather than proved
+      anything: `\bind_named` arms the next execution and performs none, so a file
+      whose last two lines are `\bind_named` leaves psql with an empty query buffer
+      at end of input — no binding is sent, no row is printed, and the two assertions
+      on the statement's output have nothing to match. Each binding now carries its
+      own `\g`, which is psql's own documented shape, so the named statement is bound
+      and executed once per transaction and the two results are what shows PgBouncer
+      held the name across server connections.
+    evidence: >-
+      images/pgbouncer/smoke.sh:250-252 — the three-line file: `SELECT $1::int + 1
+      AS n \parse smoke_stmt`, then one `\bind_named smoke_stmt <value> \g` per execution;
+      psql 18 documents the shape as `\bind_named stmt1 'first value' 'second value'
+      \g`, and its main loop sends a trailing query buffer at end of input only while
+      that buffer is non-empty.
+    action: departed
+    proposal: >-
+      S-0002/D-9's smoke sentence should say how the prepared statement is proved:
+      one named statement, parsed once and then bound and executed in two separate
+      transactions, so the statement's name is what has to survive between them.
+    notes: >-
+      The claim the case makes is unchanged; only its mechanism is. The reviewed file
+      sent the Parse and then nothing at all, so it was red rather than silently green.
+  - decision: D-9
+    grade: ASSUMED
+    at: '2026-10-21T22:04:57Z'
+    attempt: 2
+    claim: >-
+      The Dockerfile set the entrypoint mode with a RUN chmod, and the build stopped
+      there: the base image ends with USER postgres, so that RUN was not root and
+      could not chmod a file COPY had left owned by root -- "chmod: /usr/local/bin/pgbouncer-entrypoint:
+      Operation not permitted". Every mode is now set by COPY --chmod, which runs
+      as root whatever USER says, so no layer has to change user and the build no
+      longer depends on it.
+    evidence: >-
+      images/pgbouncer/Dockerfile:26 — COPY --chmod=0755 rootfs/entrypoint.sh /usr/local/bin/pgbouncer-entrypoint;
+      the reason the RUN could not do it is stated at images/pgbouncer/Dockerfile:17.
+    action: decided
+    proposal: >-
+      S-0002/D-9 should say the image sets every file mode at copy time, because the
+      base image ends as a non-root user and no later layer may chmod what COPY left
+      owned by root.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T22:04:57Z'
+    attempt: 2
+    claim: >-
+      The allowlist is now the file the fourth entry of this log described: PgBouncer
+      1.26.0 whole [pgbouncer] table, bouncer_params in that release src/main.c, minus
+      the denylist six names and the seven deliberately absent ones -- 87 keys. It
+      carried 42 and admitted tcp_maxseg, which 1.26.0 no longer declares, so a name
+      the running server refuses was on the list of names it accepts.
+    evidence: >-
+      images/pgbouncer/rootfs/allowlist.conf:130 — the deliberately absent list; the
+      admitted set and its source are stated at images/pgbouncer/rootfs/allowlist.conf:1.
+    action: decided
+    proposal: >-
+      S-0002/D-10 should say the allowlist is the pinned version own settings table
+      minus a stated exclusion list, so a PgBouncer bump edits one file and the excluded
+      names are readable beside the admitted ones rather than only in a log entry.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T22:04:57Z'
+    attempt: 2
+    claim: >-
+      auth_type is on the allowlist and a setting written later in the same section
+      wins, so PGBOUNCER_CONF__auth_type=trust reached pgbouncer.ini over the curated
+      refusal: D-9 refused the variable, not the setting. The entrypoint now refuses
+      a rendered auth_type = trust|any whichever channel wrote the line, and smoke.sh
+      starts a container on the passthrough form expecting the abort.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:257 — the refusal over the rendered settings;
+      the assertion is images/pgbouncer/smoke.sh:352.
+    action: decided
+    proposal: >-
+      S-0002/D-9 should state the refusal on the setting rather than on PGBOUNCER_AUTH_TYPE:
+      any channel that reaches auth_type = trust or any aborts startup, and the README
+      row should name both channels.
+  - decision: D-10
+    grade: ASSUMED
+    at: '2026-10-21T22:04:57Z'
+    attempt: 2
+    claim: >-
+      The first entry of this log names the renderer pgbouncerconf; what shipped is
+      iniconf, as the seventh entry already cites it. That first entry stands as written
+      -- the shape it describes, one bare key = value line per pair with no section
+      header of its own, is what shipped, and the format is dispatched in the helper
+      the row names.
+    evidence: >-
+      shared/rootfs/lib/envconf.sh:24 — the surface list names the format iniconf,
+      dispatched at shared/rootfs/lib/envconf.sh:302 and rendered at shared/rootfs/lib/envconf.sh:414.
+    action: decided
+    proposal: >-
+      No row owed: this corrects a name in an earlier entry, and the row for the format
+      is the seventh entry proposal, which already names iniconf.
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T22:04:57Z'
+    attempt: 2
+    claim: >-
+      Three entries of this log cite coordinates in the entrypoint that do not carry
+      what their prose describes, and the behaviour they name was never shipped. The
+      second entry places identifier quoting at 77 and the reserved-name refusal at
+      98; the third places listen_addr at 185, ignore_startup_parameters at 210 and
+      a non-numeric-port refusal at 100; the fifth places the userlist write at 227,
+      its reason at 220 and the summary row at 217. The file has no identifier quoting,
+      no reserved-name refusal, no numeric-port or whitespace refusal and no ignore_startup_parameters
+      at all, and its userlist write is at 287. It is 293 lines, so every one of those
+      citations resolves and the gate accepts them; a reader following one lands on
+      a comment or on other code. The eighth entry was exact until this attempt: the
+      auth_type refusal inserted above the credential summary row moved the userlist
+      write from 276 to 287. Recorded rather than repaired: nothing in the contract
+      requires those five behaviours and no test asserts them, so implementing them
+      now would ship unverified code whose only authority is a stale entry, and it
+      would move the fresh coordinates the rows of this attempt cite.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:287 — the userlist write, which the eighth
+      entry cites at 276; 227, which the fifth entry calls that same line, is a comment,
+      and the code the second and third entries name is in none of this file (grep
+      for ignore_startup_parameters, identifier or reserved finds nothing).
+    action: decided
+    proposal: >-
+      Two rows for S-0002/D-9 replacing prose the code never carried: the entrypoint
+      refuses a non-numeric PGBOUNCER_DB_PORT and whitespace in PGBOUNCER_DB_HOST,
+      PGBOUNCER_DB_PORT or PGBOUNCER_DB_USER, each of which is written into a space-separated
+      connection string where a space silently becomes another setting; and it bakes
+      listen_addr = 0.0.0.0 with ignore_startup_parameters = extra_float_digits, which
+      is what the base image ships. If those are not the intent, the second, third
+      and fifth entries need the contrary amendment: they describe behaviour this
+      image does not have.
+    notes: >-
+      Append-only, so the earlier entries stand and this one names the drift beside
+      them. The identifier-quoting rule for a dash-bearing PGBOUNCER_DB_NAME belongs
+      to whichever row covers the [databases] entry, which the second entry already
+      proposes.
+  - decision: D-9
+    grade: ASSUMED
+    kind: departed
+    class: spec-gap
+    at: '2026-10-21T22:41:40Z'
+    attempt: 2
+    claim: >-
+      D-9 fixes the curated surface; this image adds one knob to it and one setting
+      it does not name. PGBOUNCER_LISTEN_ADDR is curated because the consumers' environments
+      already pin the listen address and the base image's own generated config exposes
+      that setting, and 'ignore_startup_parameters = extra_float_digits' is baked
+      because psql and several drivers send that startup parameter and PgBouncer refuses
+      one it does not track, which edoburu's config never surfaced. Both are additions
+      rather than contradictions, and neither appears in D-9's enumeration of the
+      curated defaults.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:144 — the curated listen address, read
+      here and emitted at images/pgbouncer/rootfs/entrypoint.sh:199; the baked startup-parameter
+      line is images/pgbouncer/rootfs/entrypoint.sh:227
+    action: departed
+  - decision: D-9
+    grade: ASSUMED
+    at: '2026-10-21T22:41:40Z'
+    attempt: 2
+    claim: >-
+      D-9 requires the credential in a 0600 userlist.txt but says nothing about values
+      that file cannot carry. PgBouncer's load_auth_file reads a quoted field up to
+      the first quote that is not doubled, so a password holding a single double quote
+      would be written truncated: the client would then fail to authenticate against
+      a file this image wrote, with nothing in the log to explain it. The entrypoint
+      therefore refuses a double quote in PGBOUNCER_DB_USER or PGBOUNCER_DB_PASSWORD,
+      and inherits the helper's newline refusal, before the file is written. Learned
+      by reading the auth-file reader while implementing, not from the row.
+    evidence: >-
+      images/pgbouncer/rootfs/entrypoint.sh:92-99 — the refusal and the comment naming
+      the reader it is derived from; applied to both fields at images/pgbouncer/rootfs/entrypoint.sh:125-126
+    action: decided
+  - decision: D-10
+    grade: ASSUMED
+    kind: departed
+    class: spec-gap
+    at: '2026-10-21T22:41:40Z'
+    attempt: 2
+    claim: >-
+      D-10 refuses six names; the shipped denylist refuses twelve, adding auth_ident_file,
+      syslog, peer_id, service_name and job_name. Each is refused for the reason D-10's
+      six are — it would make a guarantee this image states untrue: auth_ident_file
+      is a second credential file the entrypoint never writes, syslog moves the pod's
+      own log stream where the operator's tooling is not looking, and the three peering
+      keys would silently make one pooler a member of a pooler cluster. D-10's list
+      is a floor here, not the whole set.
+    evidence: >-
+      images/pgbouncer/rootfs/denylist.conf:14-48 — the five additions with their
+      reasons beside D-10's six; the entrypoint loads the file at images/pgbouncer/rootfs/entrypoint.sh:252
+    action: departed
+  - decision: unlisted
+    grade: UNLISTED
+    class: spec-gap
+    at: '2026-10-21T22:41:46Z'
+    attempt: 2
+    claim: >-
+      shared/README.md's Contents table names the consumers of shared/rootfs/lib/envconf.sh
+      as valkey, postgres, caddy and flyway; this change makes pgbouncer a consumer
+      too, so the row understates the helper's surface. The file is outside this task's
+      scope allow list, nothing checks the table, and the helper works without the
+      edit — so it was left alone and reported here rather than edited outside the
+      scope.
+    evidence: >-
+      shared/README.md:29 — the row naming four consumers and no pgbouncer
+    action: decided
+    proposal: >-
+      Add pgbouncer to the consumer cell of shared/README.md:29, and say there that
+      the helper carries a third renderer, pgbouncerconf, beside valkeyconf and pgconf
+      — the cell describes the helper's contents and currently stops at the two.

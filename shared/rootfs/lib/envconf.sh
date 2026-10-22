@@ -18,6 +18,7 @@
 #   envconf_warn_unknown   <prefix> <curated_var_names> [remediation]
 #   envconf_quote_valkeyconf <value>
 #   envconf_quote_pgconf   <value>
+#   envconf_refuse_ini_value <label> <value>
 #   envconf_refuse_newline <label> <value>
 #   envconf_scan_pgconf    <file> <source> <origin>
 #   envconf_render         <fmt> [infile]
@@ -298,6 +299,7 @@ envconf_render() {
 	case "${fmt}" in
 	valkeyconf) renderer=_envconf_render_valkeyconf ;;
 	pgconf) renderer=_envconf_render_pgconf ;;
+	pgbouncerconf) renderer=_envconf_render_pgbouncerconf ;;
 	keyvalue)
 		envconf_die "envconf_render: format '${fmt}' is declared by RFC 0001 but not implemented; it ships with its first consumer"
 		;;
@@ -363,6 +365,66 @@ _envconf_render_pgconf() {
 	local key value
 	tr '\0' '\n' | while IFS= read -r key && IFS= read -r value; do
 		printf '%s = %s\n' "${key}" "$(envconf_quote_pgconf "${value}")"
+	done
+}
+
+# pgbouncer.ini is `key = value` inside a `[section]`, and unlike every format
+# above it has no quoting at all: the parser is told that section names are
+# between `[` and `]`, that a line starting with `;` or `#` is a comment, and
+# that everything after the `=` is the value. There is nothing to escape into,
+# so the three things a value could be *read as* are refused instead of carried:
+#
+#   * a newline, which ends the line the value was supposed to be on;
+#   * a `[`, which opens a section;
+#   * a leading `%include`, PgBouncer's own directive for reading another file
+#     into this one.
+#
+# The renderer writes `key = value`, where none of the three can begin a line --
+# but the rule is a property of the value rather than of the position this
+# renderer happens to put it in. The pgbouncer entrypoint writes curated values
+# into the same file by another road, and a database name is a *key* there, so
+# `PGBOUNCER_DB_NAME='[evil'` is the same hazard one line earlier. Exported, so
+# both callers apply one rule.
+#
+#   envconf_refuse_ini_value <label> <value>
+envconf_refuse_ini_value() {
+	local label="$1"
+	local value="$2"
+
+	case "${value}" in
+	*"$_ENVCONF_NL"* | *"$_ENVCONF_CR"*)
+		envconf_die "${label} contains a newline, which an ini file cannot carry"
+		;;
+	esac
+	case "${value}" in
+	*'['*)
+		envconf_die "${label} contains '[', which is what opens a section in an ini file"
+		;;
+	esac
+	case "${value}" in
+	%include*)
+		envconf_die "${label} starts with '%include', the directive that reads another file into an ini file"
+		;;
+	esac
+}
+
+# The one renderer that can *detect* a newline-bearing value rather than assume
+# envconf_collect refused it. The wire format carries NUL as the delimiter and
+# this translates NUL to newline, so an embedded newline and the delimiter
+# between two pairs become the same byte: what is left is a field without a
+# partner, an odd number of lines, which is read below as a key with no value.
+# The rows already printed are discarded with the file they were going into --
+# envconf_collect refuses these values, so reaching here at all means a caller
+# fed envconf_render a stream it did not build.
+_envconf_render_pgbouncerconf() {
+	local key value
+	tr '\0' '\n' | while :; do
+		IFS= read -r key || break
+		if ! IFS= read -r value; then
+			envconf_die "the passthrough stream stops pairing here ('${key}' has no value after it): a value holding a newline becomes a second line, and pgbouncer.ini cannot carry one"
+		fi
+		envconf_refuse_ini_value "the value for '${key}'" "${value}"
+		printf '%s = %s\n' "${key}" "${value}"
 	done
 }
 
@@ -534,7 +596,10 @@ _envconf_effective() {
 
 _envconf_summary_body() {
 	local key value source origin shown
-	tr '\0' '\n' | _envconf_effective |
+	# A newline or CR inside a field becomes a space before NUL becomes the
+	# line break. Left as is, it shifts every field after it by one line, and a
+	# two-line `_FILE` secret printed its second line as the next `source=`.
+	tr '\n\r\0' '  \n' | _envconf_effective |
 		while IFS= read -r key && IFS= read -r value &&
 			IFS= read -r source && IFS= read -r origin; do
 			# The key stays visible and only the value is hidden. RFC 0001's

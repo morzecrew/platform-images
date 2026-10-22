@@ -1,18 +1,18 @@
 # python-distroless images
 
-Minimal **runtime** image for Python workloads: [`al3xos/python-distroless`](https://hub.docker.com/r/al3xos/python-distroless) on Docker Hub as the main stage, plus a thin set of libraries copied from **`debian:bookworm-slim`** so common stacks (e.g. **python-magic** / **libmagic**) keep working without a full glibc dev tree.
+Minimal **runtime** image for Python workloads: [`al3xos/python-distroless`](https://hub.docker.com/r/al3xos/python-distroless) on Docker Hub as the main stage, plus a thin set of libraries copied from **`debian:${DEBIAN_VERSION}-slim`** (a bare Debian release, `13`/trixie today, the one the runtime names) so common stacks (e.g. **python-magic** / **libmagic**) keep working without a full glibc dev tree.
 
 ## Contents
 
-**Tag `3.14.8`** — distroless Python on `al3xos/python-distroless`, with libmagic, CA certs, and common runtime libs from bookworm.
+**Tags `3.14` and `3.14.8`** — `3.14` is the mutable minor tag, repointed on every rebuild including the weekly one, and `3.14.8` is the exact patch; the version label names the patch either way. Distroless Python on `al3xos/python-distroless`, with libmagic, CA certs, and common runtime libs from the same Debian release.
 
 - Intended as the **final stage** after a builder such as [`uv-builder`](../uv-builder): copy `/opt/venv` from the build stage. `PATH` starts with `/opt/venv/bin`, so `python`, in the entrypoint or in `docker exec <container> python`, is the venv’s.
 - **User** `65532:65532` by default (overridable via **`APP_UID`** / **`APP_GID`** build args).
 - **Environment** `LANG` / `LC_ALL` `C.UTF-8`, `TZ=UTC`, `PYTHONUNBUFFERED=1`, `PYTHONFAULTHANDLER=1`, plus **`APP_RUNTIME_DIR`**, **`APP_TMP_DIR`** (defaults `/srv/runtime` and `/srv/runtime/tmp`).
 - **Writable temp**: `TMPDIR` is **`APP_TMP_DIR`** (default `/srv/runtime/tmp`); `XDG_CACHE_HOME` is `${TMPDIR}/.cache`. Mount a volume over those paths if you need a writable layer at runtime.
-- Bundled from bookworm: updated CA certs, **`libmagic.so.1`** and **`magic.mgc`**, plus **`libbz2`**, **`liblzma`**, **`libz`**. **`LD_LIBRARY_PATH=/usr/lib`** is set so these libs resolve.
+- Bundled from Debian 13 (trixie): updated CA certs, **`libmagic.so.1`** and **`magic.mgc`**, plus **`libbz2`**, **`liblzma`**, **`libz`**. **`LD_LIBRARY_PATH=/usr/lib`** is set so these libs resolve.
 
-Published for `linux/amd64` and `linux/arm64`. `DISTROLESS_PYTHON_VERSION` in [`docker-bake.hcl`](../../docker-bake.hcl) sets the registry tag and `PYTHON_VERSION` in [`Dockerfile`](./Dockerfile), and is also the Python [`uv-builder`](../uv-builder) builds on, so the pair is one CPython build per platform. `DEBIAN_VERSION` comes from bake’s `DISTROLESS_DEBIAN_VERSION`. They must resolve to a real tag on **`al3xos/python-distroless`**: `FROM al3xos/python-distroless:${PYTHON_VERSION}-debian${DEBIAN_VERSION}` (e.g. `3.14.8-debian13`), and `python:${PYTHON_VERSION}-trixie` must exist for uv-builder. The value must be an exact patch; bake refuses a bare minor.
+Published for `linux/amd64` and `linux/arm64`. `DISTROLESS_PYTHON_VERSION` in [`docker-bake.hcl`](../../docker-bake.hcl) sets the registry tags (the minor and the exact patch) and `PYTHON_VERSION` in [`Dockerfile`](./Dockerfile), and is also the Python [`uv-builder`](../uv-builder) builds on, so the pair is one CPython build per platform. `DEBIAN_VERSION` comes from bake’s `DISTROLESS_DEBIAN_VERSION`. They must resolve to a real tag on **`al3xos/python-distroless`**: `FROM al3xos/python-distroless:${PYTHON_VERSION}-debian${DEBIAN_VERSION}` (e.g. `3.14.8-debian13`), and `python:${PYTHON_VERSION}-trixie` must exist for uv-builder. The value must be an exact patch; bake refuses a bare minor.
 
 ## Secrets from files: `envfile-exec`
 
@@ -72,9 +72,9 @@ From the repo root (see [images/README.md](../README.md)):
 just bake python-distroless
 ```
 
-Image: `ghcr.io/morzecrew/python-distroless:3.14.8`.
+Image: `ghcr.io/morzecrew/python-distroless:3.14` (minor, rebuilt weekly) and `ghcr.io/morzecrew/python-distroless:3.14.8` (exact patch).
 
 ## Layout
 
-- `Dockerfile` — deps stage from `debian:bookworm-slim` (certs, libmagic, runtime dir layout); runtime `FROM al3xos/python-distroless`
+- `Dockerfile` — deps stage from `debian:${DEBIAN_VERSION}-slim` (Debian 13, the release the runtime names; certs, libmagic, runtime dir layout); runtime `FROM al3xos/python-distroless`
 - `rootfs/envfile-exec` — the `<NAME>_FILE` launcher above
