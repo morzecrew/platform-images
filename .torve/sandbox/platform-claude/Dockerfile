@@ -5,8 +5,8 @@
 # `bake --print` needs none, and `bake-smoke` drives the task's nested daemon
 # through `DOCKER_HOST`.
 #
-#   docker build -t platform-claude-sandbox:2.1.283-torve0.6.0 .torve/sandbox/platform-claude
-ARG BASE=ghcr.io/morzecrew/claude-sandbox:2.1.283-torve0.6.0
+#   docker build -t platform-claude-sandbox:2.1.283-torve0.6.1 .torve/sandbox/platform-claude
+ARG BASE=ghcr.io/morzecrew/claude-sandbox:2.1.283-torve0.6.1
 FROM hadolint/hadolint:v2.14.0 AS hadolint
 FROM docker:28-cli AS docker
 FROM ${BASE}
