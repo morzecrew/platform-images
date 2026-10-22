@@ -21,9 +21,6 @@ usage() {
 }
 
 bake_opts=()
-# A bake file's target paths resolve next to that file: the working directory
-# for the repository, which is not where a fixture lives.
-bake_dir="$(pwd)"
 
 while [ "$#" -gt 0 ]; do
 	case "$1" in
@@ -33,7 +30,6 @@ while [ "$#" -gt 0 ]; do
 			exit 2
 		fi
 		bake_opts+=(-f "$2")
-		bake_dir="$(cd "$(dirname "$2")" && pwd)"
 		shift 2
 		;;
 	-h | --help)
@@ -53,18 +49,18 @@ if ! plan="$(docker buildx bake "${bake_opts[@]}" --print)"; then
 	exit 2
 fi
 
-ARG_DEFAULTS_PLAN="$plan" ARG_DEFAULTS_BAKE_DIR="$bake_dir" python3 - <<'PY'
+ARG_DEFAULTS_PLAN="$plan" python3 - <<'PY'
 import json
 import os
 import re
 import sys
 
 plan = json.loads(os.environ["ARG_DEFAULTS_PLAN"])
-bake_dir = os.environ["ARG_DEFAULTS_BAKE_DIR"]
 
 # `ARG NAME=value`, the value taken verbatim bar one pair of surrounding quotes.
-# An ARG without `=` has no default and never matches.
-ARG_LINE = re.compile(r"\s*ARG\s+([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+# An ARG without `=` has no default and never matches. The instruction is
+# case-insensitive to Docker, so `arg` is read too.
+ARG_LINE = re.compile(r"\s*(?i:ARG)\s+([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
 drifts = []
 for name, target in sorted(plan.get("target", {}).items()):
@@ -76,14 +72,15 @@ for name, target in sorted(plan.get("target", {}).items()):
         continue
 
     dockerfile_name = target.get("dockerfile") or "Dockerfile"
-    dockerfile = os.path.join(bake_dir, norm, dockerfile_name)
-    shown = os.path.join(norm, dockerfile_name)
+    # Bake resolves a relative context from the working directory, not from
+    # the bake file's directory, and so does this.
+    dockerfile = os.path.join(norm, dockerfile_name)
 
     passed_args = target.get("args") or {}
     try:
         handle = open(dockerfile, encoding="utf-8")
     except OSError as exc:
-        print(f"arg-defaults: {name}: cannot read {shown}: {exc}", file=sys.stderr)
+        print(f"arg-defaults: {name}: cannot read {dockerfile}: {exc}", file=sys.stderr)
         sys.exit(2)
 
     with handle:
@@ -102,7 +99,7 @@ for name, target in sorted(plan.get("target", {}).items()):
             passed = str(passed_args[key])
             if passed != default:
                 drifts.append(
-                    f"{name} {shown}: {key}: Dockerfile default {default} != bake value {passed}"
+                    f"{name} {dockerfile}: {key}: Dockerfile default {default} != bake value {passed}"
                 )
 
 for drift in drifts:

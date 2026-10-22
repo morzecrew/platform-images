@@ -45,19 +45,20 @@ ARG UNPASSED_VERSION=0.0.1
 ARG NO_DEFAULT
 DF
 
-if ! output="$(bash "${SCRIPT}" -f "${WORK}/bake.hcl" 2>&1)"; then
+if ! output="$( (cd "${WORK}" && bash "${SCRIPT}" -f bake.hcl) 2>&1)"; then
 	fail "a matching pair exited non-zero:
 ${output}"
 fi
 
-# The same pair, drifted, and unquoted this time.
+# The same pair, drifted, unquoted this time, and in the lowercase spelling
+# Docker accepts as the same instruction.
 cat > "${WORK}/images/demo/Dockerfile" <<'DF'
 FROM scratch
-ARG DEMO_VERSION=1.2.2
+arg DEMO_VERSION=1.2.2
 DF
 
 status=0
-output="$(bash "${SCRIPT}" -f "${WORK}/bake.hcl" 2>&1)" || status=$?
+output="$( (cd "${WORK}" && bash "${SCRIPT}" -f bake.hcl) 2>&1)" || status=$?
 [ "${status}" -eq 1 ] || fail "a drift exited ${status}, expected 1:
 ${output}"
 
