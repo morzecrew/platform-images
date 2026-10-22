@@ -49,6 +49,14 @@ contract. It is normative: image READMEs link here rather than restating it.
 >   upstream's own setting names. One check the contract does not require:
 >   startup aborts on a missing or default credential, which upstream only warns
 >   about.
+> - **`pgbouncer`** implements all of it, through the same helper, which gained
+>   an ini renderer for the purpose (`pgbouncerconf`, beside `valkeyconf` and
+>   `pgconf`). Two deltas, both stated in
+>   [`images/pgbouncer/rootfs/denylist.conf`](pgbouncer/rootfs/denylist.conf):
+>   the value-safety refusal covers `[` and a leading `%include` as well as a
+>   newline, because all three are ways a value in an ini file stops being a
+>   value; and the denylist is wider than the six names that decision requires,
+>   adding `auth_ident_file`, `syslog` and the three peering names.
 > - **`postgres`** implements the passthrough channel, the allowlist, a denylist
 >   file and the startup summary, through the same helper (RFC 0001 P4). It is
 >   the one image that attributes **every** value to the file or variable it came
@@ -265,6 +273,7 @@ author to remember.
 | Image | Route | Evidence | Decided |
 |---|---|---|---|
 | `valkey` | 2 (drift) | 14 projects running a cache/queue on four distinct upstream references — `redis:7-alpine` (floating), `redis:7.2.3-alpine`, `redis:8.0.3-alpine`, `valkey/valkey:9.0` — with one migration to Valkey already begun and no shared image to land on. See [RFC 0006](../rfcs/0006-valkey-image.md) §3.1. | 2026-08-12, **admitted** |
+| `pgbouncer` | 2 (drift) | Two projects run `edoburu/pgbouncer` on different tags — `v1.25.1-p0` in eis-backend, `v1.26.0-p0` in erp-backend — with environment blocks copied byte-for-byte between them and into the erp-standalone bundle, so one pooler's settings are maintained in three places and there is no shared image to land on. See `eis-backend` `compose/compose.yml:76-104`, `erp-backend` `compose/compose.yml:40-69`, and decision D-8 of the specification. | 2026-10-21, **admitted** |
 | `npm-builder` | 1 | Five projects hand-roll a Node build stage, and they diverge: two use `npm install` rather than `npm ci`, none has a dependency cache mount, one is on end-of-life `node:16`, and two ship byte-identical copies of the same file. See [RFC 0009](../rfcs/0009-javascript-static-asset-builder.md) §2. | 2026-08-12, **admitted** (as RFC 0008; re-cut as RFC 0009 after its gate measurement) |
 | Node runtime / `node-distroless` | — | Proposed as the other half of the builder pair. No Morze project executes Node in production — all five build static assets and serve them from nginx or Caddy — so the runtime would have been maintained for nobody. See [RFC 0008](../rfcs/0008-javascript-builder-and-distroless-runtime-pair.md) §3.1. | 2026-08-12, **refused** |
 | OpenTelemetry Collector | — | One repository uses it. Route 1 needs two hand-rolled Dockerfiles and route 2 needs two projects that have diverged; one project satisfies neither. See [RFC 0005](../rfcs/0005-opentelemetry-collector-image.md). | 2026-08-12, **refused** |

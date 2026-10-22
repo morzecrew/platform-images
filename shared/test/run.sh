@@ -547,6 +547,60 @@ expect_contains "  ...tab intact" "${out}" "$(printf "search_path = 'a\tb'")"
 out=$(run "keyvalue still refuses" 1 'printf "" | envconf_render keyvalue')
 expect_contains "  ...names the reason" "${out}" "ships with its first consumer"
 
+# --- the pgbouncerconf renderer --------------------------------------------
+
+# PgBouncer's parser has no quoting -- section names are between `[` and `]`,
+# `;` or `#` starts a comment, and everything after the `=` is the value -- so
+# nothing is quoted and nothing is escaped. The form is what the server reads,
+# not a convention this repo is free to improve on.
+out=$(run "pgbouncerconf renders key = value" 0 \
+	'printf "pool_mode\0%s\0" "transaction" | envconf_render pgbouncerconf')
+expect_contains "  ...bare" "${out}" "pool_mode = transaction"
+
+out=$(run "a value with a space is not quoted" 0 \
+	'printf "server_reset_query\0%s\0" "DISCARD ALL" | envconf_render pgbouncerconf')
+expect_contains "  ...as-is" "${out}" "server_reset_query = DISCARD ALL"
+
+# `*` is the fallback database key and the image's own default DB_NAME, so a
+# refusal that caught it would refuse the default configuration.
+out=$(run "a value of * renders" 0 \
+	'printf "dbname\0%s\0" "*" | envconf_render pgbouncerconf')
+expect_contains "  ...star survives" "${out}" "dbname = *"
+
+out=$(run "a tab survives the NUL wire format" 0 \
+	'printf "listen_addr\0%s\0" "$(printf "127.0.0.1\t::1")" | envconf_render pgbouncerconf')
+expect_contains "  ...tab intact" "${out}" "$(printf "listen_addr = 127.0.0.1\t::1")"
+
+out=$(run "a value containing [ is refused" 1 \
+	'printf "listen_addr\0%s\0" "[evil]" | envconf_render pgbouncerconf')
+expect_contains "  ...names the key" "${out}" "listen_addr"
+expect_contains "  ...says why" "${out}" "opens a section"
+
+out=$(run "a value starting with %include is refused" 1 \
+	'printf "auth_file\0%s\0" "%include /etc/passwd" | envconf_render pgbouncerconf')
+expect_contains "  ...names the key" "${out}" "auth_file"
+expect_contains "  ...says why" "${out}" "%include"
+
+# The renderer is the only place this can be caught at all: `tr` makes the
+# delimiter and an embedded newline the same byte, so what is visible is a
+# stream that stops pairing, not the value that caused it. Which field is left
+# unpaired depends on where the newline was, so the assertion is on the reason
+# and not on a name.
+out=$(run "a value holding a newline is refused" 1 \
+	'printf "listen_addr\0%s\0" "$(printf "a\nb")" | envconf_render pgbouncerconf')
+expect_contains "  ...says why" "${out}" "a value holding a newline"
+
+# The refusals are a property of the value, not of this renderer: the image
+# writes curated values into the same file by another road, and a database name
+# is a key there rather than a value.
+out=$(run "the ini value refusal is usable on its own" 1 \
+	'envconf_refuse_ini_value PGBOUNCER_DB_NAME "[evil"')
+expect_contains "  ...names the label" "${out}" "PGBOUNCER_DB_NAME"
+run "an ordinary value passes the ini check" 0 \
+	'envconf_refuse_ini_value PGBOUNCER_DB_HOST db.internal' >/dev/null
+run "an empty value passes the ini check" 0 \
+	'envconf_refuse_ini_value PGBOUNCER_DB_NAME ""' >/dev/null
+
 # --- reading a postgresql.conf layer ---------------------------------------
 
 cat >"${TMP}/pg.conf" <<'PGCONF'

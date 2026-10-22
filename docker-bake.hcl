@@ -41,6 +41,7 @@ variable "DESCRIPTIONS" {
     "python-distroless" = "Distroless Python runtime with libmagic and CA bundle."
     "valkey"            = "Valkey with a finite maxmemory, one persistence switch, file-first secrets, and env-generated config."
     "rustfs"            = "RustFS S3-compatible object storage: console off by default, both credentials required, env-configured."
+    "pgbouncer"         = "PgBouncer with an entrypoint-generated config, file-first credentials, and allowlist-based overrides via env."
   }
 }
 
@@ -394,9 +395,59 @@ target "python-distroless" {
 
 # ....................... #
 
+# The tag names two things: PgBouncer's version, and edoburu's own packaging
+# revision of it as a `-p<x>` suffix. The suffix is not something the upstream
+# project publishes and not something `versioning=` can be pointed at, so the
+# docker versioning compares the tags as edoburu writes them, and the model
+# below is only what a consumer is choosing between.
+# renovate: datasource=docker depName=edoburu/pgbouncer versioning=docker
+variable "PGBOUNCER_VERSION" {
+  default = "v1.26.0-p0"
+}
+
+# PgBouncer's own version, out of the tag: `v1.26.0-p0` -> `1.26.0`. That is
+# what the image is tagged and labelled with, because it is the version of the
+# pooler inside -- and what `pgbouncer --version` prints, which
+# images/pgbouncer/smoke.sh compares against the label, so a tag whose edoburu
+# suffix moved to another upstream release cannot pass unnoticed.
+#
+# Matched rather than captured: the pattern has no group, so it returns the
+# match itself whichever of `regex`'s two conventions bake's HCL follows.
+# A value with no dotted triple in it fails the build here, naming this
+# function, rather than shipping a tag like `latest`.
+function "pgbouncer_version" {
+  params = [tag]
+  result = regex("[0-9]+\\.[0-9]+\\.[0-9]+", tag)
+}
+
+target "pgbouncer" {
+  inherits   = ["_attested"]
+  context    = "./images/pgbouncer"
+  dockerfile = "Dockerfile"
+  tags       = tag("pgbouncer", pgbouncer_version(PGBOUNCER_VERSION))
+  labels     = label("pgbouncer", pgbouncer_version(PGBOUNCER_VERSION))
+
+  # The shared env-config helper reaches this build as a named context rather
+  # than a copy under images/pgbouncer/ (RFC 0001 decision 6). Every image that
+  # sources envconf.sh declares this line; an image that forgets it fails to
+  # build rather than shipping a stale copy.
+  contexts = {
+    shared = "./shared"
+  }
+
+  # The base image tag, passed under the name the Dockerfile gives it, so
+  # .github/scripts/arg-defaults.sh compares the two and a Renovate bump that
+  # touches only one of them fails the build (S-0002/D-1).
+  args = {
+    PGBOUNCER_IMAGE_TAG = PGBOUNCER_VERSION
+  }
+}
+
+# ....................... #
+
 group "default" {
   targets = [
     "flyway", "caddy", "postgres", "postgres-pgvector", "postgres-cron",
-    "uv-builder", "npm-builder", "python-distroless", "valkey", "rustfs",
+    "uv-builder", "npm-builder", "python-distroless", "valkey", "rustfs", "pgbouncer",
   ]
 }

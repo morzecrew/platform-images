@@ -48,6 +48,7 @@ Tags follow bake defaults. The image name carries what is inside; bake variables
 | [python-distroless](./images/python-distroless) | Distroless Python runtime with libmagic and CA bundle for small final images. |
 | [valkey](./images/valkey) | Valkey with a finite `maxmemory`, one persistence switch, file-first secrets, and env-generated config. |
 | [rustfs](./images/rustfs) | RustFS S3-compatible object storage; console off by default, both credentials required, `RUSTFS_CONF__*` passthrough. |
+| [pgbouncer](./images/pgbouncer) | PgBouncer with an entrypoint-generated config, file-first credentials, and allowlist-based overrides via env. |
 
 ## Consuming these images
 
