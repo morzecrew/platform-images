@@ -3577,3 +3577,36 @@ it broke a plain JSON REST API.
   `CADDY_REQUEST_BODY_MAX_SIZE=1000`: a 5000-byte multipart upload through
   `reverse_proxy` gets 413 there and on any other path. `respond` never reads
   the body, so behind it the same upload gets 200.
+
+# Wave 18 · Renovate's titles in the house format
+
+Branch `chore/renovate-gitmoji-titles`.
+
+**Drift count: 1** (D-084).
+
+## D-084 — Renovate's pull requests were the only titles outside gitmoji-conventional
+
+- **Seen:** every other commit on `main` reads `<gitmoji> <type>(<scope>): ...`.
+  Renovate's read `Update ghcr.io/astral-sh/uv Docker tag to v0.13.5 (#89)`, and
+  the repository squashes with the PR title, so each one landed as a commit in
+  another format.
+- **Built:** `semanticCommits: enabled`, and a rule for every package setting
+  `semanticCommitType` to `⬆️ build`. The scope stays Renovate's default,
+  `deps`. Renovate builds the prefix as `<type>(<scope>):` and lowercases the
+  rest, so a title reads `⬆️ build(deps): update flyway/flyway docker tag to
+  v13.11`. The commit message is the same line.
+- **Not built:** `📌` and `⬇️` for pins and rollbacks. With pinning and
+  `rollbackPrs` off, nothing here produces either.
+- **Class:** `drift`.
+
+### Verified
+
+- Renovate 44.176.3, `--platform=local --dry-run=full` at trace level, on this
+  tree under Node 24. Main's config titles the two pending updates `Update
+  flyway/flyway Docker tag to v13.11` and `Update edoburu/pgbouncer Docker tag
+  to v1.26.1`. This config gives `⬆️ build(deps): update flyway/flyway docker
+  tag to v13.11` and the same for pgbouncer; `check_commit_msg.py` passes both.
+- Without the rule for every package, `semanticCommits: enabled` alone gives
+  `chore(deps): ...`: `config:recommended`'s `:semanticPrefixFixDepsChoreOthers`
+  sets the type per package and outranks a top-level `semanticCommitType`.
+- `renovate-config-validator --strict` passes.
