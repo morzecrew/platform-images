@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1.28
 
+# renovate: datasource=docker depName=rustfs/rustfs versioning=docker
 ARG RUSTFS_VERSION=1.0.1
 
 # Upstream publishes the server, the S3 endpoint on 9000 and its console on

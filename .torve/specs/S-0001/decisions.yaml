@@ -36,7 +36,8 @@ decisions:
     text: >-
       Versions live in `docker-bake.hcl`, where one variable feeds both an image's
       tag and its build argument. A Dockerfile's `ARG` default copies the bake value
-      by hand.
+      under the same `# renovate:` annotation, so one Renovate pull request moves
+      both.
     paths: [docker-bake.hcl, images/*/Dockerfile]
     consequence: >-
       a version moves in one place for the published image, and a local `docker build`
@@ -45,6 +46,7 @@ decisions:
       README §Layout; RFC 0004 row 17 and RFC 0009 row 9 (ASSUMED). Defended: D072,
       where six `ARG` defaults and READMEs lagged; R-7 led to D041. Nothing syncs
       the defaults.
+    fingerprint: e369bbe3fa8acf3a/86d99eece9c05cfc
   - id: D-4
     grade: ASSUMED
     text: >-
@@ -340,16 +342,18 @@ decisions:
     grade: ASSUMED
     text: >-
       Versions are tracked only through `# renovate:` annotations directly above a
-      `variable` or `ARG` line in `docker-bake.hcl`. The dockerfile manager is off
-      except for `docker/dockerfile`, Renovate reads patch tags only, and automerge
+      `variable` or `ARG` line in `docker-bake.hcl`, and the same annotation directly
+      above each Dockerfile `ARG` default that copies the value. The dockerfile manager
+      is off except for `docker/dockerfile`, Renovate reads patch tags only, and automerge
       is on except for Node.
-    paths: [.github/renovate.json, docker-bake.hcl]
+    paths: [.github/renovate.json, docker-bake.hcl, images/*/Dockerfile]
     consequence: >-
       a version without its annotation is invisible to Renovate, and an RC never ships
       as a release
     rationale: >-
       Execution-log A42 (a comment gap unhooked python-distroless), D072, D073 (drift:
       an RC shipped as valkey 9.2).
+    fingerprint: e7b7be3ada85c237/c6970b5335db8cfe
   - id: D-24
     grade: ASSUMED
     text: >-

@@ -18,7 +18,7 @@ Admitting an image takes the nine touchpoints `images/README.md` lists. Every ta
 
 ### S-0001/D-3 — `ASSUMED` (Standing decisions)
 
-Versions live in `docker-bake.hcl`, where one variable feeds both an image's tag and its build argument. A Dockerfile's `ARG` default copies the bake value by hand.
+Versions live in `docker-bake.hcl`, where one variable feeds both an image's tag and its build argument. A Dockerfile's `ARG` default copies the bake value under the same `# renovate:` annotation, so one Renovate pull request moves both.
 
 - Paths: `docker-bake.hcl` `images/*/Dockerfile`
 - Consequence: a version moves in one place for the published image, and a local `docker build` lags until its default is moved too
@@ -64,6 +64,13 @@ No entrypoint renders configuration through a templating engine; each image uses
 
 - Paths: `images/*/rootfs/entrypoint.sh` `images/caddy/rootfs/Caddyfile` `images/caddy/Dockerfile`
 - Consequence: configuration is read by the server that owns it, with no second syntax in between
+
+### S-0001/D-23 — `ASSUMED` (Standing decisions)
+
+Versions are tracked only through `# renovate:` annotations directly above a `variable` or `ARG` line in `docker-bake.hcl`, and the same annotation directly above each Dockerfile `ARG` default that copies the value. The dockerfile manager is off except for `docker/dockerfile`, Renovate reads patch tags only, and automerge is on except for Node.
+
+- Paths: `.github/renovate.json` `docker-bake.hcl` `images/*/Dockerfile`
+- Consequence: a version without its annotation is invisible to Renovate, and an RC never ships as a release
 
 ### S-0001/D-25 — `ASSUMED` (Standing decisions)
 

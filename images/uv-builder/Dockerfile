@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1.28
 
+# renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
 ARG PYTHON_VERSION=3.14.8
 ARG DEBIAN_SUITE=trixie
+# renovate: datasource=docker depName=ghcr.io/astral-sh/uv versioning=docker
 ARG UV_VERSION=0.13.4
 
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
