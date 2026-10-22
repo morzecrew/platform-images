@@ -7,8 +7,8 @@ IMAGE="${1:?usage: smoke.sh <image-ref>}"
 ENGINE="${ENGINE:-podman}"
 
 # libmagic is the one claim this image's README makes that a build cannot
-# verify: the .so is copied in from a different distro's layer, so it either
-# resolves at runtime or it does not.
+# verify: the .so is copied in from another image's layer (the Debian `deps`
+# stage), so it either resolves at runtime or it does not.
 "${ENGINE}" run --rm "${IMAGE}" -c "import ctypes.util, ctypes; \
 lib = ctypes.util.find_library('magic') or 'libmagic.so.1'; \
 ctypes.CDLL(lib); print('libmagic:', lib)" ||

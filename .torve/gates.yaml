@@ -77,3 +77,10 @@ gates:
     state: blocking
     origin: structural
     timeout: 900
+    # For a run with no task contract, and what a review round's fix task is
+    # judged by: torve's review leg reads these, and with none it falls back to
+    # `uv run pytest`, which this repository cannot run. S-0002's T-0007 spent
+    # three attempts on "Failed to spawn: pytest". Builds are bake-smoke's.
+    commands:
+      - "sh shared/test/run.sh -v"
+      - "docker buildx bake --print >/dev/null"
