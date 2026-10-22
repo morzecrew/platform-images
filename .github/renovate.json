@@ -5,6 +5,7 @@
     "labels": [
         "dependencies"
     ],
+    "semanticCommits": "enabled",
     "prHourlyLimit": 2,
     "prConcurrentLimit": 5,
     "dependencyDashboard": true,
@@ -12,6 +13,13 @@
     "platformAutomerge": true,
     "automergeType": "pr",
     "packageRules": [
+        {
+            "description": "PR titles, and the squash commits GitHub makes from them, follow gitmoji-conventional: `⬆️ build(deps): update ...`. A rule for every package, because config:recommended's own rules set `chore` and `fix`; Renovate lowercases what follows the prefix. Nothing here produces a pin or a rollback, so neither gets its own emoji. See EXECUTION-LOG D-084.",
+            "matchPackageNames": [
+                "*"
+            ],
+            "semanticCommitType": "⬆️ build"
+        },
         {
             "matchManagers": [
                 "dockerfile"
