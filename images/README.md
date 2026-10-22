@@ -141,7 +141,8 @@ image, printed at startup.
 
 ### Secrets
 
-`<NAME>_FILE` takes precedence over `<NAME>` for every secret. An unreadable
+`<NAME>_FILE` takes precedence over `<NAME>` for every secret, unless an image's
+README says it refuses the two set at once, as `rustfs` does. An unreadable
 `<NAME>_FILE` **aborts** rather than falling back to the plain variable —
 silently starting with the wrong credential is worse than not starting.
 
