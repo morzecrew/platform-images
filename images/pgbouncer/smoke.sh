@@ -54,9 +54,15 @@ start_pooler() {
 # is asserted rather than described. The README says it proves PgBouncer
 # answers, not that Postgres does; this is the half of that claim an operator
 # can observe from inside the container.
+#
+# The sidecar resolving the pooler's name is part of ready, because every
+# assertion connects by that name: under rootless Podman a container recreated
+# under the same name reaches the network's DNS a moment after it answers, and
+# arm64 CI read that as "could not translate host name".
 wait_pooler() {
 	for _ in $(seq 1 60); do
-		if "${ENGINE}" exec "${CTR}" pg_isready -h 127.0.0.1 -p 6432 >/dev/null 2>&1; then
+		if "${ENGINE}" exec "${CTR}" pg_isready -h 127.0.0.1 -p 6432 >/dev/null 2>&1 &&
+			"${ENGINE}" exec "${PGSIDE}" getent hosts "${CTR}" >/dev/null 2>&1; then
 			return 0
 		fi
 		# A refusal is not slow-starting: it is a container that has already
