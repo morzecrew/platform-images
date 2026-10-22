@@ -20,6 +20,14 @@ FROM rustfs/rustfs:${RUSTFS_VERSION}
 # also pins the modes whatever a checkout's umask hands the shared context.
 COPY --chmod=0644 --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 
+# Upstream has no /etc/rustfs, and a directory `COPY --chmod` creates takes the
+# file's mode on newer BuildKit (engine 29): 0644, which uid 10001 cannot enter,
+# so the allowlist reads as missing. dind 27 made it 0755, which is why the
+# sandbox passed. The directory is made first, as root, and the user put back.
+USER root
+RUN install -d -m 0755 /etc/rustfs
+USER rustfs
+
 COPY --chmod=0644 rootfs/allowlist.conf /etc/rustfs/allowlist.conf
 COPY --chmod=0644 rootfs/denylist.conf /etc/rustfs/denylist.conf
 COPY --chmod=0755 rootfs/entrypoint.sh /usr/local/bin/rustfs-entrypoint
