@@ -596,7 +596,10 @@ _envconf_effective() {
 
 _envconf_summary_body() {
 	local key value source origin shown
-	tr '\0' '\n' | _envconf_effective |
+	# A newline or CR inside a field becomes a space before NUL becomes the
+	# line break. Left as is, it shifts every field after it by one line, and a
+	# two-line `_FILE` secret printed its second line as the next `source=`.
+	tr '\n\r\0' '  \n' | _envconf_effective |
 		while IFS= read -r key && IFS= read -r value &&
 			IFS= read -r source && IFS= read -r origin; do
 			# The key stays visible and only the value is hidden. RFC 0001's

@@ -477,6 +477,16 @@ case "${out}" in
 *) ok "  ...the losing source does not appear" ;;
 esac
 
+# A `_FILE` secret may hold a newline, and a curated value need not refuse one.
+# Either must stay inside its own field, not slide into the next row's columns.
+out=$(run "summary keeps its rows over a newline in a value" 0 \
+	'printf "api_key\000abc\nzz9tail\000env\000X\000b\0002\000env\000y\000" | envconf_summary VALKEY')
+case "${out}" in
+*zz9tail*) bad "  ...the secret's second line must not appear" "${out}" ;;
+*) ok "  ...the secret's second line does not appear" ;;
+esac
+expect_contains "  ...the next row is intact" "${out}" "b = 2"
+
 # Distinct keys are all kept; the collapse is per key, not a last-wins filter.
 out=$(run "summary keeps distinct keys" 0 \
 	'printf "a\0001\000baked\000x\000b\0002\000env\000y\000" | envconf_summary VALKEY')
