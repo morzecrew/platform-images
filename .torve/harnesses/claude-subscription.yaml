@@ -4,7 +4,7 @@
 # version and the torve release it builds on. The image's own `/opt/torve/run`
 # starts claude.
 adapter: subscription
-image: platform-claude-sandbox:2.1.283-torve0.6.1
+image: platform-claude-sandbox:2.1.283-torve0.6.2
 equip_root: ~/.claude/skills
 kinds: [skill, plugin, mcp, hook, agent]
 env:
