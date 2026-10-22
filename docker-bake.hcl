@@ -402,7 +402,7 @@ target "python-distroless" {
 # below is only what a consumer is choosing between.
 # renovate: datasource=docker depName=edoburu/pgbouncer versioning=docker
 variable "PGBOUNCER_VERSION" {
-  default = "v1.26.0-p0"
+  default = "v1.26.1-p0"
 }
 
 # PgBouncer's own version, out of the tag: `v1.26.0-p0` -> `1.26.0`. That is
