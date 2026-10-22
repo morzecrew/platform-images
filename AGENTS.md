@@ -72,7 +72,7 @@ Versions are tracked only through `# renovate:` annotations directly above a `va
 - Paths: `.github/renovate.json` `docker-bake.hcl`
 - Consequence: a version without its annotation is invisible to Renovate, and an RC never ships as a release
 
-### S-0002/D-2 — `ASSUMED` (Service images and the drift CI cannot see) — implementation: none
+### S-0002/D-2 — `ASSUMED` (Service images and the drift CI cannot see)
 
 python-distroless is tagged with the minor of `DISTROLESS_PYTHON_VERSION` and with the exact patch, the minor first, as uv-builder is. Its labels keep naming the exact patch.
 

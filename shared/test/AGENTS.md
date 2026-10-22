@@ -2,7 +2,7 @@
 
 ## Decisions governing `shared/test/`
 
-### S-0002/D-10 — `ASSUMED` (Service images and the drift CI cannot see) — implementation: none
+### S-0002/D-10 — `ASSUMED` (Service images and the drift CI cannot see)
 
 `PGBOUNCER_CONF__<key>` writes `<key> = <value>` into the `[pgbouncer]` section once the key is on the image's allowlist, in PgBouncer's own spelling. `user`, `auth_file`, `auth_hba_file`, `logfile`, `pidfile` and `unix_socket_dir` are refused, as is a value that starts a new section or `%include`. The renderer is a new mode of `shared/rootfs/lib/envconf.sh` beside `valkeyconf` and `pgconf`, covered by the helper's own suite. The README gives `pg_isready -h 127.0.0.1 -p 6432` as the health check and says it proves PgBouncer answers, not that Postgres does.
 

@@ -72,14 +72,14 @@ An image is admitted by route 1, hand-rolled in two or more projects, or route 2
 - Paths: `images/README.md` `.github/workflows/annual-image-review.yaml` `.github/workflows/cleanup-images.yaml`
 - Consequence: an image enters and leaves by a rule, not by whoever needs it first
 
-### S-0002/D-4 — `ASSUMED` (Service images and the drift CI cannot see) — implementation: none
+### S-0002/D-4 — `ASSUMED` (Service images and the drift CI cannot see)
 
 `rustfs` is admitted by route 2 and recorded under "Admissions on record" in `images/README.md`. eis-backend and erp-backend both run `rustfs/rustfs:1.0.1`, and they have diverged on its health path and on where its logs go. MinIO, which the erp-standalone bundle and morze-crm-backend still name, no longer publishes an image.
 
 - Paths: `images/README.md`
 - Consequence: the projects that store objects have one image to land on, and MinIO's consumers have a destination when they move
 
-### S-0002/D-8 — `ASSUMED` (Service images and the drift CI cannot see) — implementation: none
+### S-0002/D-8 — `ASSUMED` (Service images and the drift CI cannot see)
 
 `pgbouncer` is admitted by route 2 and recorded under "Admissions on record" in `images/README.md`. eis-backend runs `edoburu/pgbouncer:v1.25.1-p0` and erp-backend `v1.26.0-p0`, with byte-identical environment blocks copied between them and into the erp-standalone bundle.
 
