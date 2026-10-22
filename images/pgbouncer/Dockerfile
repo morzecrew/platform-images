@@ -9,7 +9,7 @@
 # .github/scripts/arg-defaults.sh fails the build if it drifts from the bake
 # (S-0002/D-1).
 # renovate: datasource=docker depName=edoburu/pgbouncer versioning=docker
-ARG PGBOUNCER_IMAGE_TAG=v1.26.0-p0
+ARG PGBOUNCER_IMAGE_TAG=v1.26.1-p0
 
 # Alpine, so RFC 0001's POSIX-sh helper runs unmodified with no added bash
 # (RFC 0001 decision 7).
