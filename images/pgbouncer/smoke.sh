@@ -342,11 +342,20 @@ expect_refusal "a denylisted key" "denylisted" \
 expect_refusal "the curated and passthrough channels setting pool_mode" "both set it" \
 	"${DBARGS[@]}" -e PGBOUNCER_POOL_MODE=session -e PGBOUNCER_CONF__pool_mode=transaction
 
+expect_refusal "the curated and passthrough channels setting listen_addr" "both set it" \
+	"${DBARGS[@]}" -e PGBOUNCER_LISTEN_ADDR=127.0.0.1 -e PGBOUNCER_CONF__listen_addr=0.0.0.0
+
+expect_refusal "a database name that starts a comment" "a comment" \
+	"${DBARGS[@]}" -e 'PGBOUNCER_DB_NAME=#app'
+
 # trust admits every user in the auth file without a password, and `any` admits
 # every user there is; both are refused by name, which is why the image curates
 # this setting instead of defaulting it and leaving it open.
 expect_refusal "PGBOUNCER_AUTH_TYPE=trust" "authenticates nobody" \
 	"${DBARGS[@]}" -e PGBOUNCER_AUTH_TYPE=trust
+
+expect_refusal "PGBOUNCER_AUTH_TYPE=TRUST, in capitals" "authenticates nobody" \
+	"${DBARGS[@]}" -e PGBOUNCER_AUTH_TYPE=TRUST
 
 # auth_type is allowlisted, so the passthrough channel is another spelling of
 # the same setting, and PgBouncer takes the last occurrence of a repeated key.

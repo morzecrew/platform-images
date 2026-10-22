@@ -132,7 +132,8 @@ refuse_unwritable_credential PGBOUNCER_DB_PASSWORD "${db_password}"
 # `trust` admits every user named in auth_file without a password and `any`
 # admits every user at all, including as administrator of the console.
 auth_type="${PGBOUNCER_AUTH_TYPE:-scram-sha-256}"
-case "${auth_type}" in
+# Compared without case: PgBouncer's lookup reads `TRUST` as `trust`.
+case "$(printf '%s' "${auth_type}" | tr '[:upper:]' '[:lower:]')" in
 trust | any)
 	envconf_die "PGBOUNCER_AUTH_TYPE=${auth_type} authenticates nobody: every client that names a known user is let through, which is the opposite of what a pooler in front of a database is for. Use scram-sha-256 (the default), md5, plain or cert."
 	;;
@@ -165,6 +166,13 @@ envconf_refuse_ini_value PGBOUNCER_DB_NAME "${db_name}"
 envconf_refuse_ini_value PGBOUNCER_DB_HOST "${db_host}"
 envconf_refuse_ini_value PGBOUNCER_DB_PORT "${db_port}"
 envconf_refuse_ini_value PGBOUNCER_DB_USER "${db_user}"
+# The name is the line's key, and a line that starts with `;` or `#` after its
+# leading blanks is a comment: the route would be dropped without a word.
+case "${db_name#"${db_name%%[![:space:]]*}"}" in
+';'* | '#'*)
+	envconf_die "PGBOUNCER_DB_NAME starts with ';' or '#', which makes its [databases] line a comment, so PgBouncer would never route to it."
+	;;
+esac
 printf '%s = host=%s port=%s user=%s\n' \
 	"${db_name}" "${db_host}" "${db_port}" "${db_user}" >>"${CONF_TMP}"
 
@@ -229,6 +237,7 @@ emit ignore_startup_parameters "extra_float_digits" baked "image default"
 # ---------------------------------------------------------------------------
 # 6. the passthrough channel
 # ---------------------------------------------------------------------------
+curated_if_set PGBOUNCER_LISTEN_ADDR listen_addr
 curated_if_set PGBOUNCER_LISTEN_PORT listen_port
 curated_if_set PGBOUNCER_AUTH_TYPE auth_type
 curated_if_set PGBOUNCER_POOL_MODE pool_mode
@@ -294,7 +303,7 @@ effective() {
 }
 
 eff_auth_type=$(effective auth_type)
-case "${eff_auth_type}" in
+case "$(printf '%s' "${eff_auth_type}" | tr '[:upper:]' '[:lower:]')" in
 trust | any)
 	envconf_die "the assembled pgbouncer.ini authenticates with auth_type=${eff_auth_type}: PGBOUNCER_CONF__auth_type sets what PGBOUNCER_AUTH_TYPE refuses. Use scram-sha-256 (the default), md5, plain or cert."
 	;;
