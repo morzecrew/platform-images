@@ -18,7 +18,7 @@ Admitting an image takes the nine touchpoints `images/README.md` lists. Every ta
 
 ### S-0001/D-3 — `ASSUMED` (Standing decisions)
 
-Versions live in `docker-bake.hcl`, where one variable feeds both an image's tag and its build argument. A Dockerfile's `ARG` default copies the bake value by hand.
+Versions live in `docker-bake.hcl`, where one variable feeds both an image's tag and its build argument. A Dockerfile's `ARG` default copies the bake value under the same `# renovate:` annotation, so one Renovate pull request moves both.
 
 - Paths: `docker-bake.hcl` `images/*/Dockerfile`
 - Consequence: a version moves in one place for the published image, and a local `docker build` lags until its default is moved too
@@ -65,6 +65,13 @@ No entrypoint renders configuration through a templating engine; each image uses
 - Paths: `images/*/rootfs/entrypoint.sh` `images/caddy/rootfs/Caddyfile` `images/caddy/Dockerfile`
 - Consequence: configuration is read by the server that owns it, with no second syntax in between
 
+### S-0001/D-23 — `ASSUMED` (Standing decisions)
+
+Versions are tracked only through `# renovate:` annotations directly above a `variable` or `ARG` line in `docker-bake.hcl`, and the same annotation directly above each Dockerfile `ARG` default that copies the value. The dockerfile manager is off except for `docker/dockerfile`, Renovate reads patch tags only, and automerge is on except for Node.
+
+- Paths: `.github/renovate.json` `docker-bake.hcl` `images/*/Dockerfile`
+- Consequence: a version without its annotation is invisible to Renovate, and an RC never ships as a release
+
 ### S-0001/D-25 — `ASSUMED` (Standing decisions)
 
 An image is admitted by route 1, hand-rolled in two or more projects, or route 2, the same upstream run and diverged in two or more; a pair counts once. Refusals are recorded under "Admissions on record". An image unused for a year is deleted, its package frozen by default and kept in `PACKAGES`. The annual workflow opens the review issue on 8 January with a consumer scan.
@@ -72,14 +79,14 @@ An image is admitted by route 1, hand-rolled in two or more projects, or route 2
 - Paths: `images/README.md` `.github/workflows/annual-image-review.yaml` `.github/workflows/cleanup-images.yaml`
 - Consequence: an image enters and leaves by a rule, not by whoever needs it first
 
-### S-0002/D-4 — `ASSUMED` (Service images and the drift CI cannot see) — implementation: none
+### S-0002/D-4 — `ASSUMED` (Service images and the drift CI cannot see)
 
 `rustfs` is admitted by route 2 and recorded under "Admissions on record" in `images/README.md`. eis-backend and erp-backend both run `rustfs/rustfs:1.0.1`, and they have diverged on its health path and on where its logs go. MinIO, which the erp-standalone bundle and morze-crm-backend still name, no longer publishes an image.
 
 - Paths: `images/README.md`
 - Consequence: the projects that store objects have one image to land on, and MinIO's consumers have a destination when they move
 
-### S-0002/D-8 — `ASSUMED` (Service images and the drift CI cannot see) — implementation: none
+### S-0002/D-8 — `ASSUMED` (Service images and the drift CI cannot see)
 
 `pgbouncer` is admitted by route 2 and recorded under "Admissions on record" in `images/README.md`. eis-backend runs `edoburu/pgbouncer:v1.25.1-p0` and erp-backend `v1.26.0-p0`, with byte-identical environment blocks copied between them and into the erp-standalone bundle.
 

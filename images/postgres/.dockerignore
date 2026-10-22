@@ -1,0 +1,3 @@
+# Projected `AGENTS.md` files describe the tree to agents and are never image
+# content: `rootfs/conf.d/` is copied into the image whole.
+**/AGENTS.md
