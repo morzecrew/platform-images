@@ -11,6 +11,10 @@ runtime:
   # container, for `bake-smoke`. Its egress is the host proxy at the bridge
   # gateway, which `torve doctor` checks.
   docker: nested
+  nested:
+    # The attempt gets one too, so an agent that changes a Dockerfile can
+    # build and smoke-test it before its gates do.
+    roles: [gates, implement]
   sandbox_timeout: 2700      # strictly outside agent_timeout, refused otherwise
   agent_timeout: 2200
   network: host              # this host's egress runs through a local proxy
