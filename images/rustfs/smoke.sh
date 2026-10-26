@@ -337,6 +337,16 @@ logs="$(logs_of)"
 expect_not_in "the access key is not in the root path's log" "${logs}" "${ACCESS_KEY}"
 expect_not_in "the secret key is not in the root path's log" "${logs}" "${SECRET_KEY}"
 
+# A credential set directly is the server's as given, padding included: only a
+# file's content is normalized and exported, so the root path must not hand
+# the server a trimmed copy of a value nobody read from a file.
+start -e RUSTFS_ACCESS_KEY="${ACCESS_KEY}" -e RUSTFS_SECRET_KEY="${SECRET_KEY} "
+wait_ready
+code="$(status_of PUT /smoke-bucket/padded.txt "padded" "${ACCESS_KEY}" "${SECRET_KEY} ")"
+[ "${code}" = "200" ] ||
+	{ echo "FAIL: a padded secret set directly signed a ${code}, expected 200"; exit 1; }
+echo "root path: a value set directly reaches the server unchanged"
+
 # --- 9. `--user`: the same image, run as the server's uid ------------------
 #
 # Pinning `user:` gets none of the above: the container runs as that uid
