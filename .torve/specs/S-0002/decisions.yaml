@@ -83,8 +83,9 @@ decisions:
       `images/rustfs` builds `FROM rustfs/rustfs:${RUSTFS_VERSION}`, a Renovate-tracked
       bake variable starting at 1.0.1, and its tag is that version. Its entrypoint
       sources the shared helper, exports what it decides and then execs upstream's
-      `/entrypoint.sh`, which keeps creating the data directories and running as uid
-      10001. Upstream owns every `RUSTFS_*` name, so the curated keys are upstream
+      `/entrypoint.sh`, which keeps creating the data directories; the server runs
+      as uid 10001, dropped to from root by S-0003/D-3 when the container starts as
+      root. Upstream owns every `RUSTFS_*` name, so the curated keys are upstream
       names whose defaults the image changes: `RUSTFS_CONSOLE_ENABLE=false`, `RUSTFS_OBS_LOG_DIRECTORY`
       empty so the server logs to stdout, and `RUSTFS_ADDRESS=:9000`.
     paths: [images/rustfs/Dockerfile, images/rustfs/rootfs/**]
@@ -97,6 +98,7 @@ decisions:
       entrypoint lines to a file in the container. No consumer publishes 9001. caddy
       already exports curated values into upstream's names (S-0001/D-12).
     cites: [S-0001/D-1, S-0001/D-12, S-0001/D-15]
+    fingerprint: bbcde0b97c6426be/b5a5a048c2ccf468
   - id: D-6
     grade: ASSUMED
     text: >-
@@ -158,7 +160,8 @@ decisions:
       `images/pgbouncer` takes PgBouncer from `edoburu/pgbouncer` at a Renovate-tracked
       bake tag, starting at v1.26.0-p0, and is tagged with PgBouncer's own version.
       Its own entrypoint writes `pgbouncer.ini` and a 0600 `userlist.txt` on every
-      start, then execs `pgbouncer`. edoburu's script is not run. The prefix is `PGBOUNCER`,
+      start, then execs `pgbouncer`, as uid 70 (S-0003/D-1 drops to it from root when
+      the container starts as root). edoburu's script is not run. The prefix is `PGBOUNCER`,
       and the curated keys default to what every consumer sets today: `DB_HOST` and
       `DB_USER` required, `DB_PORT=5432`, `DB_NAME=*`, `DB_PASSWORD` required (with
       `_FILE`), `LISTEN_PORT=6432`, `AUTH_TYPE=scram-sha-256`, `POOL_MODE=transaction`,
@@ -179,6 +182,7 @@ decisions:
       transaction mode that works only while `max_prepared_statements` is non-zero.
       Both tags default it to 200, which no consumer writes down.
     cites: [S-0001/D-12, S-0001/D-14, S-0001/D-16]
+    fingerprint: 9207bf41a8abd173/2d131f74fdb0e0ec
   - id: D-10
     grade: ASSUMED
     text: >-
