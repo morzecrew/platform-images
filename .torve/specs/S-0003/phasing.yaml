@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=../../schemas/phasing.json
+phasing:
+  - phase: 1
+    title: >-
+      pgbouncer reads its password as root, then drops to 70
+    intent: >-
+      In `images/pgbouncer/Dockerfile`, end with `USER root` under a `# hadolint ignore=DL3002`
+      line and a comment saying the entrypoint drops to `postgres`. In `images/pgbouncer/rootfs/entrypoint.sh`,
+      after the files are written and the work directory is cleaned up, branch on
+      `id -u`: as 0, `chown 70:70` both `pgbouncer.ini` and `userlist.txt` and `exec
+      setpriv --reuid=70 --regid=70 --clear-groups pgbouncer "${CONF_FILE}"`; otherwise
+      `exec pgbouncer "${CONF_FILE}"` as now. Extend `images/pgbouncer/smoke.sh` with
+      a section that makes the password file in a volume through `"${ENGINE}" run
+      --rm --user 0 --entrypoint sh` on the image under test (`printf`, `chown 65532:65532`,
+      `chmod 0400`), starts the image with that volume and `PGBOUNCER_DB_PASSWORD_FILE`
+      pointing into it, and asserts: a login through 6432 works; `/proc/1/status`
+      reports `Uid` 70; `userlist.txt` is owned by 70 with mode 0600; the password
+      is absent from the log. Then assert that `--user 70` with the existing world-readable
+      file still logs in, and that `--user 70` with the 65532-owned file exits non-zero
+      with a log line naming `PGBOUNCER_DB_PASSWORD_FILE`. Update `images/pgbouncer/README.md`
+      as D-5 says. Settles D-1, D-2 and D-5.
+    scope: [images/pgbouncer/**]
+    acceptance:
+      - hadolint -t error images/pgbouncer/Dockerfile
+      - >-
+        shellcheck -S error images/pgbouncer/smoke.sh images/pgbouncer/rootfs/entrypoint.sh
+      - >-
+        awk '/^USER /{u=$2} END{exit u!="root"}' images/pgbouncer/Dockerfile
+      - >-
+        grep -q 'setpriv --reuid=70 --regid=70 --clear-groups' images/pgbouncer/rootfs/entrypoint.sh
+    character: routine
+  - phase: 2
+    title: >-
+      rustfs reads its credentials as root, then drops to 10001
+    intent: >-
+      In `images/rustfs/Dockerfile`, end with `USER root` under a `# hadolint ignore=DL3002`
+      line and a comment saying the entrypoint drops to `rustfs`. In `images/rustfs/rootfs/entrypoint.sh`,
+      keep `credential` resolving and checking both keys, and keep the values it read.
+      Just before the final exec, branch on `id -u`: as 0, `export RUSTFS_ACCESS_KEY`
+      and `RUSTFS_SECRET_KEY` as those values, `unset RUSTFS_ACCESS_KEY_FILE RUSTFS_SECRET_KEY_FILE`,
+      and `exec setpriv --reuid=10001 --regid=10001 --clear-groups /entrypoint.sh
+      rustfs "$@"`; otherwise exec `/entrypoint.sh rustfs "$@"` as now. Extend `images/rustfs/smoke.sh`
+      with a section that makes both credential files in a volume through `"${ENGINE}"
+      run --rm --user 0 --entrypoint sh` on the image under test, owned by 65532 at
+      mode 0400. Start the image with that volume and both `_FILE` names pointing
+      into it, and assert: a signed path-style request creates a bucket and puts and
+      gets an object; `/proc/1/status` reports `Uid` 10001; neither credential appears
+      in the log. Then assert that `--user 10001` with the existing world-readable
+      files still serves, and that `--user 10001` with the 65532-owned files exits
+      non-zero with a log line naming the unreadable `_FILE`. Update `images/rustfs/README.md`
+      as D-6 says. Settles D-3, D-4 and D-6.
+    scope: [images/rustfs/**]
+    acceptance:
+      - hadolint -t error images/rustfs/Dockerfile
+      - >-
+        shellcheck -S error images/rustfs/smoke.sh images/rustfs/rootfs/entrypoint.sh
+      - >-
+        awk '/^USER /{u=$2} END{exit u!="root"}' images/rustfs/Dockerfile
+      - >-
+        grep -q 'setpriv --reuid=10001 --regid=10001 --clear-groups' images/rustfs/rootfs/entrypoint.sh
+    character: routine

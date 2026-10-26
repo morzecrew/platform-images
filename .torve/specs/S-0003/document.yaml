@@ -1,0 +1,95 @@
+# yaml-language-server: $schema=../../schemas/document.json
+id: S-0003
+title: >-
+  pgbouncer and rustfs read their secrets as root, then drop to their user
+kind: design
+change:
+  type: feat
+  scope: images
+status: draft
+implementation: none
+depends_on: [S-0002]
+informed_by: []
+supersedes: []
+superseded_by: null
+owner: Lev Litvinov
+schema_version: 4
+summary: |-
+  The pgbouncer and rustfs images start as root, read their `_FILE` secrets whoever owns the file, and drop to uid 70 and uid 10001 before their server starts, as the postgres and valkey images already do.
+
+  A deployment can then give one secret file to the application's user and still hand the same value to the pooler and the object store. A container started with `user:` behaves exactly as it does today.
+motivation: |-
+  morzer renders each secret to a 0400 file with one owner, so a non-root reader gets a file only by owning it. The erp-standalone bundle's backend runs as 65532, PgBouncer as 70 and RustFS as 10001. The database password and the S3 key each have two non-root readers, so the bundle declares each twice and the operator types the same value into both. Those are infrastructure secrets that morzer could generate, if one file could reach both readers.
+
+  The postgres, valkey and flyway images do not have this problem. They start as root, read any secret file, and drop to their own user (valkey through upstream's `setpriv`), so the bundle's generated `valkey_password` is owned by 65532 and Valkey still reads it.
+current_state: |-
+  `images/pgbouncer` (S-0002/D-9) inherits `USER postgres` from edoburu's image. Its entrypoint reads `PGBOUNCER_DB_PASSWORD_FILE` as uid 70, writes `/etc/pgbouncer/pgbouncer.ini` and a 0600 `userlist.txt`, and execs `pgbouncer`. PgBouncer refuses to start as root, and the image refuses `PGBOUNCER_CONF__user`.
+
+  `images/rustfs` (S-0002/D-5, D-6) sets `USER rustfs` (uid 10001). Its entrypoint validates both credentials through `envconf_secret` and leaves the `_FILE` variables set, then execs upstream's `/entrypoint.sh`. Upstream's script only validates them; the `rustfs` binary reads `RUSTFS_*` from its environment, never from its arguments. Upstream's script never drops privileges, so started as root it would run the server as root.
+
+  Both bases ship `/bin/setpriv` (checked on `ghcr.io/morzecrew/pgbouncer:1.26.1` and `rustfs:1.0.4`).
+goals: |-
+  - A `_FILE` secret owned by any uid at mode 0400 reaches PgBouncer and RustFS.
+  - Neither server ever runs as root: PgBouncer as 70, RustFS as 10001.
+  - A consumer that starts either image with `user:` sees no change.
+non_goals: |-
+  - Changing the uid either server runs as.
+  - Any other image: postgres, valkey and flyway already start as root, and caddy reads no secret file.
+  - Switching any consumer. erp-standalone's single declarations are that repository's document.
+design:
+  - key: phases
+    md: |-
+      | Phase | Owns | Runs beside |
+      |---|---|---|
+      | 1 | `images/pgbouncer/` | 2 |
+      | 2 | `images/rustfs/` | 1 |
+
+      The two phases share no file, so two workers can run them side by side.
+  - key: judging
+    md: >-
+      `bake-smoke` judges both phases: it builds the touched target on the task's
+      nested daemon and runs its `smoke.sh`. Each smoke test makes its secret files
+      inside a throwaway container started from the image under test with `--user
+      0 --entrypoint sh`, on a volume, so the file's owner and mode are real under
+      rootless Podman and under Docker alike. Acceptance names only the static checks
+      and the `USER` line.
+  - key: root-path
+    md: |-
+      Started as uid 0, each entrypoint does everything it does today as root, then:
+
+      - **pgbouncer** gives `pgbouncer.ini` and `userlist.txt` to 70:70 and execs `setpriv --reuid=70 --regid=70 --clear-groups pgbouncer /etc/pgbouncer/pgbouncer.ini`.
+      - **rustfs** exports `RUSTFS_ACCESS_KEY` and `RUSTFS_SECRET_KEY` as the values it already read, unsets their `_FILE` names, and execs `setpriv --reuid=10001 --regid=10001 --clear-groups /entrypoint.sh rustfs`. Upstream refuses a value and a file set together, and as uid 10001 it could not reread a file another uid owns.
+
+      Started as any other uid, each entrypoint runs exactly as it does today.
+tests: |-
+  - Each `smoke.sh` gains a section that starts the image with its credential file owned by 65532 at mode 0400 and asserts the server works, PID 1 runs as the image's uid, and the secret is absent from the log.
+  - Each also asserts that the `user:` path is unchanged: started with `--user` and a world-readable file it works, and with the 65532-owned file it aborts naming the unreadable file.
+docs: >-
+  Each image's README says the container starts as root and drops to its uid, that
+  a secret file of any owner is read, and that `user:` keeps the old behaviour with
+  its own file requirements.
+out_of_scope: ''
+risks: |-
+  - A consumer that relied on the container's user being 70 or 10001 for something other than the server, such as `docker exec` without `--user`, now gets root in an exec. The servers themselves are unchanged.
+  - rustfs's credentials move from a file into the server's environment, as upstream's value form already puts them: `/proc/1/environ` inside the container, readable by root and uid 10001. They do not reach `docker inspect`, which shows only the configured environment.
+alternatives:
+  - option: >-
+      A morzer feature: group-readable secret files (a mode and a gid per declaration),
+      with `group_add` on each reader.
+    rejected_because: >-
+      It waits on a morzer release and still needs every reader's image to agree on
+      a group. The root-start pattern already serves postgres and valkey, and needs
+      nothing from the manager.
+  - option: >-
+      For rustfs, copy the credentials into a 0400 file under `/dev/shm` owned by
+      10001 and point the `_FILE` names at it, rather than exporting the values.
+    rejected_because: >-
+      It keeps a second copy of the secret on a tmpfs for the container's life, readable
+      by the same uid that can read the server's environment. One more file for the
+      same exposure.
+  - option: >-
+      In the consumer, run PgBouncer and RustFS as the application's uid.
+    rejected_because: >-
+      `/etc/pgbouncer` and RustFS's data directory belong to 70 and 10001 in the images,
+      so each consumer would need a chown step and writable overrides. That works
+      around the image rather than fixing it.

@@ -1,0 +1,104 @@
+# yaml-language-server: $schema=../../schemas/decisions.json
+decisions:
+  - id: D-1
+    grade: ASSUMED
+    text: >-
+      `images/pgbouncer`'s final `USER` is root. Started as uid 0, its entrypoint
+      reads `PGBOUNCER_DB_PASSWORD_FILE` and writes `/etc/pgbouncer/pgbouncer.ini`
+      and the 0600 `userlist.txt` as it does today, gives both files to 70:70, and
+      execs `setpriv --reuid=70 --regid=70 --clear-groups pgbouncer /etc/pgbouncer/pgbouncer.ini`.
+      Started as any other uid, it behaves exactly as before and execs `pgbouncer`
+      as that uid. PgBouncer never runs as root.
+    paths: [images/pgbouncer/Dockerfile, images/pgbouncer/rootfs/**]
+    consequence: >-
+      a password file of any owner at mode 0400 reaches PgBouncer, so one secret can
+      serve the pooler and its clients
+    rationale: >-
+      morzer renders each secret to a 0400 file with one owner. erp-standalone's backend
+      (65532) and PgBouncer (70) therefore need two declarations the operator sets
+      to one value. PgBouncer refuses to start as root, and this image refuses `PGBOUNCER_CONF__user`
+      (S-0002/D-10), so the drop happens in the entrypoint, with the `/bin/setpriv`
+      edoburu's Alpine base already ships. The `--user` path keeps every consumer
+      that pins the uid working unchanged.
+    cites: [S-0002/D-9, S-0002/D-10]
+  - id: D-2
+    grade: ASSUMED
+    text: >-
+      `images/pgbouncer/smoke.sh` creates its password file inside a throwaway container
+      of the image under test (`--user 0 --entrypoint sh`) on a volume, owned by 65532
+      at mode 0400. With that file it asserts that a login through 6432 works, that
+      PID 1 runs as uid 70, that `userlist.txt` is 70's at mode 0600, and that the
+      password is absent from the log. It also asserts that a container started with
+      `--user 70` and a world-readable file still works, and that one started with
+      `--user 70` and the 65532-owned file aborts naming the unreadable file.
+    paths: [images/pgbouncer/smoke.sh]
+    consequence: >-
+      both the root path and the `user:` path are proven on every build, under rootless
+      Podman and under Docker
+    rationale: >-
+      A file made by the smoke script on the host is owned by whoever runs it, and
+      under rootless Podman a host chown cannot reach 65532. Made by root inside a
+      container of the image itself, the file's owner and mode are what a morzer deployment
+      gives it, and nothing new is pulled.
+    cites: [S-0002/D-9]
+  - id: D-3
+    grade: ASSUMED
+    text: >-
+      `images/rustfs`'s final `USER` is root. Started as uid 0, its entrypoint resolves
+      and checks both credentials as it does today, exports `RUSTFS_ACCESS_KEY` and
+      `RUSTFS_SECRET_KEY` as the values it read, unsets `RUSTFS_ACCESS_KEY_FILE` and
+      `RUSTFS_SECRET_KEY_FILE`, and execs `setpriv --reuid=10001 --regid=10001 --clear-groups
+      /entrypoint.sh rustfs` with the container's arguments. Started as any other
+      uid, it behaves exactly as before. The server never runs as root.
+    paths: [images/rustfs/Dockerfile, images/rustfs/rootfs/**]
+    consequence: >-
+      a credential file of any owner at mode 0400 reaches RustFS, and upstream's script
+      and the server run as uid 10001 as before
+    rationale: >-
+      Upstream's `/entrypoint.sh` refuses a value and its `_FILE` set together and
+      never drops privileges, so the drop has to precede it, and after the drop a
+      file another uid owns cannot be read again. Upstream only validates the credentials;
+      the `rustfs` binary reads `RUSTFS_*` from its environment, never from its arguments,
+      so exporting the value puts nothing in `ps`.
+    cites: [S-0002/D-5, S-0002/D-6]
+  - id: D-4
+    grade: ASSUMED
+    text: >-
+      `images/rustfs/smoke.sh` creates both credential files the way D-2 does, owned
+      by 65532 at mode 0400. With them it asserts that a signed request creates a
+      bucket and puts and gets an object, that PID 1 runs as uid 10001, and that neither
+      credential appears in the log. It also asserts that a container started with
+      `--user 10001` and world-readable files still works, and that one started with
+      `--user 10001` and the 65532-owned files aborts naming the unreadable file.
+    paths: [images/rustfs/smoke.sh]
+    consequence: both paths are proven on every build
+    rationale: >-
+      As D-2. The signed round trip is the check that the exported key is the one
+      the server uses.
+    cites: [S-0002/D-6]
+  - id: D-5
+    grade: ASSUMED
+    text: >-
+      `images/pgbouncer/README.md` says that the container starts as root and drops
+      to uid 70 before PgBouncer starts, that `PGBOUNCER_DB_PASSWORD_FILE` may be
+      owned by any uid, and that a container started with `user:` runs as that user
+      throughout and needs the file readable by it.
+    paths: [images/pgbouncer/README.md]
+    consequence: >-
+      a consumer learns it can give the password file to its application's user
+    rationale: >-
+      The README states the image's user today; a consumer reads it, not the entrypoint.
+    cites: [S-0002/D-10]
+  - id: D-6
+    grade: ASSUMED
+    text: >-
+      `images/rustfs/README.md` says that the container starts as root and drops to
+      uid 10001 before upstream's script runs, that both `_FILE` credentials may be
+      owned by any uid and reach the server as environment values, and that a container
+      started with `user:` runs as that user throughout and needs the files readable
+      by it.
+    paths: [images/rustfs/README.md]
+    consequence: >-
+      a consumer learns it can give the credential files to its application's user
+    rationale: As D-5.
+    cites: [S-0002/D-7]
