@@ -84,6 +84,29 @@ A credential holding a newline or a `"` is refused at startup. Neither can
 survive the file's format: a `"` ends a quoted field early, so the stored
 password would not be the one given.
 
+## Privileges
+
+The container **starts as root**. Before PgBouncer starts, the entrypoint hands
+`pgbouncer.ini` and the 0600 `userlist.txt` to the `postgres` user the base
+image provides (uid 70) and drops to it with
+`setpriv --reuid=70 --regid=70 --clear-groups`. PgBouncer itself never runs as
+root: by the time it listens, PID 1 is uid 70.
+
+Root for those few lines is what lets `PGBOUNCER_DB_PASSWORD_FILE` be **owned by
+any uid, at any mode**. Root reads it, the pooler is handed the value in its own
+file, and nothing else has to be able to read the secret — so the same file can
+be mounted `0400` for the application's own user and shared with the pooler. A
+secret owned by a user this image has never heard of is the normal case, not an
+exception.
+
+A container started with `user:` takes the other path: it is **that user
+throughout**, so it skips the chown and the drop, and it needs the password file
+readable by that user. Started `user: 70`, a world-readable file works exactly
+as before; a file owned by another uid at 0400 aborts startup, naming
+`PGBOUNCER_DB_PASSWORD_FILE`. Under Kubernetes, `runAsNonRoot: true` refuses an
+image whose user is root unless the pod names one: set `runAsUser: 70` to keep
+this path.
+
 ## Refusals
 
 Every one of these aborts startup with the reason on stderr, which is where the
@@ -102,10 +125,11 @@ runtime collects it.
 | a curated variable and a passthrough key setting the same thing | Naming both |
 
 The denylist is [`rootfs/denylist.conf`](rootfs/denylist.conf), and each entry
-is there for a reason rather than for general caution: `user` (the uid the image
-was built to run as), `auth_file`/`auth_hba_file`/`auth_ident_file` (the
-credential file the entrypoint writes), `logfile`/`syslog` (the pod's own log
-stream), `pidfile`, `unix_socket_dir` (this container is reached over TCP), and
+is there for a reason rather than for general caution: `user` (the uid PgBouncer
+itself runs as — 70 — which the file modes are sized for),
+`auth_file`/`auth_hba_file`/`auth_ident_file` (the credential file the
+entrypoint writes), `logfile`/`syslog` (the pod's own log stream), `pidfile`,
+`unix_socket_dir` (this container is reached over TCP), and
 `peer_id`/`service_name`/`job_name` (peering, which would make one pooler a
 member of a cluster).
 

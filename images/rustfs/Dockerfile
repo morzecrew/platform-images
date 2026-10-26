@@ -21,13 +21,19 @@ FROM rustfs/rustfs:${RUSTFS_VERSION}
 # also pins the modes whatever a checkout's umask hands the shared context.
 COPY --chmod=0644 --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 
+USER root
+
+# The entrypoint's drop to uid 10001 is `setpriv --reuid=...` (S-0003/D-3). The
+# base image's setpriv is BusyBox's, which takes only the capability options and
+# rejects `--reuid`; Alpine ships util-linux's binary in this package, which
+# installs /bin/setpriv over the busybox applet.
+RUN apk add --no-cache setpriv
+
 # Upstream has no /etc/rustfs, and a directory `COPY --chmod` creates takes the
 # file's mode on newer BuildKit (engine 29): 0644, which uid 10001 cannot enter,
 # so the allowlist reads as missing. dind 27 made it 0755, which is why the
-# sandbox passed. The directory is made first, as root, and the user put back.
-USER root
+# sandbox passed. The directory is made first, explicitly, as root.
 RUN install -d -m 0755 /etc/rustfs
-USER rustfs
 
 COPY --chmod=0644 rootfs/allowlist.conf /etc/rustfs/allowlist.conf
 COPY --chmod=0644 rootfs/denylist.conf /etc/rustfs/denylist.conf
@@ -51,3 +57,12 @@ ENV RUSTFS_ADDRESS=:9000 \
 # volume mount, and moving it silently strands existing data.
 ENTRYPOINT ["/usr/local/bin/rustfs-entrypoint"]
 CMD []
+
+# The container starts as root so its entrypoint can read a credential file
+# owned by any uid, whatever mode it carries. The entrypoint drops to `rustfs`
+# (uid 10001) with `setpriv` before upstream's own script runs, so the server
+# is never root (S-0003/D-3); started with any other uid it runs as that uid
+# throughout, as before.
+#
+# hadolint ignore=DL3002
+USER root

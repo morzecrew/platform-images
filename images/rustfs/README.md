@@ -13,7 +13,8 @@ same binary, same uid 10001, same `/data` volume, same
 `/entrypoint.sh` — and adds the environment contract from
 [images/README.md](../README.md#environment-configuration): three changed
 defaults, one required credential source, and an allowlisted passthrough
-channel.
+channel. It starts as root only to read the credential files, and drops to
+uid 10001 before upstream's script runs.
 
 The upstream image it builds on is pinned by `RUSTFS_VERSION` in
 [`docker-bake.hcl`](../../docker-bake.hcl), a Renovate-tracked variable. The
@@ -55,10 +56,39 @@ Startup aborts when either is
 - given as a value **and** a file at once — upstream's own refusal, kept as it
   is.
 
-The value is read for those checks and never exported: upstream's entrypoint
-resolves the pair itself, so a credential supplied through `_FILE` stays a path
-in the process environment and never reaches `docker inspect`. The startup
+### Reading the files, and the drop to uid 10001
+
+The container **starts as root**, and its entrypoint drops to uid 10001 with
+`setpriv` before upstream's `/entrypoint.sh` runs, so the server itself never
+runs as root. What the root start buys is that a credential file may be **owned
+by any uid, at any mode root can read**: a Kubernetes secret, or a file an init
+container wrote, is typically mode 0400 and belongs to somebody else, and uid
+10001 could not open it at all.
+
+Started as root, the entrypoint reads each file, exports its content to the
+server as `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY`, and unsets the `_FILE`
+pair, so upstream's script and the server see one credential, as a value. A
+credential set directly as a value is left exactly as given. It is
+the file's **first line**, with carriage returns removed and surrounding
+whitespace trimmed — the same reading upstream's own script does — so a
+CRLF-edited or newline-terminated secret file is accepted and the terminator is
+not part of the credential.
+
+A container started with `user:` (any uid other than 0) takes the other path: it
+runs as that user throughout and execs upstream's entrypoint unchanged. Nothing
+is read on its behalf, so **both `_FILE`s must be readable by that user** — pass
+a 65532-owned 0400 file to `user: 10001` and it exits 78 naming the unreadable
+`_FILE`, while a world-readable one works as before.
+
+Choose between the paths by what the value may touch. The root start reaches a
+file its own user cannot, and pays for it by putting the value in the
+container's process environment. `user:` keeps the value out of the environment
+— the `_FILE` stays a path, and `docker inspect` reports it rather than the
+value — and needs the files readable by that user. Either way the startup
 summary prints both key names and redacts both values.
+
+Under Kubernetes, `runAsNonRoot: true` refuses an image whose user is root
+unless the pod names one: set `runAsUser: 10001` to keep the `user:` path.
 
 **`RUSTFS_ROOT_USER`, `RUSTFS_ROOT_PASSWORD`, `MINIO_ROOT_USER` and
 `MINIO_ROOT_PASSWORD` are refused.** Upstream accepts them as pre-rename

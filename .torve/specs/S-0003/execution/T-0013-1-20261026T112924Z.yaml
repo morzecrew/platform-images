@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=../../../schemas/landing.json
+task: T-0013
+phase: 2
+base: fcdc745c85fefe98ae489ebd714ce409a4f8f1d3
+commit: 18797aaebc34159421f6abab2864af51dbbf6ffc
+at: '2026-10-26T11:29:24Z'
+agent: subscription/deepseek-v4.1-flash@deepseek-v4.1-flash
+decisions:
+  - id: D-1
+    grade: ASSUMED
+  - id: D-2
+    grade: ASSUMED
+  - id: D-3
+    grade: ASSUMED
+  - id: D-4
+    grade: ASSUMED
+  - id: D-5
+    grade: ASSUMED
+  - id: D-6
+    grade: ASSUMED
+entries:
+  - decision: D-3
+    grade: ASSUMED
+    kind: departed
+    class: spec-gap
+    at: '2026-10-26T11:21:53Z'
+    claim: >-
+      S-0003/D-3's drop execs `setpriv --reuid=10001 --regid=10001 --clear-groups
+      /entrypoint.sh rustfs`, which cannot run on this base image: upstream rustfs/rustfs:1.0.4
+      is Alpine 3.24 and its /bin/setpriv is BusyBox's applet, which takes only --no-new-privs/--inh-caps/--ambient-caps
+      and rejects --reuid. The flags are util-linux's. Alpine ships util-linux's binary
+      in a separate `setpriv` package (2.42.3-r1), which installs /bin/setpriv over
+      the busybox symlink, so the departure is to add that package to the image alongside
+      the entrypoint the row already describes.
+    evidence: >-
+      `docker run --rm --user 0 --entrypoint sh rustfs/rustfs:1.0.4 -c 'readlink -f
+      /bin/setpriv; /bin/setpriv --reuid=10001 --regid=10001 --clear-groups id'` —
+      prints `/bin/busybox` then `/bin/setpriv: unrecognized option: reuid=10001`
+      and BusyBox v1.37.0's usage; `apk add --no-cache setpriv` then resolves /bin/setpriv
+      to util-linux 2.42.3 and the same command reports uid=10001
+    action: departed
+    proposal: >-
+      Extend S-0003/D-3: images/rustfs installs Alpine's `setpriv` package (with the
+      Dockerfile's apk step) so the drop's `setpriv --reuid=10001 --regid=10001 --clear-groups`
+      resolves to util-linux's binary rather than the base image's BusyBox applet.
+    notes: >-
+      Found while running the new smoke section; the image builds and the root path
+      otherwise works, so the drop's flags and the acceptance grep are unchanged.
