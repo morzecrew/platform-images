@@ -8,6 +8,7 @@ set -euo pipefail
 IMAGE="${1:?usage: smoke.sh <image-ref>}"
 ENGINE="${ENGINE:-podman}"
 CTR="smoke-rustfs-$$"
+SECRETS_VOL="smoke-rustfs-secrets-$$"
 WORK="$(mktemp -d)"
 
 # Published rather than reached by `exec`: the S3 assertions are signed HTTP
@@ -21,6 +22,7 @@ SECRET_KEY=smoke-secret-key-9c2e
 
 cleanup() {
 	"${ENGINE}" rm -f "${CTR}" >/dev/null 2>&1 || true
+	"${ENGINE}" volume rm -f "${SECRETS_VOL}" >/dev/null 2>&1 || true
 	rm -rf "${WORK}"
 }
 trap cleanup EXIT
@@ -269,6 +271,9 @@ expect_refusal "the built-in rustfsadmin credential" "rustfsadmin" \
 	-e RUSTFS_ACCESS_KEY=rustfsadmin -e RUSTFS_SECRET_KEY="${SECRET_KEY}"
 expect_refusal "an unreadable credential file" "not readable" \
 	-e RUSTFS_ACCESS_KEY_FILE=/nonexistent/access -e RUSTFS_SECRET_KEY="${SECRET_KEY}"
+# No `--user`, so this is the root path: the entrypoint reads both files and
+# refuses the pair itself, before the drop and before anything is exported.
+# The wording on the line is upstream's own.
 expect_refusal "a credential set as both a value and a file" "not both" \
 	-v "${WORK}/secrets/access:/run/access:ro,Z" \
 	-e RUSTFS_ACCESS_KEY=plain-value -e RUSTFS_ACCESS_KEY_FILE=/run/access \
@@ -282,5 +287,79 @@ expect_refusal "a passthrough key off the allowlist" "not in the allowlist" \
 expect_refusal "the data directory through the passthrough channel" "denylisted" \
 	-e RUSTFS_ACCESS_KEY="${ACCESS_KEY}" -e RUSTFS_SECRET_KEY="${SECRET_KEY}" \
 	-e RUSTFS_CONF__VOLUMES=/tmp/elsewhere
+
+# --- 8. a credential file another uid owns, read as root -------------------
+#
+# This is what the root start buys: a Kubernetes secret or a file an init
+# container wrote is mode 0400 and belongs to somebody else, and uid 10001
+# cannot read it. The entrypoint reads and checks both as root, exports the
+# values, and drops the server to 10001 with them.
+
+# The files are made inside the image under test, as root, on a volume of its
+# own: the ownership and the mode are the point, and writing them through the
+# engine is what proves they need nothing of the host. The secret file ends in
+# CRLF -- the request signed with the unadorned value below is what proves the
+# carriage return did not reach the server.
+"${ENGINE}" run --rm --user 0 --entrypoint sh \
+	-v "${SECRETS_VOL}:/secrets" \
+	-e "FILE_ACCESS=${ACCESS_KEY}" -e "FILE_SECRET=${SECRET_KEY}" \
+	"${IMAGE}" -c '
+	set -eu
+	printf "%s\n" "${FILE_ACCESS}" > /secrets/access
+	printf "%s\r\n" "${FILE_SECRET}" > /secrets/secret
+	chown 65532:65532 /secrets/access /secrets/secret
+	chmod 0400 /secrets/access /secrets/secret
+'
+
+start -v "${SECRETS_VOL}:/run/secrets:ro" \
+	-e RUSTFS_ACCESS_KEY_FILE=/run/secrets/access \
+	-e RUSTFS_SECRET_KEY_FILE=/run/secrets/secret
+wait_ready
+
+# The server is PID 1 -- upstream's script ends in `exec`, and the entrypoint
+# execs through `setpriv` -- and it is uid 10001, not the root the container
+# started as. Read inside the container, where 1 is that process.
+pid1_uid="$("${ENGINE}" exec "${CTR}" cat /proc/1/status | awk '/^Uid:/{print $2}')"
+[ "${pid1_uid}" = "10001" ] ||
+	{ echo "FAIL: PID 1 runs as uid ${pid1_uid}, expected 10001"; exit 1; }
+echo "root path: PID 1 runs as uid 10001"
+
+code="$(status_of PUT /smoke-bucket)"
+[ "${code}" = "200" ] || { echo "FAIL: creating a bucket returned ${code}"; exit 1; }
+code="$(status_of PUT /smoke-bucket/root-path.txt "hello-root-path")"
+[ "${code}" = "200" ] || { echo "FAIL: putting an object returned ${code}"; exit 1; }
+got="$(s3 GET /smoke-bucket/root-path.txt | tail -n +2)"
+[ "${got}" = "hello-root-path" ] ||
+	{ echo "FAIL: the object read back as '${got}'"; exit 1; }
+echo "root path: signed request created a bucket, put and got an object"
+
+logs="$(logs_of)"
+expect_not_in "the access key is not in the root path's log" "${logs}" "${ACCESS_KEY}"
+expect_not_in "the secret key is not in the root path's log" "${logs}" "${SECRET_KEY}"
+
+# --- 9. `--user`: the same image, run as the server's uid ------------------
+#
+# Pinning `user:` gets none of the above: the container runs as that uid
+# throughout and execs upstream's entrypoint unchanged, so the files have to be
+# readable by it. World-readable ones still serve.
+start --user 10001 \
+	-v "${WORK}/secrets/access:/run/access:ro,Z" \
+	-v "${WORK}/secrets/secret:/run/secret:ro,Z" \
+	-e RUSTFS_ACCESS_KEY_FILE=/run/access \
+	-e RUSTFS_SECRET_KEY_FILE=/run/secret
+wait_ready
+code="$(status_of PUT /smoke-bucket-user)"
+[ "${code}" = "200" ] ||
+	{ echo "FAIL: creating a bucket as --user 10001 returned ${code}"; exit 1; }
+echo "user path: world-readable _FILEs still serve under --user 10001"
+
+# The same volume that worked as root: uid 10001 cannot read it, and the
+# refusal names the `_FILE` it could not open.
+expect_refusal "--user 10001 with a file it cannot read" \
+	"RUSTFS_ACCESS_KEY_FILE is set to '/run/secrets/access', which is not readable" \
+	--user 10001 \
+	-v "${SECRETS_VOL}:/run/secrets:ro" \
+	-e RUSTFS_ACCESS_KEY_FILE=/run/secrets/access \
+	-e RUSTFS_SECRET_KEY_FILE=/run/secrets/secret
 
 echo "ok: rustfs smoke"
