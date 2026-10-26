@@ -45,13 +45,14 @@ decisions:
     grade: ASSUMED
     text: >-
       `images/rustfs`'s final `USER` is root. Started as uid 0, its entrypoint resolves
-      and checks both credentials as it does today, exports `RUSTFS_ACCESS_KEY` and
-      `RUSTFS_SECRET_KEY` as each `_FILE`'s content reads to upstream's script (its
-      first line, with carriage returns removed and surrounding whitespace trimmed),
-      unsets `RUSTFS_ACCESS_KEY_FILE` and `RUSTFS_SECRET_KEY_FILE`, and execs `setpriv
-      --reuid=10001 --regid=10001 --clear-groups /entrypoint.sh rustfs` with the container's
-      arguments. Started as any other uid, it behaves exactly as before. The server
-      never runs as root.
+      and checks both credentials as it does today, refuses a credential set both
+      as a value and as `_FILE` before anything is exported, as upstream would, exports
+      `RUSTFS_ACCESS_KEY` and `RUSTFS_SECRET_KEY` as each `_FILE`'s content reads
+      to upstream's script (its first line, with carriage returns removed and surrounding
+      whitespace trimmed), unsets `RUSTFS_ACCESS_KEY_FILE` and `RUSTFS_SECRET_KEY_FILE`,
+      and execs `setpriv --reuid=10001 --regid=10001 --clear-groups /entrypoint.sh
+      rustfs` with the container's arguments. Started as any other uid, it behaves
+      exactly as before. The server never runs as root.
     paths: [images/rustfs/Dockerfile, images/rustfs/rootfs/**]
     consequence: >-
       a credential file of any owner at mode 0400 reaches RustFS, and upstream's script
