@@ -193,13 +193,20 @@ if [ "${uid}" = "0" ]; then
 		fi
 	done
 
-	export RUSTFS_ACCESS_KEY="${NORMALIZED_ACCESS_KEY}"
-	export RUSTFS_SECRET_KEY="${NORMALIZED_SECRET_KEY}"
-
+	# Only a credential that came from a file is exported. Upstream trims a value
+	# set directly only to check it, and the server reads it as given; replacing
+	# it with the trimmed copy would hand the root path a different credential.
 	# The paths go, so upstream's script cannot put them back: the value it
 	# resolves and the value the server reads would otherwise be two different
 	# things.
-	unset RUSTFS_ACCESS_KEY_FILE RUSTFS_SECRET_KEY_FILE
+	if [ -n "${RUSTFS_ACCESS_KEY_FILE+x}" ]; then
+		export RUSTFS_ACCESS_KEY="${NORMALIZED_ACCESS_KEY}"
+		unset RUSTFS_ACCESS_KEY_FILE
+	fi
+	if [ -n "${RUSTFS_SECRET_KEY_FILE+x}" ]; then
+		export RUSTFS_SECRET_KEY="${NORMALIZED_SECRET_KEY}"
+		unset RUSTFS_SECRET_KEY_FILE
+	fi
 fi
 
 # The trap does not fire across `exec`, so without this the source map -- which

@@ -67,7 +67,8 @@ container wrote, is typically mode 0400 and belongs to somebody else, and uid
 
 Started as root, the entrypoint reads each file, exports its content to the
 server as `RUSTFS_ACCESS_KEY` / `RUSTFS_SECRET_KEY`, and unsets the `_FILE`
-pair, so upstream's script and the server see one credential, as a value. It is
+pair, so upstream's script and the server see one credential, as a value. A
+credential set directly as a value is left exactly as given. It is
 the file's **first line**, with carriage returns removed and surrounding
 whitespace trimmed — the same reading upstream's own script does — so a
 CRLF-edited or newline-terminated secret file is accepted and the terminator is
@@ -85,6 +86,9 @@ container's process environment. `user:` keeps the value out of the environment
 — the `_FILE` stays a path, and `docker inspect` reports it rather than the
 value — and needs the files readable by that user. Either way the startup
 summary prints both key names and redacts both values.
+
+Under Kubernetes, `runAsNonRoot: true` refuses an image whose user is root
+unless the pod names one: set `runAsUser: 10001` to keep the `user:` path.
 
 **`RUSTFS_ROOT_USER`, `RUSTFS_ROOT_PASSWORD`, `MINIO_ROOT_USER` and
 `MINIO_ROOT_PASSWORD` are refused.** Upstream accepts them as pre-rename

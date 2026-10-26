@@ -103,7 +103,9 @@ A container started with `user:` takes the other path: it is **that user
 throughout**, so it skips the chown and the drop, and it needs the password file
 readable by that user. Started `user: 70`, a world-readable file works exactly
 as before; a file owned by another uid at 0400 aborts startup, naming
-`PGBOUNCER_DB_PASSWORD_FILE`.
+`PGBOUNCER_DB_PASSWORD_FILE`. Under Kubernetes, `runAsNonRoot: true` refuses an
+image whose user is root unless the pod names one: set `runAsUser: 70` to keep
+this path.
 
 ## Refusals
 
