@@ -7,3 +7,71 @@ amendments:
       Phases 2, 3 and 4 name `docker-bake.hcl` and `README.md` in their scopes, and a scope is read on the gitignore grammar: a pattern with no slash matches at any depth, and a match may be a directory with anything under it. On that reading `docker-bake.hcl` can share a path with every other glob, so the board held phases 2 to 4 behind phase 1 as overlapping although no file is common to them, and the night's second worker was refused with "3 waiting on overlap".
 
       Both are now written `/docker-bake.hcl` and `/README.md`, anchored to the repository root, which is the file each phase means. Phase 1 can run beside whichever of 2, 3 and 4 the board starts first; 2, 3 and 4 still share the bake file and the README and stay one at a time.
+  - id: A-2
+    at: '2026-10-26T10:54:50Z'
+    title: >-
+      rustfs starts as root and drops to 10001 (S-0003)
+    md: |-
+      S-0003/D-3 gives `images/rustfs` a final `USER root`: the entrypoint reads both credential files as root, exports their values, unsets the `_FILE` names and drops to uid 10001 with `setpriv` before upstream's script runs. D-5 said upstream's script keeps running as 10001, which still holds after the drop, so the row now says where the uid comes from.
+    changes:
+      - subject: D-5
+        field: text
+        before: >-
+          `images/rustfs` builds `FROM rustfs/rustfs:${RUSTFS_VERSION}`, a Renovate-tracked
+          bake variable starting at 1.0.1, and its tag is that version. Its entrypoint
+          sources the shared helper, exports what it decides and then execs upstream's
+          `/entrypoint.sh`, which keeps creating the data directories and running
+          as uid 10001. Upstream owns every `RUSTFS_*` name, so the curated keys are
+          upstream names whose defaults the image changes: `RUSTFS_CONSOLE_ENABLE=false`,
+          `RUSTFS_OBS_LOG_DIRECTORY` empty so the server logs to stdout, and `RUSTFS_ADDRESS=:9000`.
+        after: >-
+          `images/rustfs` builds `FROM rustfs/rustfs:${RUSTFS_VERSION}`, a Renovate-tracked
+          bake variable starting at 1.0.1, and its tag is that version. Its entrypoint
+          sources the shared helper, exports what it decides and then execs upstream's
+          `/entrypoint.sh`, which keeps creating the data directories; the server
+          runs as uid 10001, dropped to from root by S-0003/D-3 when the container
+          starts as root. Upstream owns every `RUSTFS_*` name, so the curated keys
+          are upstream names whose defaults the image changes: `RUSTFS_CONSOLE_ENABLE=false`,
+          `RUSTFS_OBS_LOG_DIRECTORY` empty so the server logs to stdout, and `RUSTFS_ADDRESS=:9000`.
+      - subject: D-5
+        field: fingerprint
+        after: bbcde0b97c6426be/b5a5a048c2ccf468
+  - id: A-3
+    at: '2026-10-26T10:55:02Z'
+    title: >-
+      pgbouncer starts as root and drops to 70 (S-0003)
+    md: |-
+      S-0003/D-1 gives `images/pgbouncer` a final `USER root`: the entrypoint reads the password file as root, writes both files, gives them to 70:70 and execs `pgbouncer` through `setpriv`. D-9 said the entrypoint execs `pgbouncer`, which still holds, so the row now names the uid it runs as.
+    changes:
+      - subject: D-9
+        field: text
+        before: >-
+          `images/pgbouncer` takes PgBouncer from `edoburu/pgbouncer` at a Renovate-tracked
+          bake tag, starting at v1.26.0-p0, and is tagged with PgBouncer's own version.
+          Its own entrypoint writes `pgbouncer.ini` and a 0600 `userlist.txt` on every
+          start, then execs `pgbouncer`. edoburu's script is not run. The prefix is
+          `PGBOUNCER`, and the curated keys default to what every consumer sets today:
+          `DB_HOST` and `DB_USER` required, `DB_PORT=5432`, `DB_NAME=*`, `DB_PASSWORD`
+          required (with `_FILE`), `LISTEN_PORT=6432`, `AUTH_TYPE=scram-sha-256`,
+          `POOL_MODE=transaction`, `MAX_CLIENT_CONN=1000`, `DEFAULT_POOL_SIZE=30`,
+          `MAX_PREPARED_STATEMENTS=200`, and `ADMIN_USERS` and `STATS_USERS` defaulting
+          to `DB_USER`. `AUTH_TYPE` refuses `trust` and `any`. `min_pool_size=5` and
+          `reserve_pool_size=10` are baked. The image's version label is the version
+          `pgbouncer --version` prints, and its smoke test compares the two.
+        after: >-
+          `images/pgbouncer` takes PgBouncer from `edoburu/pgbouncer` at a Renovate-tracked
+          bake tag, starting at v1.26.0-p0, and is tagged with PgBouncer's own version.
+          Its own entrypoint writes `pgbouncer.ini` and a 0600 `userlist.txt` on every
+          start, then execs `pgbouncer`, as uid 70 (S-0003/D-1 drops to it from root
+          when the container starts as root). edoburu's script is not run. The prefix
+          is `PGBOUNCER`, and the curated keys default to what every consumer sets
+          today: `DB_HOST` and `DB_USER` required, `DB_PORT=5432`, `DB_NAME=*`, `DB_PASSWORD`
+          required (with `_FILE`), `LISTEN_PORT=6432`, `AUTH_TYPE=scram-sha-256`,
+          `POOL_MODE=transaction`, `MAX_CLIENT_CONN=1000`, `DEFAULT_POOL_SIZE=30`,
+          `MAX_PREPARED_STATEMENTS=200`, and `ADMIN_USERS` and `STATS_USERS` defaulting
+          to `DB_USER`. `AUTH_TYPE` refuses `trust` and `any`. `min_pool_size=5` and
+          `reserve_pool_size=10` are baked. The image's version label is the version
+          `pgbouncer --version` prints, and its smoke test compares the two.
+      - subject: D-9
+        field: fingerprint
+        after: 9207bf41a8abd173/2d131f74fdb0e0ec

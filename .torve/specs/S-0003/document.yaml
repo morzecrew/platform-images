@@ -6,7 +6,7 @@ kind: design
 change:
   type: feat
   scope: images
-status: draft
+status: accepted
 implementation: none
 depends_on: [S-0002]
 informed_by: []

@@ -4,7 +4,7 @@
 
 ### S-0002/D-5 — `ASSUMED` (Service images and the drift CI cannot see)
 
-`images/rustfs` builds `FROM rustfs/rustfs:${RUSTFS_VERSION}`, a Renovate-tracked bake variable starting at 1.0.1, and its tag is that version. Its entrypoint sources the shared helper, exports what it decides and then execs upstream's `/entrypoint.sh`, which keeps creating the data directories and running as uid 10001. Upstream owns every `RUSTFS_*` name, so the curated keys are upstream names whose defaults the image changes: `RUSTFS_CONSOLE_ENABLE=false`, `RUSTFS_OBS_LOG_DIRECTORY` empty so the server logs to stdout, and `RUSTFS_ADDRESS=:9000`.
+`images/rustfs` builds `FROM rustfs/rustfs:${RUSTFS_VERSION}`, a Renovate-tracked bake variable starting at 1.0.1, and its tag is that version. Its entrypoint sources the shared helper, exports what it decides and then execs upstream's `/entrypoint.sh`, which keeps creating the data directories; the server runs as uid 10001, dropped to from root by S-0003/D-3 when the container starts as root. Upstream owns every `RUSTFS_*` name, so the curated keys are upstream names whose defaults the image changes: `RUSTFS_CONSOLE_ENABLE=false`, `RUSTFS_OBS_LOG_DIRECTORY` empty so the server logs to stdout, and `RUSTFS_ADDRESS=:9000`.
 
 - Paths: `images/rustfs/Dockerfile` `images/rustfs/rootfs/**`
 - Consequence: nothing listens on the console port unless a consumer asks, and the server's log is in `docker logs`
@@ -22,5 +22,12 @@
 
 - Paths: `images/rustfs/rootfs/**` `images/rustfs/README.md`
 - Consequence: a consumer can reach upstream's settings by name, and cannot reach the ones that move its data or weaken it
+
+### S-0003/D-3 — `ASSUMED` (pgbouncer and rustfs read their secrets as root, then drop to their user) — implementation: none
+
+`images/rustfs`'s final `USER` is root. Started as uid 0, its entrypoint resolves and checks both credentials as it does today, refuses a credential set both as a value and as `_FILE` before anything is exported, as upstream would, exports `RUSTFS_ACCESS_KEY` and `RUSTFS_SECRET_KEY` as each `_FILE`'s content reads to upstream's script (its first line, with carriage returns removed and surrounding whitespace trimmed), unsets `RUSTFS_ACCESS_KEY_FILE` and `RUSTFS_SECRET_KEY_FILE`, and execs `setpriv --reuid=10001 --regid=10001 --clear-groups /entrypoint.sh rustfs` with the container's arguments. Started as any other uid, it behaves exactly as before. The server never runs as root.
+
+- Paths: `images/rustfs/Dockerfile` `images/rustfs/rootfs/**`
+- Consequence: a credential file of any owner at mode 0400 reaches RustFS, and upstream's script and the server run as uid 10001 as before
 
 <!-- /torve:managed -->
