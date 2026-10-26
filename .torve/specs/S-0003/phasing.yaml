@@ -35,8 +35,9 @@ phasing:
     intent: >-
       In `images/rustfs/Dockerfile`, end with `USER root` under a `# hadolint ignore=DL3002`
       line and a comment saying the entrypoint drops to `rustfs`. In `images/rustfs/rootfs/entrypoint.sh`,
-      keep `credential` resolving and checking both keys, and keep the values it read.
-      Just before the final exec, branch on `id -u`: as 0, `export RUSTFS_ACCESS_KEY`
+      keep `credential` resolving and checking both keys, and keep each value as upstream's
+      script reads a file: its first line, carriage returns removed, surrounding whitespace
+      trimmed. Just before the final exec, branch on `id -u`: as 0, `export RUSTFS_ACCESS_KEY`
       and `RUSTFS_SECRET_KEY` as those normalized values, `unset RUSTFS_ACCESS_KEY_FILE
       RUSTFS_SECRET_KEY_FILE`, and `exec setpriv --reuid=10001 --regid=10001 --clear-groups
       /entrypoint.sh rustfs "$@"`; otherwise exec `/entrypoint.sh rustfs "$@"` as
