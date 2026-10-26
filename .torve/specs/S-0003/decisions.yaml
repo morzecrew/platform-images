@@ -46,10 +46,12 @@ decisions:
     text: >-
       `images/rustfs`'s final `USER` is root. Started as uid 0, its entrypoint resolves
       and checks both credentials as it does today, exports `RUSTFS_ACCESS_KEY` and
-      `RUSTFS_SECRET_KEY` as the values it read, unsets `RUSTFS_ACCESS_KEY_FILE` and
-      `RUSTFS_SECRET_KEY_FILE`, and execs `setpriv --reuid=10001 --regid=10001 --clear-groups
-      /entrypoint.sh rustfs` with the container's arguments. Started as any other
-      uid, it behaves exactly as before. The server never runs as root.
+      `RUSTFS_SECRET_KEY` as each `_FILE`'s content reads to upstream's script (its
+      first line, with carriage returns removed and surrounding whitespace trimmed),
+      unsets `RUSTFS_ACCESS_KEY_FILE` and `RUSTFS_SECRET_KEY_FILE`, and execs `setpriv
+      --reuid=10001 --regid=10001 --clear-groups /entrypoint.sh rustfs` with the container's
+      arguments. Started as any other uid, it behaves exactly as before. The server
+      never runs as root.
     paths: [images/rustfs/Dockerfile, images/rustfs/rootfs/**]
     consequence: >-
       a credential file of any owner at mode 0400 reaches RustFS, and upstream's script
@@ -59,17 +61,20 @@ decisions:
       never drops privileges, so the drop has to precede it, and after the drop a
       file another uid owns cannot be read again. Upstream only validates the credentials;
       the `rustfs` binary reads `RUSTFS_*` from its environment, never from its arguments,
-      so exporting the value puts nothing in `ps`.
+      so exporting the value puts nothing in `ps`. The exported value is the one upstream's
+      script reads from a file, so a CRLF or padded file means the same credential
+      on either path.
     cites: [S-0002/D-5, S-0002/D-6]
   - id: D-4
     grade: ASSUMED
     text: >-
       `images/rustfs/smoke.sh` creates both credential files the way D-2 does, owned
-      by 65532 at mode 0400. With them it asserts that a signed request creates a
-      bucket and puts and gets an object, that PID 1 runs as uid 10001, and that neither
-      credential appears in the log. It also asserts that a container started with
-      `--user 10001` and world-readable files still works, and that one started with
-      `--user 10001` and the 65532-owned files aborts naming the unreadable file.
+      by 65532 at mode 0400, the secret key's file CRLF-terminated. With them it asserts
+      that a signed request creates a bucket and puts and gets an object, that PID
+      1 runs as uid 10001, and that neither credential appears in the log. It also
+      asserts that a container started with `--user 10001` and world-readable files
+      still works, and that one started with `--user 10001` and the 65532-owned files
+      aborts naming the unreadable file.
     paths: [images/rustfs/smoke.sh]
     consequence: both paths are proven on every build
     rationale: >-

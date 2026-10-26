@@ -37,14 +37,15 @@ phasing:
       line and a comment saying the entrypoint drops to `rustfs`. In `images/rustfs/rootfs/entrypoint.sh`,
       keep `credential` resolving and checking both keys, and keep the values it read.
       Just before the final exec, branch on `id -u`: as 0, `export RUSTFS_ACCESS_KEY`
-      and `RUSTFS_SECRET_KEY` as those values, `unset RUSTFS_ACCESS_KEY_FILE RUSTFS_SECRET_KEY_FILE`,
-      and `exec setpriv --reuid=10001 --regid=10001 --clear-groups /entrypoint.sh
-      rustfs "$@"`; otherwise exec `/entrypoint.sh rustfs "$@"` as now. Extend `images/rustfs/smoke.sh`
-      with a section that makes both credential files in a volume through `"${ENGINE}"
-      run --rm --user 0 --entrypoint sh` on the image under test, owned by 65532 at
-      mode 0400. Start the image with that volume and both `_FILE` names pointing
-      into it, and assert: a signed path-style request creates a bucket and puts and
-      gets an object; `/proc/1/status` reports `Uid` 10001; neither credential appears
+      and `RUSTFS_SECRET_KEY` as those normalized values, `unset RUSTFS_ACCESS_KEY_FILE
+      RUSTFS_SECRET_KEY_FILE`, and `exec setpriv --reuid=10001 --regid=10001 --clear-groups
+      /entrypoint.sh rustfs "$@"`; otherwise exec `/entrypoint.sh rustfs "$@"` as
+      now. Extend `images/rustfs/smoke.sh` with a section that makes both credential
+      files in a volume through `"${ENGINE}" run --rm --user 0 --entrypoint sh` on
+      the image under test, owned by 65532 at mode 0400, the secret key's file ending
+      in CRLF. Start the image with that volume and both `_FILE` names pointing into
+      it, and assert: a signed path-style request creates a bucket and puts and gets
+      an object; `/proc/1/status` reports `Uid` 10001; neither credential appears
       in the log. Then assert that `--user 10001` with the existing world-readable
       files still serves, and that `--user 10001` with the 65532-owned files exits
       non-zero with a log line naming the unreadable `_FILE`. Update `images/rustfs/README.md`
