@@ -193,9 +193,9 @@ if [ "${uid}" = "0" ]; then
 		fi
 	done
 
-	# Only a credential that came from a file is exported. Upstream trims a value
-	# set directly only to check it, and the server reads it as given; replacing
-	# it with the trimmed copy would hand the root path a different credential.
+	# Only a credential that came from a file is exported: that is the one only
+	# root can read. A value set directly is left as given, for the server, which
+	# trims it itself, so the root path changes nothing a `user:` start does not.
 	# The paths go, so upstream's script cannot put them back: the value it
 	# resolves and the value the server reads would otherwise be two different
 	# things.
