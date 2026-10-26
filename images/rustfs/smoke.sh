@@ -342,7 +342,8 @@ expect_not_in "the secret key is not in the root path's log" "${logs}" "${SECRET
 # padding), so the root path treats it exactly as a `user:` start does.
 start -e RUSTFS_ACCESS_KEY="${ACCESS_KEY}" -e RUSTFS_SECRET_KEY="${SECRET_KEY} "
 wait_ready
-code="$(status_of PUT /smoke-bucket/padded.txt "padded")"
+# A fresh container has a fresh /data, so the signed request makes its own bucket.
+code="$(status_of PUT /padded-bucket)"
 [ "${code}" = "200" ] ||
 	{ echo "FAIL: a padded secret set directly did not sign as its trimmed value (${code})"; exit 1; }
 echo "root path: a value set directly is the server's to trim, as on any start"
