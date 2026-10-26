@@ -1,7 +1,8 @@
 #!/bin/sh
 # Generate pgbouncer.ini and userlist.txt from the environment, refuse what
-# cannot be represented, print what won, and exec PgBouncer. See RFC 0001 and
-# images/pgbouncer/README.md.
+# cannot be represented, print what won, and exec PgBouncer -- as the starting
+# uid, or as `postgres` when the container started as root, which is the image's
+# default. See RFC 0001 and images/pgbouncer/README.md.
 #
 # edoburu/pgbouncer's own entrypoint is deliberately not run. It writes
 # pgbouncer.ini only when the file is absent, so a changed environment never
@@ -340,4 +341,24 @@ envconf_summary "${PREFIX}" "${SRCMAP}" "effective configuration" \
 cleanup
 trap - EXIT
 
+# ---------------------------------------------------------------------------
+# 9. hand off to the right uid
+# ---------------------------------------------------------------------------
+# Started as root -- which the image's USER makes the default -- the two files
+# above were written by uid 0, and PgBouncer must not serve as it. They go to
+# the `postgres` user the base image provides, uid 70, which is the uid this
+# image has always run the pooler as; userlist.txt keeps 0600, now held by the
+# uid that reads it. The password file this read could have been any uid's at
+# any mode, which is the point: one secret serves the pooler and its clients.
+#
+# `id -u`, not `whoami`: a `--user` uid has no passwd entry to name.
+if [ "$(id -u)" = "0" ]; then
+	chown 70:70 "${CONF_FILE}" "${AUTH_FILE}"
+	exec setpriv --reuid=70 --regid=70 --clear-groups pgbouncer "${CONF_FILE}"
+fi
+
+# Any other uid behaves exactly as it did before: PgBouncer runs as that uid
+# and reads whatever file that uid can read. A password file it cannot read is
+# refused above, naming the variable that pointed at it, rather than starting a
+# pooler that authenticates nobody.
 exec pgbouncer "${CONF_FILE}"

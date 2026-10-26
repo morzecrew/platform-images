@@ -5,13 +5,17 @@
 # on a network of its own runs with scram-sha-256, which means the password the
 # pooler logs in with can only have come from the auth_file the entrypoint
 # wrote. Sections 1-7 exercise what the image promises when it works; 8 asserts
-# the several ways it must refuse to start instead.
+# the several ways it must refuse to start instead; 9 and 10 prove the two
+# privilege paths -- started as root, and started as a `user:` -- which is what
+# makes a password file owned by somebody else reach the pooler at all.
 set -euo pipefail
 IMAGE="${1:?usage: smoke.sh <image-ref>}"
 ENGINE="${ENGINE:-podman}"
 CTR="smoke-pgbouncer-$$"
 PGSIDE="smoke-pgbouncer-pg-$$"
 NET="smoke-pgbouncer-$$"
+# Set in section 9, where the volume holding the 65532-owned file is made.
+SECVOL=""
 # The credential for both sides. Not a secret and not random: it appears in this
 # file, in the sidecar's environment and in the secret file, and the image has
 # to be the only thing that keeps it out of its own output.
@@ -21,6 +25,7 @@ WORK="$(mktemp -d)"
 cleanup() {
 	"${ENGINE}" rm -f "${CTR}" "${PGSIDE}" >/dev/null 2>&1 || true
 	"${ENGINE}" network rm "${NET}" >/dev/null 2>&1 || true
+	[ -z "${SECVOL}" ] || "${ENGINE}" volume rm -f "${SECVOL}" >/dev/null 2>&1 || true
 	rm -rf "${WORK}"
 }
 trap cleanup EXIT
@@ -39,14 +44,21 @@ printf '%s' "${PW}" >"${WORK}/pw"
 chmod 0755 "${WORK}"
 chmod 0644 "${WORK}/pw"
 
+# Where the password comes from: the world-readable bind mount above, by
+# default. Section 9 replaces it with a volume holding a file owned by 65532 at
+# 0400, which is the case the image's root path exists for. An array rather
+# than an argument so every section states its mount without restating the
+# variable it points PGBOUNCER_DB_PASSWORD_FILE at.
+PWSRC=(-e PGBOUNCER_DB_PASSWORD_FILE=/run/secrets/pw
+	-v "${WORK}/pw:/run/secrets/pw:ro,Z")
+
 # start_pooler [engine args...]
 start_pooler() {
 	"${ENGINE}" rm -f "${CTR}" >/dev/null 2>&1 || true
 	"${ENGINE}" run -d --name "${CTR}" --network "${NET}" \
 		-e PGBOUNCER_DB_HOST="${PGSIDE}" \
 		-e PGBOUNCER_DB_USER=postgres \
-		-e PGBOUNCER_DB_PASSWORD_FILE=/run/secrets/pw \
-		-v "${WORK}/pw:/run/secrets/pw:ro,Z" \
+		"${PWSRC[@]}" \
 		"$@" "${IMAGE}" >/dev/null
 }
 
@@ -371,5 +383,75 @@ expect_refusal "a passthrough value that opens a section" "opens a section" \
 
 expect_refusal "a passthrough value that starts an include" "%include" \
 	"${DBARGS[@]}" -e 'PGBOUNCER_CONF__track_extra_parameters=%include /tmp/evil.conf'
+
+# --- 9. started as root: a password file owned by any uid at 0400 ---------
+
+# The image's USER is root (S-0003/D-1). Started as uid 0 the entrypoint reads
+# the password file, writes pgbouncer.ini and userlist.txt, gives both to 70,
+# and execs the pooler under setpriv -- so the file may be owned by anyone, at
+# any mode, and the process that listens still runs as 70 and never as root.
+#
+# The file here is owned by 65532 at 0400: neither root's uid nor 70's, so only
+# the root path can read it, and the Uid assertion is what proves the drop
+# happened rather than the pooler simply staying root. It is made by a
+# throwaway container of the image under test on a volume of its own, because
+# this script's uid cannot chown a file to 65532.
+SECVOL="smoke-pgbouncer-sec-$$"
+"${ENGINE}" volume create "${SECVOL}" >/dev/null
+"${ENGINE}" run --rm --user 0 --entrypoint sh \
+	-v "${SECVOL}:/run/secrets:Z" "${IMAGE}" \
+	-c "printf '%s' '${PW}' >/run/secrets/pw &&
+		chown 65532:65532 /run/secrets/pw &&
+		chmod 0400 /run/secrets/pw" >/dev/null
+
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+PWSRC=(-e PGBOUNCER_DB_PASSWORD_FILE=/run/secrets/pw
+	-v "${SECVOL}:/run/secrets:ro,Z")
+start_pooler
+wait_pooler
+
+got="$(psql_client "${PW}" postgres -c 'select current_user' 2>&1 || true)"
+[ "${got}" = "postgres" ] ||
+	fail "a 0400 password file owned by 65532 did not reach the pooler: '${got}'"
+
+uid="$("${ENGINE}" exec "${CTR}" awk '/^Uid:/{print $2}' /proc/1/status 2>/dev/null | tr -d '\r' || true)"
+[ "${uid}" = "70" ] ||
+	fail "PID 1 runs as uid ${uid:-unknown}, but PgBouncer must never run as root"
+
+# The file the password is in, and the only place it is: 0600 held by the uid
+# that reads it, which the root path had to change from its own.
+meta="$("${ENGINE}" exec "${CTR}" stat -c '%u %a' /etc/pgbouncer/userlist.txt 2>/dev/null | tr -d '\r' || true)"
+[ "${meta}" = "70 600" ] || fail "userlist.txt is '${meta:-unknown}', expected owner 70 at mode 600"
+
+logs="$("${ENGINE}" logs "${CTR}" 2>&1 || true)"
+case "${logs}" in
+*"${PW}"*) fail "the password appears in the log of the root path" ;;
+*) echo "root: any owner's 0400 file is read, PID 1 is uid 70, userlist.txt is 70:0600, password absent from the log" ;;
+esac
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# --- 10. started as another uid: that uid throughout ----------------------
+
+# `user:` overrides the image's USER, so this start is uid 70 from its first
+# instruction: no root, no chown, no setpriv. The world-readable file from the
+# top of this script is readable by it, and the pooler runs as before.
+PWSRC=(-e PGBOUNCER_DB_PASSWORD_FILE=/run/secrets/pw
+	-v "${WORK}/pw:/run/secrets/pw:ro,Z")
+start_pooler --user 70
+wait_pooler
+got="$(psql_client "${PW}" postgres -c 'select current_user' 2>&1 || true)"
+[ "${got}" = "postgres" ] ||
+	fail "started with --user 70, the login through 6432 returned '${got}'"
+echo "user 70: a world-readable password file still logs in"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# The 65532-owned file is not readable by 70, which is not root, and the
+# entrypoint refuses rather than starting a pooler that authenticates nobody.
+# The refusal names the variable, so the operator is told which file could not
+# be read and by whom. Its three required companions are DBARGS'.
+expect_refusal "PGBOUNCER_DB_PASSWORD_FILE unreadable as --user 70" \
+	"PGBOUNCER_DB_PASSWORD_FILE" \
+	--user 70 "${DBARGS[@]}" -e PGBOUNCER_DB_PASSWORD_FILE=/run/secrets/pw \
+	-v "${SECVOL}:/run/secrets:ro,Z"
 
 echo "PASS: pgbouncer"

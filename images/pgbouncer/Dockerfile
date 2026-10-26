@@ -32,6 +32,16 @@ COPY --chmod=0644 rootfs/allowlist.conf /etc/pgbouncer/allowlist.conf
 COPY --chmod=0644 rootfs/denylist.conf /etc/pgbouncer/denylist.conf
 COPY --chmod=0755 rootfs/entrypoint.sh /usr/local/bin/pgbouncer-entrypoint
 
+# The /bin/setpriv this base image carries is busybox's, and busybox's setpriv
+# has no --reuid, --regid or --clear-groups: the entrypoint's drop-to-postgres
+# command fails on it with "unrecognized option: reuid" (S-0003/D-1). Alpine
+# ships util-linux's as a package of its own name, which has all three. `apk`
+# needs root, which the base image's USER is not, so the switch is made here
+# and stands for the rest of the file -- including the USER at the end, whose
+# job is the image's runtime uid rather than this install.
+USER root
+RUN apk add --no-cache setpriv
+
 # 6432, which is what PGBOUNCER_LISTEN_PORT defaults to and what the entrypoint
 # writes. The base image's own EXPOSE names 5432 -- the port edoburu's
 # generated config listens on -- and EXPOSE is additive, so the metadata names
@@ -45,3 +55,13 @@ ENTRYPOINT ["/usr/local/bin/pgbouncer-entrypoint"]
 # config itself and execs the pooler with the path it wrote, so there is no
 # default command left to name.
 CMD []
+
+# Root, so the entrypoint can read a `PGBOUNCER_DB_PASSWORD_FILE` owned by any
+# uid at any mode and give what it writes to the user PgBouncer runs as: it
+# chowns pgbouncer.ini and userlist.txt to 70:70 and execs the pooler under
+# `setpriv --reuid=70 --regid=70 --clear-groups`. PgBouncer itself never runs
+# as root. A container started with `user:` is that uid from the first
+# instruction, root's duties are skipped, and the password file has to be
+# readable by it (S-0003/D-1, README.md).
+# hadolint ignore=DL3002
+USER root
