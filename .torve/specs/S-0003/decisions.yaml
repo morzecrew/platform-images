@@ -3,8 +3,9 @@ decisions:
   - id: D-1
     grade: ASSUMED
     text: >-
-      `images/pgbouncer`'s final `USER` is root. Started as uid 0, its entrypoint
-      reads `PGBOUNCER_DB_PASSWORD_FILE` and writes `/etc/pgbouncer/pgbouncer.ini`
+      `images/pgbouncer`'s final `USER` is root, and the image installs Alpine's util-linux
+      `setpriv`, because the base's BusyBox applet has no `--reuid`. Started as uid
+      0, its entrypoint reads `PGBOUNCER_DB_PASSWORD_FILE` and writes `/etc/pgbouncer/pgbouncer.ini`
       and the 0600 `userlist.txt` as it does today, gives both files to 70:70, and
       execs `setpriv --reuid=70 --regid=70 --clear-groups pgbouncer /etc/pgbouncer/pgbouncer.ini`.
       Started as any other uid, it behaves exactly as before and execs `pgbouncer`
@@ -21,6 +22,7 @@ decisions:
       edoburu's Alpine base already ships. The `--user` path keeps every consumer
       that pins the uid working unchanged.
     cites: [S-0002/D-9, S-0002/D-10]
+    fingerprint: 48e19984490ed95d/2d131f74fdb0e0ec
   - id: D-2
     grade: ASSUMED
     text: >-
@@ -44,13 +46,15 @@ decisions:
   - id: D-3
     grade: ASSUMED
     text: >-
-      `images/rustfs`'s final `USER` is root. Started as uid 0, its entrypoint resolves
-      and checks both credentials as it does today, refuses a credential set both
-      as a value and as `_FILE` before anything is exported, as upstream would, exports
-      `RUSTFS_ACCESS_KEY` and `RUSTFS_SECRET_KEY` as each `_FILE`'s content reads
-      to upstream's script (its first line, with carriage returns removed and surrounding
-      whitespace trimmed), unsets `RUSTFS_ACCESS_KEY_FILE` and `RUSTFS_SECRET_KEY_FILE`,
-      and execs `setpriv --reuid=10001 --regid=10001 --clear-groups /entrypoint.sh
+      `images/rustfs`'s final `USER` is root, and the image installs Alpine's util-linux
+      `setpriv`, because the base's BusyBox applet has no `--reuid`. Started as uid
+      0, its entrypoint resolves and checks both credentials as it does today and
+      refuses a credential set both as a value and as `_FILE` before anything is exported,
+      as upstream would. A credential given as `_FILE` is exported as its content
+      reads to upstream's script (its first line, with carriage returns removed and
+      surrounding whitespace trimmed) and its `_FILE` name is unset; a credential
+      given as a value is left as given, for the server, which trims it itself. It
+      then execs `setpriv --reuid=10001 --regid=10001 --clear-groups /entrypoint.sh
       rustfs` with the container's arguments. Started as any other uid, it behaves
       exactly as before. The server never runs as root.
     paths: [images/rustfs/Dockerfile, images/rustfs/rootfs/**]
@@ -66,6 +70,7 @@ decisions:
       script reads from a file, so a CRLF or padded file means the same credential
       on either path.
     cites: [S-0002/D-5, S-0002/D-6]
+    fingerprint: b0917678e11af5cd/b5a5a048c2ccf468
   - id: D-4
     grade: ASSUMED
     text: >-

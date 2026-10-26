@@ -7,7 +7,7 @@ change:
   type: feat
   scope: images
 status: accepted
-implementation: none
+implementation: complete
 depends_on: [S-0002]
 informed_by: []
 supersedes: []
