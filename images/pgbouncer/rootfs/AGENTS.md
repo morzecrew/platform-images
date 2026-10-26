@@ -9,9 +9,9 @@
 - Paths: `images/pgbouncer/Dockerfile` `images/pgbouncer/rootfs/**`
 - Consequence: a changed environment takes effect on a restart, the password arrives through a file, and a moved upstream tag is caught by the smoke test rather than shipped
 
-### S-0003/D-1 — `ASSUMED` (pgbouncer and rustfs read their secrets as root, then drop to their user) — implementation: none
+### S-0003/D-1 — `ASSUMED` (pgbouncer and rustfs read their secrets as root, then drop to their user)
 
-`images/pgbouncer`'s final `USER` is root. Started as uid 0, its entrypoint reads `PGBOUNCER_DB_PASSWORD_FILE` and writes `/etc/pgbouncer/pgbouncer.ini` and the 0600 `userlist.txt` as it does today, gives both files to 70:70, and execs `setpriv --reuid=70 --regid=70 --clear-groups pgbouncer /etc/pgbouncer/pgbouncer.ini`. Started as any other uid, it behaves exactly as before and execs `pgbouncer` as that uid. PgBouncer never runs as root.
+`images/pgbouncer`'s final `USER` is root, and the image installs Alpine's util-linux `setpriv`, because the base's BusyBox applet has no `--reuid`. Started as uid 0, its entrypoint reads `PGBOUNCER_DB_PASSWORD_FILE` and writes `/etc/pgbouncer/pgbouncer.ini` and the 0600 `userlist.txt` as it does today, gives both files to 70:70, and execs `setpriv --reuid=70 --regid=70 --clear-groups pgbouncer /etc/pgbouncer/pgbouncer.ini`. Started as any other uid, it behaves exactly as before and execs `pgbouncer` as that uid. PgBouncer never runs as root.
 
 - Paths: `images/pgbouncer/Dockerfile` `images/pgbouncer/rootfs/**`
 - Consequence: a password file of any owner at mode 0400 reaches PgBouncer, so one secret can serve the pooler and its clients

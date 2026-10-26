@@ -16,21 +16,21 @@
 - Paths: `shared/rootfs/lib/envconf.sh` `shared/test/**` `images/pgbouncer/README.md`
 - Consequence: a consumer reaches PgBouncer's settings by name, and nothing in the environment can rewrite the files PgBouncer reads its users from
 
-### S-0003/D-1 — `ASSUMED` (pgbouncer and rustfs read their secrets as root, then drop to their user) — implementation: none
+### S-0003/D-1 — `ASSUMED` (pgbouncer and rustfs read their secrets as root, then drop to their user)
 
-`images/pgbouncer`'s final `USER` is root. Started as uid 0, its entrypoint reads `PGBOUNCER_DB_PASSWORD_FILE` and writes `/etc/pgbouncer/pgbouncer.ini` and the 0600 `userlist.txt` as it does today, gives both files to 70:70, and execs `setpriv --reuid=70 --regid=70 --clear-groups pgbouncer /etc/pgbouncer/pgbouncer.ini`. Started as any other uid, it behaves exactly as before and execs `pgbouncer` as that uid. PgBouncer never runs as root.
+`images/pgbouncer`'s final `USER` is root, and the image installs Alpine's util-linux `setpriv`, because the base's BusyBox applet has no `--reuid`. Started as uid 0, its entrypoint reads `PGBOUNCER_DB_PASSWORD_FILE` and writes `/etc/pgbouncer/pgbouncer.ini` and the 0600 `userlist.txt` as it does today, gives both files to 70:70, and execs `setpriv --reuid=70 --regid=70 --clear-groups pgbouncer /etc/pgbouncer/pgbouncer.ini`. Started as any other uid, it behaves exactly as before and execs `pgbouncer` as that uid. PgBouncer never runs as root.
 
 - Paths: `images/pgbouncer/Dockerfile` `images/pgbouncer/rootfs/**`
 - Consequence: a password file of any owner at mode 0400 reaches PgBouncer, so one secret can serve the pooler and its clients
 
-### S-0003/D-2 — `ASSUMED` (pgbouncer and rustfs read their secrets as root, then drop to their user) — implementation: none
+### S-0003/D-2 — `ASSUMED` (pgbouncer and rustfs read their secrets as root, then drop to their user)
 
 `images/pgbouncer/smoke.sh` creates its password file inside a throwaway container of the image under test (`--user 0 --entrypoint sh`) on a volume, owned by 65532 at mode 0400. With that file it asserts that a login through 6432 works, that PID 1 runs as uid 70, that `userlist.txt` is 70's at mode 0600, and that the password is absent from the log. It also asserts that a container started with `--user 70` and a world-readable file still works, and that one started with `--user 70` and the 65532-owned file aborts naming the unreadable file.
 
 - Paths: `images/pgbouncer/smoke.sh`
 - Consequence: both the root path and the `user:` path are proven on every build, under rootless Podman and under Docker
 
-### S-0003/D-5 — `ASSUMED` (pgbouncer and rustfs read their secrets as root, then drop to their user) — implementation: none
+### S-0003/D-5 — `ASSUMED` (pgbouncer and rustfs read their secrets as root, then drop to their user)
 
 `images/pgbouncer/README.md` says that the container starts as root and drops to uid 70 before PgBouncer starts, that `PGBOUNCER_DB_PASSWORD_FILE` may be owned by any uid, and that a container started with `user:` runs as that user throughout and needs the file readable by it.
 

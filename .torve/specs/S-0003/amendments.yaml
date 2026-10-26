@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=../../schemas/amendments.json
+amendments:
+  - id: A-1
+    at: '2026-10-26T13:38:05Z'
+    title: util-linux setpriv, as BusyBox's has no --reuid
+    md: |-
+      The night found that `/bin/setpriv` in both bases is BusyBox's applet, which rejects `--reuid`, `--regid` and `--clear-groups`. Both Dockerfiles install Alpine's `setpriv` package (util-linux) as root before the final `USER root`; D-1 and D-3 now say so.
+    changes:
+      - subject: D-1
+        field: text
+        before: >-
+          `images/pgbouncer`'s final `USER` is root. Started as uid 0, its entrypoint
+          reads `PGBOUNCER_DB_PASSWORD_FILE` and writes `/etc/pgbouncer/pgbouncer.ini`
+          and the 0600 `userlist.txt` as it does today, gives both files to 70:70,
+          and execs `setpriv --reuid=70 --regid=70 --clear-groups pgbouncer /etc/pgbouncer/pgbouncer.ini`.
+          Started as any other uid, it behaves exactly as before and execs `pgbouncer`
+          as that uid. PgBouncer never runs as root.
+        after: >-
+          `images/pgbouncer`'s final `USER` is root, and the image installs Alpine's
+          util-linux `setpriv`, because the base's BusyBox applet has no `--reuid`.
+          Started as uid 0, its entrypoint reads `PGBOUNCER_DB_PASSWORD_FILE` and
+          writes `/etc/pgbouncer/pgbouncer.ini` and the 0600 `userlist.txt` as it
+          does today, gives both files to 70:70, and execs `setpriv --reuid=70 --regid=70
+          --clear-groups pgbouncer /etc/pgbouncer/pgbouncer.ini`. Started as any other
+          uid, it behaves exactly as before and execs `pgbouncer` as that uid. PgBouncer
+          never runs as root.
+      - subject: D-1
+        field: fingerprint
+        after: 48e19984490ed95d/2d131f74fdb0e0ec
+  - id: A-2
+    at: '2026-10-26T13:38:06Z'
+    title: >-
+      rustfs exports only a credential read from a file
+    md: |-
+      A review on #103 asked whether exporting a trimmed copy of a credential set directly changes it on the root path. It does not: the published 1.0.4, started as 10001, signs a padded `RUSTFS_SECRET_KEY` with its trimmed value, so the server trims it itself. The entrypoint exports only a credential read from a file (e1024ae), which is the one only root can read, and the smoke test asserts that a padded value set directly signs with its trimmed form (2b5b5b8, c547bd9).
+    changes:
+      - subject: D-3
+        field: text
+        before: >-
+          `images/rustfs`'s final `USER` is root. Started as uid 0, its entrypoint
+          resolves and checks both credentials as it does today, refuses a credential
+          set both as a value and as `_FILE` before anything is exported, as upstream
+          would, exports `RUSTFS_ACCESS_KEY` and `RUSTFS_SECRET_KEY` as each `_FILE`'s
+          content reads to upstream's script (its first line, with carriage returns
+          removed and surrounding whitespace trimmed), unsets `RUSTFS_ACCESS_KEY_FILE`
+          and `RUSTFS_SECRET_KEY_FILE`, and execs `setpriv --reuid=10001 --regid=10001
+          --clear-groups /entrypoint.sh rustfs` with the container's arguments. Started
+          as any other uid, it behaves exactly as before. The server never runs as
+          root.
+        after: >-
+          `images/rustfs`'s final `USER` is root, and the image installs Alpine's
+          util-linux `setpriv`, because the base's BusyBox applet has no `--reuid`.
+          Started as uid 0, its entrypoint resolves and checks both credentials as
+          it does today and refuses a credential set both as a value and as `_FILE`
+          before anything is exported, as upstream would. A credential given as `_FILE`
+          is exported as its content reads to upstream's script (its first line, with
+          carriage returns removed and surrounding whitespace trimmed) and its `_FILE`
+          name is unset; a credential given as a value is left as given, for the server,
+          which trims it itself. It then execs `setpriv --reuid=10001 --regid=10001
+          --clear-groups /entrypoint.sh rustfs` with the container's arguments. Started
+          as any other uid, it behaves exactly as before. The server never runs as
+          root.
+      - subject: D-3
+        field: fingerprint
+        after: b0917678e11af5cd/b5a5a048c2ccf468

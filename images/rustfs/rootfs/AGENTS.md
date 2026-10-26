@@ -23,9 +23,9 @@
 - Paths: `images/rustfs/rootfs/**` `images/rustfs/README.md`
 - Consequence: a consumer can reach upstream's settings by name, and cannot reach the ones that move its data or weaken it
 
-### S-0003/D-3 — `ASSUMED` (pgbouncer and rustfs read their secrets as root, then drop to their user) — implementation: none
+### S-0003/D-3 — `ASSUMED` (pgbouncer and rustfs read their secrets as root, then drop to their user)
 
-`images/rustfs`'s final `USER` is root. Started as uid 0, its entrypoint resolves and checks both credentials as it does today, refuses a credential set both as a value and as `_FILE` before anything is exported, as upstream would, exports `RUSTFS_ACCESS_KEY` and `RUSTFS_SECRET_KEY` as each `_FILE`'s content reads to upstream's script (its first line, with carriage returns removed and surrounding whitespace trimmed), unsets `RUSTFS_ACCESS_KEY_FILE` and `RUSTFS_SECRET_KEY_FILE`, and execs `setpriv --reuid=10001 --regid=10001 --clear-groups /entrypoint.sh rustfs` with the container's arguments. Started as any other uid, it behaves exactly as before. The server never runs as root.
+`images/rustfs`'s final `USER` is root, and the image installs Alpine's util-linux `setpriv`, because the base's BusyBox applet has no `--reuid`. Started as uid 0, its entrypoint resolves and checks both credentials as it does today and refuses a credential set both as a value and as `_FILE` before anything is exported, as upstream would. A credential given as `_FILE` is exported as its content reads to upstream's script (its first line, with carriage returns removed and surrounding whitespace trimmed) and its `_FILE` name is unset; a credential given as a value is left as given, for the server, which trims it itself. It then execs `setpriv --reuid=10001 --regid=10001 --clear-groups /entrypoint.sh rustfs` with the container's arguments. Started as any other uid, it behaves exactly as before. The server never runs as root.
 
 - Paths: `images/rustfs/Dockerfile` `images/rustfs/rootfs/**`
 - Consequence: a credential file of any owner at mode 0400 reaches RustFS, and upstream's script and the server run as uid 10001 as before
