@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=../../../schemas/landing.json
+task: T-0012
+phase: 1
+base: fcdc745c85fefe98ae489ebd714ce409a4f8f1d3
+commit: 26c10b542dbe91e5ef3f3d1159773d81948dced9
+at: '2026-10-26T11:23:21Z'
+agent: subscription/deepseek-v4.1-flash@deepseek-v4.1-flash
+decisions:
+  - id: D-1
+    grade: ASSUMED
+  - id: D-2
+    grade: ASSUMED
+  - id: D-3
+    grade: ASSUMED
+  - id: D-4
+    grade: ASSUMED
+  - id: D-5
+    grade: ASSUMED
+  - id: D-6
+    grade: ASSUMED
+entries:
+  - decision: D-1
+    grade: ASSUMED
+    kind: departed
+    at: '2026-10-26T11:18:30Z'
+    claim: >-
+      D-1's exec line cannot run on the pinned base image: the /bin/setpriv edoburu/pgbouncer
+      carries is busybox's, which has no --reuid, --regid or --clear-groups and exits
+      'unrecognized option: reuid=70'. The decision's mechanism is kept verbatim and
+      made to work by installing Alpine's setpriv package, which is util-linux's binary
+      and has all three; that needs root, so the Dockerfile switches USER before the
+      RUN. Behaviour is exactly what D-1 specifies: root writes both files, chowns
+      them to 70:70, and execs the pooler as uid 70.
+    evidence: >-
+      images/pgbouncer/Dockerfile:42-43 — the apk install added for this reason; `docker
+      run --rm --user 0 --entrypoint sh edoburu/pgbouncer:v1.26.1-p0 -c "setpriv --reuid=70
+      --regid=70 --clear-groups id"` printed "setpriv: unrecognized option: reuid=70"
+      while the same command after the install prints "uid=70(postgres) gid=70(postgres)"
+    action: departed
