@@ -1,0 +1,61 @@
+# yaml-language-server: $schema=../../schemas/decisions.json
+decisions:
+  - id: D-1
+    grade: ASSUMED
+    text: >-
+      With `REMOVE_TESTS=1`, `build-uv-app` removes directories named `tests` and
+      nothing else. A directory named `test` is kept. `images/uv-builder/README.md`
+      says so, and says why `test` is kept.
+    paths: [images/uv-builder/rootfs/build.sh, images/uv-builder/README.md]
+    consequence: >-
+      a package that imports its own `test` module, such as SQLMesh, starts after
+      the build with the defaults
+    rationale: >-
+      Shipped test suites overwhelmingly use the plural, while `test` is as often
+      a runtime module (`sqlmesh.core.test`, the standard library's `test`). A wrong
+      deletion breaks the application at its first import, while a kept test suite
+      only costs space (#106).
+  - id: D-2
+    grade: ASSUMED
+    text: >-
+      `images/uv-builder/smoke.sh`'s default build covers a project whose package
+      imports a `test` subpackage at import time and also ships a `tests` directory.
+      After the build it asserts that the package imports, that its `test` directory
+      remains and that its `tests` directory is gone.
+    paths: [images/uv-builder/smoke.sh]
+    consequence: >-
+      a build that prunes a runtime `test` module, or stops pruning `tests`, fails
+      the image's smoke test
+    rationale: >-
+      The bug built green and failed only at a consumer's first import. The smoke
+      test is the only place it can surface before publishing.
+    cites: [S-0001/D-11]
+  - id: D-3
+    grade: ASSUMED
+    text: >-
+      `images/python-distroless`'s deps stage installs `libsqlite3-0`, and the runtime
+      copies `libsqlite3.so.0` from it into `/usr/lib` with the same multiarch glob
+      as the other copied libraries. `images/python-distroless/README.md` lists it
+      among the bundled libraries, and names a source-built `psycopg2`'s missing `libpq.so.5`
+      as a known gap.
+    paths: [images/python-distroless/Dockerfile, images/python-distroless/README.md]
+    consequence: >-
+      `import sqlite3` works, so pandas' SQL readers work, at about 1.5 MB more per
+      image
+    rationale: >-
+      The image already ships the `_sqlite3` extension. A module that is present but
+      cannot load is the one combination that surprises people, and dropping it would
+      break pandas on paths that never use SQLite (#107).
+  - id: D-4
+    grade: ASSUMED
+    text: >-
+      `images/python-distroless/smoke.sh` imports `sqlite3`, runs `select sqlite_version()`
+      and writes and reads back a row in an in-memory database. On failure it prints
+      a line naming `sqlite3`.
+    paths: [images/python-distroless/smoke.sh]
+    consequence: >-
+      an image whose `_sqlite3` cannot load its library fails the smoke test
+    rationale: >-
+      As for libmagic and the compression modules, the library is copied in from another
+      image's layer, so it either resolves at runtime or it does not.
+    cites: [S-0001/D-11]

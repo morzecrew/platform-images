@@ -1,0 +1,97 @@
+# yaml-language-server: $schema=../../schemas/document.json
+id: S-0004
+title: >-
+  uv-builder keeps runtime test modules, and python-distroless loads sqlite3
+kind: design
+change:
+  type: fix
+  scope: images
+status: draft
+implementation: none
+depends_on: [S-0001]
+informed_by: []
+supersedes: []
+superseded_by: null
+owner: Lev Litvinov
+schema_version: 4
+summary: |-
+  uv-builder's `REMOVE_TESTS` prunes only directories named `tests`, so a runtime module named `test` survives, and python-distroless ships the `libsqlite3.so.0` its `_sqlite3` extension links to.
+
+  Both images build green today and then fail at the application's first import. Each fix lands with a smoke assertion that would have caught it.
+motivation: |-
+  Two consumers hit these at runtime, each in a deployed stack rather than in tests, because tests and local development run from a normal venv on a full interpreter (#106, #107).
+
+  - SQLMesh imports `sqlmesh.core.test` at start. `build-uv-app` deleted that package with the other `test` directories, so the CLI could not start: `ModuleNotFoundError: No module named 'sqlmesh.core.test'`.
+  - `import sqlite3` fails on python-distroless: `ImportError: libsqlite3.so.0: cannot open shared object file`. pandas imports `sqlite3` inside `read_sql_query`, so anything that reads SQL through pandas breaks, whether or not it uses SQLite.
+
+  Each consumer carries a workaround: `REMOVE_TESTS=0` for the whole venv, and a stage that copies the library out of a Debian image.
+current_state: |-
+  `images/uv-builder/rootfs/build.sh` (installed as `build-uv-app`) runs `find "${dir}" -type d \( -name "tests" -o -name "test" \) -prune -exec rm -rf {} +` when `REMOVE_TESTS=1`, the default. The README's table says it removes "`tests` / `test` trees under the venv". `smoke.sh` builds a fixture with no directory of either name.
+
+  `images/python-distroless/Dockerfile` copies `libmagic`, `libbz2`, `liblzma` and `libz` out of a `debian:${DEBIAN_VERSION}-slim` deps stage into `/usr/lib`, which is on `LD_LIBRARY_PATH`. Upstream's `al3xos/python-distroless` ships `lib-dynload/_sqlite3.cpython-314-*.so` but not the library it links to, and the deps stage does not install or copy it. `smoke.sh` loads libmagic and round-trips the three compression modules, and never imports `sqlite3`.
+goals: |-
+  - A package that ships a runtime module named `test` imports after `build-uv-app` with its defaults.
+  - Directories named `tests` are still pruned by default.
+  - `import sqlite3` works on python-distroless, and a query runs.
+  - Each image's smoke test fails on the build that has the bug.
+non_goals: |-
+  - An exclude list for `REMOVE_TESTS`, or any other new switch.
+  - A smoke step in `build-uv-app` that imports every top-level package after slimming.
+  - Bundling `libpq` for a source-built `psycopg2`. The README names the gap instead.
+design:
+  - key: phases
+    md: |-
+      | Phase | Owns | Runs beside |
+      |---|---|---|
+      | 1 | `images/uv-builder/` | 2 |
+      | 2 | `images/python-distroless/` | 1 |
+
+      The two phases share no file, so two workers can run them side by side.
+  - key: judging
+    md: >-
+      `bake-smoke` judges both phases: it builds the touched target on the task's
+      nested daemon and runs its `smoke.sh`. The acceptance commands are the static
+      checks and greps for the changed lines. `test-build-uv-app.sh`, which needs
+      two images, still runs only in `bake.yaml`.
+  - key: uv-builder
+    md: |-
+      `REMOVE_TESTS=1` prunes directories named `tests` and nothing else. Shipped test suites overwhelmingly use the plural, while `test` is as often a real module: `sqlmesh.core.test`, and the standard library's own `test` package.
+
+      `smoke.sh`'s default build gets a fixture that a package with both names would break: `smokeapp/__init__.py` imports a `smokeapp.test` subpackage, and `smokeapp/tests/` holds a test file. After the build, `import smokeapp` must work, `smokeapp/test/` must remain and `smokeapp/tests/` must be gone.
+  - key: python-distroless
+    md: >-
+      The deps stage installs `libsqlite3-0`, and the runtime copies `libsqlite3.so.0`
+      into `/usr/lib` beside the other copied libraries, with the same multiarch glob.
+      `smoke.sh` imports `sqlite3`, runs `select sqlite_version()` on an in-memory
+      database and writes and reads a table, printing a line that names `sqlite3`
+      when it fails.
+tests: |-
+  - uv-builder's `smoke.sh` builds a fixture with a runtime `test` subpackage and a `tests` directory, and asserts the first survives and imports and the second is gone.
+  - python-distroless's `smoke.sh` imports `sqlite3` and round-trips a row through an in-memory database.
+docs: |-
+  - uv-builder's README says `REMOVE_TESTS` removes `tests` trees only, and why `test` is kept.
+  - python-distroless's README lists `libsqlite3` among the bundled libraries, and adds a known gap: a source-built `psycopg2`, such as the one `sqlmesh[postgres]` pulls in, links a system `libpq.so.5` the image does not have, while `psycopg2-binary` and `psycopg[binary]` bundle their own.
+out_of_scope: ''
+risks: |-
+  - A venv now keeps `test` directories that are test suites, in the few packages that name theirs in the singular. Images grow a little, and nothing breaks.
+  - python-distroless grows by about 1.5 MB. The library is Debian's build, of the release the runtime names, as the other copied libraries are.
+alternatives:
+  - option: >-
+      An exclude list for `REMOVE_TESTS` (`KEEP_TESTS="sqlmesh/core/test"`), with
+      a default of known offenders.
+    rejected_because: >-
+      Every consumer learns of the list only after its first runtime failure, and
+      the default list grows one package per incident. Keeping the singular costs
+      a few kilobytes and needs no list.
+  - option: >-
+      Prune a `test` directory only when nothing in its own package imports it.
+    rejected_because: >-
+      Imports are dynamic. A build step cannot tell which modules a package loads,
+      so the rule would guess.
+  - option: >-
+      Drop `_sqlite3` and the `sqlite3` package from python-distroless, so the failure
+      is a clear `ModuleNotFoundError`.
+    rejected_because: >-
+      pandas imports `sqlite3` on paths that never touch SQLite, so applications that
+      do not use SQLite would still break. The standard library module is expected
+      to work, and the library costs about 1.5 MB.
