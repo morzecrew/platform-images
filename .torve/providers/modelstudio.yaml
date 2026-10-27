@@ -21,5 +21,8 @@ models:
     reasoning: [none, minimal, low, medium, high, xhigh, max]
   deepseek-v4-flash-0731:
     reasoning: [none, minimal, low, medium, high, xhigh, max]
+  # The vendor's stated window: unstated, the claude seat sizes it at 200,000
+  # tokens and compacts far short of what it holds.
   deepseek-v4.1-flash:
+    context_window: 1000000
     reasoning: [minimal, low, medium, high, xhigh, max, ultra]
