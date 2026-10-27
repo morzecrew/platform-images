@@ -1,12 +1,11 @@
 # yaml-language-server: $schema=../../schemas/document.json
 id: S-0004
-title: >-
-  uv-builder keeps runtime test modules, and python-distroless loads sqlite3
+title: test modules and sqlite3 survive the images
 kind: design
 change:
   type: fix
   scope: images
-status: draft
+status: accepted
 implementation: none
 depends_on: [S-0001]
 informed_by: []
