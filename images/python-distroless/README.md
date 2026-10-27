@@ -10,7 +10,8 @@ Minimal **runtime** image for Python workloads: [`al3xos/python-distroless`](htt
 - **User** `65532:65532` by default (overridable via **`APP_UID`** / **`APP_GID`** build args).
 - **Environment** `LANG` / `LC_ALL` `C.UTF-8`, `TZ=UTC`, `PYTHONUNBUFFERED=1`, `PYTHONFAULTHANDLER=1`, plus **`APP_RUNTIME_DIR`**, **`APP_TMP_DIR`** (defaults `/srv/runtime` and `/srv/runtime/tmp`).
 - **Writable temp**: `TMPDIR` is **`APP_TMP_DIR`** (default `/srv/runtime/tmp`); `XDG_CACHE_HOME` is `${TMPDIR}/.cache`. Mount a volume over those paths if you need a writable layer at runtime.
-- Bundled from Debian 13 (trixie): updated CA certs, **`libmagic.so.1`** and **`magic.mgc`**, plus **`libbz2`**, **`liblzma`**, **`libz`**. **`LD_LIBRARY_PATH=/usr/lib`** is set so these libs resolve.
+- Bundled from Debian 13 (trixie): updated CA certs, **`libmagic.so.1`** and **`magic.mgc`**, plus **`libbz2`**, **`liblzma`**, **`libz`**, **`libsqlite3`**. **`LD_LIBRARY_PATH=/usr/lib`** is set so these libs resolve. The `sqlite3` stdlib module (and pandas' SQL readers) need `libsqlite3`, which is why it is here.
+- **Known gap:** a source-built **`psycopg2`** needs **`libpq.so.5`**, which this image does not bundle. Use the `psycopg2-binary` wheel, or add `libpq5` in an image built on this one.
 
 Published for `linux/amd64` and `linux/arm64`. `DISTROLESS_PYTHON_VERSION` in [`docker-bake.hcl`](../../docker-bake.hcl) sets the registry tags (the minor and the exact patch) and `PYTHON_VERSION` in [`Dockerfile`](./Dockerfile), and is also the Python [`uv-builder`](../uv-builder) builds on, so the pair is one CPython build per platform. `DEBIAN_VERSION` comes from bake’s `DISTROLESS_DEBIAN_VERSION`. They must resolve to a real tag on **`al3xos/python-distroless`**: `FROM al3xos/python-distroless:${PYTHON_VERSION}-debian${DEBIAN_VERSION}` (e.g. `3.14.8-debian13`), and `python:${PYTHON_VERSION}-trixie` must exist for uv-builder. The value must be an exact patch; bake refuses a bare minor.
 
@@ -76,5 +77,5 @@ Image: `ghcr.io/morzecrew/python-distroless:3.14` (minor, rebuilt weekly) and `g
 
 ## Layout
 
-- `Dockerfile` — deps stage from `debian:${DEBIAN_VERSION}-slim` (Debian 13, the release the runtime names; certs, libmagic, runtime dir layout); runtime `FROM al3xos/python-distroless`
+- `Dockerfile` — deps stage from `debian:${DEBIAN_VERSION}-slim` (Debian 13, the release the runtime names; certs, libmagic, libsqlite3, runtime dir layout); runtime `FROM al3xos/python-distroless`
 - `rootfs/envfile-exec` — the `<NAME>_FILE` launcher above

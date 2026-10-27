@@ -77,7 +77,7 @@ ENTRYPOINT ["/opt/app/bin/myapp"]
 | `PYTHON_BIN` | `${VENV_PATH}/bin/python` | Python used for `compileall`, `pip uninstall`, and `uv pip install --python`. |
 | `REMOVE_PY_SOURCES` | `0` | If `1`, delete `*.py` under the venv. Bytecode is then compiled beside each module (`compileall -b`) rather than into `__pycache__`, because Python reads `__pycache__` only for a module whose source still exists. |
 | `STRIP_NATIVE` | `1` | Strip `*.so` with `strip --strip-unneeded`. |
-| `REMOVE_TESTS` | `1` | Remove `tests` / `test` trees under the venv. `__pycache__` is kept: it holds the compiled bytecode. |
+| `REMOVE_TESTS` | `1` | Remove `tests` directories under the venv. `test` is kept: a package that imports its own `test` module, such as SQLMesh, loads it at import time, so it is runtime code. `__pycache__` is kept: it holds the compiled bytecode. |
 | `REMOVE_DOCS` | `0` | If `1`, remove `docs` / `doc` / `examples` / `example` directories under the venv. |
 | `REMOVE_LOCALES` | `1` | If `1`, remove `locale` / `locales` / `i18n` trees and `*.mo` / `*.po` files under the venv. |
 | `REMOVE_TYPE_HINTS` | `1` | Delete `*.pyi`. |

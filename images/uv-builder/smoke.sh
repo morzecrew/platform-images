@@ -32,8 +32,10 @@ echo "build-uv-app: parses"
 # consumer shipped a venv with no bytecode and recompiled each import at
 # startup. A no-dependency project on the uv_build backend needs no network.
 "${ENGINE}" run --rm --network none "${IMAGE}" bash -euo pipefail -c '
-mkdir -p /app/src/smokeapp
-echo "VALUE = 1" >/app/src/smokeapp/__init__.py
+mkdir -p /app/src/smokeapp/test /app/src/smokeapp/tests
+printf "VALUE = 1\nfrom smokeapp.test import TEST_VALUE\n" >/app/src/smokeapp/__init__.py
+echo "TEST_VALUE = 42" >/app/src/smokeapp/test/__init__.py
+printf "def test_smoke():\n    assert True\n" >/app/src/smokeapp/tests/test_smoke.py
 cat >/app/pyproject.toml <<EOF
 [project]
 name = "smokeapp"
@@ -47,10 +49,16 @@ EOF
 uv lock -q --offline
 out="$(build-uv-app 2>&1)" || { echo "${out}"; exit 1; }
 /opt/venv/bin/python - <<EOF
-import importlib.util, pathlib
+import importlib.util, pathlib, smokeapp
 srcs = list(pathlib.Path("/opt/venv").rglob("*.py"))
 missing = [str(p) for p in srcs if not pathlib.Path(importlib.util.cache_from_source(p)).is_file()]
 assert srcs and not missing, "%d of %d modules have no loadable bytecode, e.g. %s" % (len(missing), len(srcs), missing[:3])
+# REMOVE_TESTS prunes `tests` and keeps `test`. This package imports its own
+# `test` subpackage, as SQLMesh does, so pruning it would break the import.
+site = pathlib.Path(smokeapp.__file__).parent
+assert smokeapp.test.TEST_VALUE == 42, "the test subpackage lost its value"
+assert (site / "test").is_dir(), "the runtime test/ directory was pruned"
+assert not (site / "tests").exists(), "the tests/ directory was not pruned"
 EOF
 # The build above had no dev group, which the default UV_GROUPS must tolerate;
 # this one gets a dev dependency, which the default must leave out. A local

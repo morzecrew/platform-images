@@ -9,9 +9,9 @@ ARG APP_RUNTIME_DIR=/srv/runtime
 ARG APP_TMP_DIR=/srv/runtime/tmp
 
 # The deps stage must be the Debian release the runtime names, or the libmagic,
-# libz, liblzma and libbz2 copied out of it are built against a different glibc
-# than the runtime loads them with. DEBIAN_VERSION, declared above the first
-# FROM, is the same value the bake passes for the runtime's tag.
+# libz, liblzma, libbz2 and libsqlite3 copied out of it are built against a
+# different glibc than the runtime loads them with. DEBIAN_VERSION, declared
+# above the first FROM, is the same value the bake passes for the runtime's tag.
 FROM debian:${DEBIAN_VERSION}-slim AS deps
 
 ARG APP_UID
@@ -22,6 +22,7 @@ ARG APP_TMP_DIR
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libmagic1 \
+    libsqlite3-0 \
     file \
     && rm -rf /var/lib/apt/lists/*
 
@@ -62,6 +63,10 @@ COPY --from=deps /usr/lib/*-linux-gnu/libmagic.so.1 /usr/lib/
 COPY --from=deps /usr/lib/*-linux-gnu/libbz2.so.1.0 /usr/lib/
 COPY --from=deps /usr/lib/*-linux-gnu/liblzma.so.5 /usr/lib/
 COPY --from=deps /usr/lib/*-linux-gnu/libz.so.1 /usr/lib/
+# The stdlib's `sqlite3` loads `_sqlite3`, which links this; pandas' SQL
+# readers import it. Without the library the module fails at import, so it is
+# copied beside the rest rather than left to the runtime image.
+COPY --from=deps /usr/lib/*-linux-gnu/libsqlite3.so.0 /usr/lib/
 COPY --from=deps /usr/share/file/magic.mgc /usr/share/file/magic.mgc
 COPY --from=deps /usr/share/misc/magic.mgc /usr/share/misc/magic.mgc
 
