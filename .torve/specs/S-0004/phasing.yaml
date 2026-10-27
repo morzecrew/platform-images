@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=../../schemas/phasing.json
+phasing:
+  - phase: 1
+    title: REMOVE_TESTS prunes tests and keeps test
+    intent: >-
+      In `images/uv-builder/rootfs/build.sh`, make the `REMOVE_TESTS` step remove
+      only directories named `tests`, keeping its comment about `__pycache__`, and
+      add a comment saying why `test` is kept. In `images/uv-builder/smoke.sh`, in
+      the default build's fixture, make `smokeapp/__init__.py` import a `smokeapp.test`
+      subpackage (a `test/__init__.py` defining a value) and add `smokeapp/tests/test_smoke.py`.
+      Keep the existing `VALUE = 1` and every existing assertion. After the default
+      build, assert in the venv's python that `smokeapp` imports, that the `test`
+      subpackage's value is reachable, that the installed `smokeapp/test` directory
+      exists and that `smokeapp/tests` does not. Update the `REMOVE_TESTS` row of
+      `images/uv-builder/README.md`'s table as D-1 says. Settles D-1 and D-2.
+    scope: [images/uv-builder/**]
+    acceptance:
+      - >-
+        shellcheck -S error images/uv-builder/rootfs/build.sh images/uv-builder/smoke.sh
+      - bash -n images/uv-builder/rootfs/build.sh
+      - >-
+        sh -c '! grep -nE -- "-name \"test\"" images/uv-builder/rootfs/build.sh'
+      - >-
+        grep -q -- '-name "tests"' images/uv-builder/rootfs/build.sh
+    character: routine
+  - phase: 2
+    title: python-distroless ships libsqlite3
+    intent: >-
+      In `images/python-distroless/Dockerfile`, add `libsqlite3-0` to the deps stage's
+      `apt-get install` and `COPY --from=deps /usr/lib/*-linux-gnu/libsqlite3.so.0
+      /usr/lib/` beside the other library copies. In `images/python-distroless/smoke.sh`,
+      after the compression round trip, add a check through the image's python that
+      imports `sqlite3`, prints `sqlite3.sqlite_version`, creates a table in a `:memory:`
+      database, inserts a row and reads it back, and exits non-zero with a `FAIL:
+      sqlite3` line if any step fails. Update `images/python-distroless/README.md`
+      as D-3 says: the bundled list and a known-gaps line for `libpq`. Settles D-3
+      and D-4.
+    scope: [images/python-distroless/**]
+    acceptance:
+      - >-
+        hadolint -t error images/python-distroless/Dockerfile
+      - >-
+        shellcheck -S error images/python-distroless/smoke.sh
+      - >-
+        grep -q 'libsqlite3.so.0' images/python-distroless/Dockerfile
+      - >-
+        grep -q 'sqlite3' images/python-distroless/smoke.sh
+    character: routine
