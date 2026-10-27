@@ -6,7 +6,7 @@ change:
   type: fix
   scope: images
 status: accepted
-implementation: none
+implementation: complete
 depends_on: [S-0001]
 informed_by: []
 supersedes: []

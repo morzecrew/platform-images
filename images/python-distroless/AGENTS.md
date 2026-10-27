@@ -23,14 +23,14 @@ python-distroless's `deps` stage builds from `debian:${DEBIAN_VERSION}-slim`, th
 - Paths: `images/python-distroless/Dockerfile` `images/python-distroless/smoke.sh`
 - Consequence: CPython's compression modules load the libraries of the release they were built against. `LD_LIBRARY_PATH=/usr/lib` no longer puts bookworm's `libz`, `liblzma` and `libbz2` ahead of the runtime's own.
 
-### S-0004/D-3 — `ASSUMED` (test modules and sqlite3 survive the images) — implementation: none
+### S-0004/D-3 — `ASSUMED` (test modules and sqlite3 survive the images)
 
 `images/python-distroless`'s deps stage installs `libsqlite3-0`, and the runtime copies `libsqlite3.so.0` from it into `/usr/lib` with the same multiarch glob as the other copied libraries. `images/python-distroless/README.md` lists it among the bundled libraries, and names a source-built `psycopg2`'s missing `libpq.so.5` as a known gap.
 
 - Paths: `images/python-distroless/Dockerfile` `images/python-distroless/README.md`
 - Consequence: `import sqlite3` works, so pandas' SQL readers work, at about 1.5 MB more per image
 
-### S-0004/D-4 — `ASSUMED` (test modules and sqlite3 survive the images) — implementation: none
+### S-0004/D-4 — `ASSUMED` (test modules and sqlite3 survive the images)
 
 `images/python-distroless/smoke.sh` imports `sqlite3`, runs `select sqlite_version()` and writes and reads back a row in an in-memory database. On failure it prints a line naming `sqlite3`.
 
