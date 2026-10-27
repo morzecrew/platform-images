@@ -90,8 +90,10 @@ if [[ "${STRIP_NATIVE}" == "1" ]]; then
 fi
 
 # Remove tests. Not __pycache__: that is where the bytecode compiled above lives.
+# Only `tests`: a package that ships its own `test` module imports it at import
+# time (SQLMesh does), so that directory is runtime code, not test code.
 if [[ "${REMOVE_TESTS}" == "1" ]]; then
-	find "${dir}" -type d \( -name "tests" -o -name "test" \) \
+	find "${dir}" -type d -name "tests" \
 		-prune -exec rm -rf {} + || true
 fi
 
