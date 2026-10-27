@@ -35,6 +35,32 @@ for name in ("zlib", "lzma", "bz2"):
 raise SystemExit(1 if failed else 0)
 EOF
 
+# sqlite3 is a stdlib module with a shared-library dependency: `_sqlite3` links
+# libsqlite3.so.0, which is copied out of the deps stage like the compression
+# libraries. Import it, read the library's own version through SQL, and round
+# trip a row through an in-memory database, so a library that resolves but is
+# unusable fails here rather than inside a consumer's pandas query.
+"${ENGINE}" run --rm -i "${IMAGE}" - <<'EOF' || { echo "FAIL: sqlite3 did not round-trip"; exit 1; }
+import sqlite3
+try:
+    print("sqlite3:", sqlite3.sqlite_version)
+    db = sqlite3.connect(":memory:")
+    try:
+        version = db.execute("select sqlite_version()").fetchone()[0]
+        assert version == sqlite3.sqlite_version, \
+            "the library reports %s, the module %s" % (version, sqlite3.sqlite_version)
+        db.execute("create table smoke (value text)")
+        db.execute("insert into smoke values (?)", ("python-distroless",))
+        row = db.execute("select value from smoke").fetchone()
+        assert row == ("python-distroless",), "read back %r" % (row,)
+    finally:
+        db.close()
+except Exception as error:
+    print("FAIL: sqlite3: %s" % (error,))
+    raise SystemExit(1)
+print("sqlite3: in-memory round-trip ok")
+EOF
+
 # Non-root by construction, and the README says 65532.
 uid=$("${ENGINE}" run --rm "${IMAGE}" -c "import os; print(os.getuid())")
 [ "${uid}" = "65532" ] || { echo "FAIL: running as uid ${uid}, expected 65532"; exit 1; }
