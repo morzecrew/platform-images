@@ -88,9 +88,10 @@ for name in "${selected[@]}"; do
 	apt-get install -y -V /tmp/groonga-apt-source.deb
 	rm -f /tmp/groonga-apt-source.deb
 	apt-get update
-	# pgroonga 4.1.0-1 links opentelemetry-cpp's libraries without depending on
-	# its package, so without it CREATE EXTENSION cannot load pgroonga.so.
-	# shortcut: redundant once the package's Depends names it; drop it then.
+	# Groonga's libarrow2600 26.0.0-1 links opentelemetry-cpp's libraries without
+	# depending on its package, so without it CREATE EXTENSION cannot load
+	# pgroonga.so (apache/arrow#55112).
+	# shortcut: Arrow 26.0.1's package depends on it; drop this line then.
 	apt-get install -y --no-install-recommends opentelemetry-cpp
 done
 
