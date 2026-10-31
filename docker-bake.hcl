@@ -356,7 +356,7 @@ target "rustfs" {
 # 2026-08-18 and had never produced a bump (EXECUTION-LOG A-42).
 # renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
 variable "DISTROLESS_PYTHON_VERSION" {
-  default = "3.14.8"
+  default = "3.14.10"
 
   # A full patch, never a minor: "3.14" resolves to whatever each registry's
   # floating tag points at today, and the two registries move independently.
