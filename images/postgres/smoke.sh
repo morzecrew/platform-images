@@ -75,6 +75,11 @@ available() {
 for ext in "${expected_available[@]}"; do
 	[ "$(available "${ext}")" = "1" ] || { echo "FAIL: ${ext} not available"; exit 1; }
 	echo "available: ${ext}"
+	# Available means only that the control file is there. CREATE loads the
+	# library, which fails when a package links a library it does not depend on.
+	"${ENGINE}" exec "${CTR}" psql -U postgres -v ON_ERROR_STOP=1 -qc \
+		"CREATE EXTENSION \"${ext}\"" || { echo "FAIL: CREATE EXTENSION ${ext}"; exit 1; }
+	echo "created: ${ext}"
 done
 
 # The other direction, and it is not symmetry for its own sake: checking only
