@@ -51,6 +51,7 @@ Every row below is a **curated** variable in the sense of the [environment confi
 | `CADDY_BUILTIN_SNIPPETS_DIR` | `/etc/caddy/snippets` | Glob `import {$CADDY_BUILTIN_SNIPPETS_DIR}/*.caddy` runs **between** the global `{ }` block and the site block so bundled **`(name) { }`** snippets are real definitions. Point elsewhere only if you replace the shipped tree. |
 | `CADDY_SNIPPET_DEFS_DIR` | `/etc/caddy/snippet_defs.d` | Extra top-level snippet definitions (`*.caddy` containing `(myapp) { ... }`). Empty directory logs a harmless import warning. |
 | `CADDY_WAF_ENGINE` | `On` | `On` refuses a request over the CRS threshold with `403`. `DetectionOnly` logs it and lets it through, for a first release behind CRS. Any other value refuses to start. See [WAF](#waf-coraza-and-owasp-crs). |
+| `CADDY_WAF_SKIP_PATHS` | `none` | Space-separated path patterns, each starting with `/` (`/v1/realtime/* /v1/events`), where a `GET` skips the WAF. For event streams and other long-lived responses; any other method to those paths is still inspected. `/*`, or an entry without a leading `/`, refuses to start. See [Long-lived responses](#long-lived-responses). |
 
 Setting a variable to the empty string means "use the image default", which is what Caddy's own `{$VAR:default}` form does.
 
@@ -96,7 +97,7 @@ You can scope by listener if needed, e.g. `servers :8080 { ... }` (see Caddy glo
 
 Snippet **`(name) { }` definitions** are **not** loaded here (they are invalid inside the global options block). They are loaded via **`CADDY_BUILTIN_SNIPPETS_DIR`** and **`CADDY_SNIPPET_DEFS_DIR`**; see [Snippets](#snippets-composable-patterns).
 
-Caddy expands `{$VAR}` and `{$VAR:default}` in the Caddyfile from the environment. The base file already sets **`encode zstd gzip`** on the site; add more `encode` only if you need different options.
+Caddy expands `{$VAR}` and `{$VAR:default}` in the Caddyfile from the environment. The base file already sets **`encode zstd gzip`** on the site, for Caddy's default types except `text/event-stream` (see [Long-lived responses](#long-lived-responses)); add more `encode` only if you need different options.
 
 ### Injected site config (`CADDY_CONFIG_DIR`, default `/etc/caddy/config.d/*.caddy`)
 
@@ -269,6 +270,20 @@ Without a derived image, copy one out (`docker run --rm --entrypoint cat ghcr.io
 ```text
 WAF request body limit: 30000000 bytes (CADDY_REQUEST_BODY_MAX_SIZE=30MB)
 ```
+
+### Long-lived responses
+
+A response that stays open, such as a server-sent event stream for each browser tab, holds what the edge set up for it until it ends. Measured on 2.11.7, that was about 1 MB a stream ([#121](https://github.com/morzecrew/platform-images/issues/121)), from two sources:
+
+- **Compression.** An encoder is held for the life of its response, about 0.5 MB with gzip. The base `encode` leaves `text/event-stream` out, so a stream is sent as is. Its match is Caddy's default list with `text/*` spelled out, because a response matcher cannot exclude one value; a `text/` type not on it is sent uncompressed. A response carrying `Cache-Control: no-transform` is never compressed either.
+- **The WAF.** Coraza holds a transaction, about 0.75 MB, until the request ends. **`CADDY_WAF_SKIP_PATHS`** names the paths where a `GET` is not inspected at all: not the query string, not the headers. Keep it to the stream endpoints, and keep their input to what the application checks itself, such as a session cookie:
+
+```yaml
+environment:
+  CADDY_WAF_SKIP_PATHS: /v1/realtime/*
+```
+
+**Memory is bounded by the container's limit.** Caddy sets `GOMEMLIMIT` to 90% of the container's memory limit when it starts, or of the host's memory when there is none, and logs `GOMEMLIMIT is updated`. Near it the Go runtime collects harder and returns freed memory to the system, so a container's limit is what bounds the heap a burst of connections leaves behind. Without a limit, that bound is 90% of the host. Set `GOMEMLIMIT` yourself to override it.
 
 ### Rate limiting
 

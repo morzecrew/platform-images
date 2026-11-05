@@ -63,7 +63,7 @@ expect_not_in() {
 	esac
 }
 
-# The ten curated variables, canonical spelling, in the order the entrypoint
+# The eleven curated variables, canonical spelling, in the order the entrypoint
 # declares them.
 CURATED=(
 	CADDY_EDGE_ADDRESS
@@ -76,6 +76,7 @@ CURATED=(
 	CADDY_BUILTIN_SNIPPETS_DIR
 	CADDY_SNIPPET_DEFS_DIR
 	CADDY_WAF_ENGINE
+	CADDY_WAF_SKIP_PATHS
 )
 
 # --- 1. it serves, and falls through where it says it does -----------------
@@ -455,5 +456,49 @@ expect_in "a fragment's handle_errors still writes the WAF's 403" "${headers}" "
 expect_in "and the marker is added to it" "${headers,,}" "x-waf-blocked: "
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 echo "waf: each exclusion passes its case, and a field it does not name is still checked"
+
+# --- 14. an event stream is not compressed, and a page still is -------------
+
+# The encoder for a response is held until it ends, and an event stream ends
+# when its tab closes: with `text/*` in the match, each open stream held one
+# (#121). `text/html` is one of the types the list spells out instead.
+mkdir -p "${WORK}/stream"
+{
+	printf 'handle /v1/events {\n\theader Content-Type text/event-stream\n\trespond "data: x\\n\\n" 200\n}\n'
+	printf 'handle /v1/page {\n\theader Content-Type "text/html; charset=utf-8"\n\trespond "%s" 200\n}\n' "$(head -c 2000 /dev/zero | tr '\000' x)"
+	printf 'handle /v1/* {\n\trespond "upstream" 200\n}\n'
+} >"${WORK}/stream/10-stream.caddy"
+start 18080:8080 -e "CADDY_WAF_SKIP_PATHS=/v1/events /v1/live/*" -v "${WORK}/stream:/etc/caddy/config.d:ro,Z"
+wait_health "http://127.0.0.1:18080/__platform_healthz"
+encoding() {
+	# encoding <path>: the Content-Encoding a gzip-capable client gets
+	curl -s -D - -o /dev/null -H 'Host: app.example' -H 'Accept-Encoding: gzip' \
+		"http://127.0.0.1:18080$1" | awk 'tolower($1) == "content-encoding:" { print $2 }' | tr -d '\r'
+}
+got=$(encoding /v1/events)
+[ -z "${got}" ] || { echo "FAIL: an event stream came back with Content-Encoding ${got}"; exit 1; }
+got=$(encoding /v1/page)
+[ "${got}" = "gzip" ] || { echo "FAIL: a text/html page came back with Content-Encoding '${got}', expected gzip"; exit 1; }
+echo "encode: an event stream is sent as is, a page is compressed"
+
+# --- 15. CADDY_WAF_SKIP_PATHS takes a GET to its paths past the WAF, only ---
+
+# Coraza holds a transaction for the life of the request it inspects, so each
+# open stream held one (#121). A GET to a named path skips it; any other method
+# to that path, and a GET anywhere else, is inspected as before.
+sqli="id=1%27%20OR%20%271%27%3D%271"
+for pair in "GET /v1/events?${sqli}=200" "GET /v1/live/x?${sqli}=200" \
+	"POST /v1/events?${sqli}=403" "GET /v1/x?${sqli}=403"; do
+	req="${pair%=*}"
+	code=$(api "${req%% *}" "${req#* }")
+	[ "${code}" = "${pair##*=}" ] || { echo "FAIL: ${req} got ${code}, expected ${pair##*=}"; exit 1; }
+done
+expect_in "skip paths: the summary shows them" "$(logs_of)" "CADDY_WAF_SKIP_PATHS = /v1/events /v1/live/*"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+refuse "a skip path matching every GET" -e "CADDY_WAF_SKIP_PATHS=/v1/events /*"
+expect_in "refusal names /*" "$(cat "${REFUSE_OUT}")" "CADDY_WAF_SKIP_PATHS includes /*"
+refuse "a skip path matching no request" -e "CADDY_WAF_SKIP_PATHS=v1/events"
+expect_in "refusal names the entry" "$(cat "${REFUSE_OUT}")" "CADDY_WAF_SKIP_PATHS includes v1/events, which does not start with /"
+echo "waf: a GET to a skip path passes, everything else is inspected, and a bad entry refuses"
 
 echo "PASS: caddy"

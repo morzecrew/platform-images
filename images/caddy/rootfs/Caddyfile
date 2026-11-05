@@ -9,7 +9,64 @@ import {$CADDY_BUILTIN_SNIPPETS_DIR}/*.caddy
 import {$CADDY_SNIPPET_DEFS_DIR}/*.caddy
 
 {$CADDY_EDGE_ADDRESS} {
-	encode zstd gzip
+	# Caddy's own default types, except that `text/*` is spelled out, from the
+	# Cloudflare list Caddy's is based on, so that `text/event-stream` is not
+	# among them. An encoder is held for as long as its response is open, about
+	# 0.5 MB with gzip, and an event stream stays open for as long as the tab
+	# that reads it (#121). A response matcher cannot negate a value, hence the
+	# list rather than `text/*` minus one.
+	encode zstd gzip {
+		match {
+			header Content-Type application/atom+xml*
+			header Content-Type application/eot*
+			header Content-Type application/font*
+			header Content-Type application/geo+json*
+			header Content-Type application/graphql+json*
+			header Content-Type application/graphql-response+json*
+			header Content-Type application/javascript*
+			header Content-Type application/json*
+			header Content-Type application/ld+json*
+			header Content-Type application/manifest+json*
+			header Content-Type application/opentype*
+			header Content-Type application/otf*
+			header Content-Type application/rss+xml*
+			header Content-Type application/truetype*
+			header Content-Type application/ttf*
+			header Content-Type application/vnd.api+json*
+			header Content-Type application/vnd.ms-fontobject*
+			header Content-Type application/wasm*
+			header Content-Type application/x-httpd-cgi*
+			header Content-Type application/x-javascript*
+			header Content-Type application/x-opentype*
+			header Content-Type application/x-otf*
+			header Content-Type application/x-perl*
+			header Content-Type application/x-protobuf*
+			header Content-Type application/x-ttf*
+			header Content-Type application/xhtml+xml*
+			header Content-Type application/xml*
+			header Content-Type font/ttf*
+			header Content-Type font/otf*
+			header Content-Type image/svg+xml*
+			header Content-Type image/vnd.microsoft.icon*
+			header Content-Type image/x-icon*
+			header Content-Type multipart/bag*
+			header Content-Type multipart/mixed*
+			header Content-Type text/css*
+			header Content-Type text/csv*
+			header Content-Type text/html*
+			header Content-Type text/javascript*
+			header Content-Type text/js*
+			header Content-Type text/markdown*
+			header Content-Type text/plain*
+			header Content-Type text/richtext*
+			header Content-Type text/tab-separated-values*
+			header Content-Type text/x-component*
+			header Content-Type text/x-java-source*
+			header Content-Type text/x-markdown*
+			header Content-Type text/x-script*
+			header Content-Type text/xml*
+		}
+	}
 
 	handle {$CADDY_HEALTH_PATH} {
 		respond "ok" 200
@@ -19,7 +76,17 @@ import {$CADDY_SNIPPET_DEFS_DIR}/*.caddy
 		max_size {$CADDY_REQUEST_BODY_MAX_SIZE}
 	}
 
-	coraza_waf {
+	# A GET to one of CADDY_WAF_SKIP_PATHS is not inspected: Coraza holds a
+	# transaction, about 0.75 MB, for the whole life of a request, and an event
+	# stream lives as long as its tab (#121). Any other method to those paths
+	# still is. The default, `none`, is a pattern no request path matches, since
+	# every one starts with `/`.
+	@waf_inspect not {
+		method GET
+		path {$CADDY_WAF_SKIP_PATHS}
+	}
+
+	coraza_waf @waf_inspect {
 		directives `
 		Include /opt/coraza/config/coraza.conf
 		SecRequestBodyLimit {$CADDY_WAF_REQUEST_BODY_LIMIT:30000000}

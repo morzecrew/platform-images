@@ -31,6 +31,7 @@ CADDY_SERVERS_DIR|SERVERS_DIR|/etc/caddy/servers.d
 CADDY_BUILTIN_SNIPPETS_DIR|BUILTIN_SNIPPETS_DIR|/etc/caddy/snippets
 CADDY_SNIPPET_DEFS_DIR|SNIPPET_DEFS_DIR|/etc/caddy/snippet_defs.d
 CADDY_WAF_ENGINE||On
+CADDY_WAF_SKIP_PATHS||none
 "
 
 # Upstream's own name, set by caddy:*-alpine. RFC 0001 decision 1 says upstream
@@ -159,6 +160,23 @@ case "${CADDY_WAF_ENGINE}" in
 On | DetectionOnly) ;;
 *) envconf_die "CADDY_WAF_ENGINE=${CADDY_WAF_ENGINE} is not On or DetectionOnly." ;;
 esac
+
+# Path patterns for Caddy's `path` matcher. A request path always starts with
+# `/`, so an entry that does not would match nothing and leave the stream it
+# was meant for inspected, in silence. `/*` would take the WAF off every GET,
+# which is what CADDY_WAF_ENGINE is for. `set -f`: the entries are globs for
+# Caddy, not for this shell.
+if [ "${CADDY_WAF_SKIP_PATHS}" != none ]; then
+	set -f
+	for p in ${CADDY_WAF_SKIP_PATHS}; do
+		case "${p}" in
+		/\*) envconf_die "CADDY_WAF_SKIP_PATHS includes /*, which takes the WAF off every GET. Name the paths of the long-lived responses." ;;
+		/*) ;;
+		*) envconf_die "CADDY_WAF_SKIP_PATHS includes ${p}, which does not start with / and so matches no request. Set space-separated paths such as /v1/realtime/*, or none." ;;
+		esac
+	done
+	set +f
+fi
 
 envconf_summary caddy "${SRCMAP}" \
 	"effective configuration" \

@@ -118,7 +118,8 @@ ENV CADDY_EDGE_ADDRESS=":8080" \
     CADDY_SERVERS_DIR="/etc/caddy/servers.d" \
     CADDY_BUILTIN_SNIPPETS_DIR="/etc/caddy/snippets" \
     CADDY_SNIPPET_DEFS_DIR="/etc/caddy/snippet_defs.d" \
-    CADDY_WAF_ENGINE="On"
+    CADDY_WAF_ENGINE="On" \
+    CADDY_WAF_SKIP_PATHS="none"
 
 EXPOSE 8080
 
