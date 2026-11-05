@@ -70,14 +70,22 @@ default, and the pools together have to fit in Postgres's `max_connections`.
 
 Each backend holds memory of its own, so the pool sizes Postgres's memory as
 much as `shared_buffers` does. The default was 30 until
-[#122](https://github.com/morzecrew/platform-images/issues/122). On a 4 vCPU
-host under a write-heavy load, a pool of 20 kept the throughput of 30 (34.7
-against 35 requests a second), with Postgres at 2.1–2.3 GiB rather than
-6.4–7.3 GiB, given the postgres image's
-[malloc thresholds](../postgres/README.md#memory-a-backend-keeps). A pool of 12
-queued writes behind each other and fell to 23. Raise the pool with the
-database host's cores, not with the number of clients: a backend with no core
-to run on only waits.
+[#122](https://github.com/morzecrew/platform-images/issues/122), measured on a
+4 vCPU host:
+
+- Under a write-heavy load, with the postgres image's
+  [malloc thresholds](../postgres/README.md#memory-a-backend-keeps), a pool of
+  20 kept the throughput of 30 (34.7 against 35 requests a second) and held
+  Postgres at 2.1–2.3 GiB. The old defaults, a pool of 30 without the
+  thresholds, held 6.4–7.3 GiB, so that gap is both changes together.
+- A pool of 12 queued writes behind each other and fell to 23 requests a
+  second.
+- In an earlier run, without the stock-move and order traffic, the thresholds
+  alone took a pool of 30 from 6.8 GB to 2.6 GB, and with them a pool of 12
+  held 1.4 GB.
+
+Raise the pool with the database host's cores, not with the number of
+clients: a backend with no core to run on only waits.
 
 `PGBOUNCER_DB_PASSWORD` is required and there is no default: a pooler with no
 password authenticates nobody, and one that guessed the user would log into
