@@ -49,7 +49,7 @@ anything in [`rootfs/allowlist.conf`](rootfs/allowlist.conf).
 | `PGBOUNCER_AUTH_TYPE` | `scram-sha-256` | `trust` and `any` are refused |
 | `PGBOUNCER_POOL_MODE` | `transaction` | |
 | `PGBOUNCER_MAX_CLIENT_CONN` | `1000` | |
-| `PGBOUNCER_DEFAULT_POOL_SIZE` | `30` | Server connections per pool |
+| `PGBOUNCER_DEFAULT_POOL_SIZE` | `20` | Server connections per pool; see [pool size](#pool-size) |
 | `PGBOUNCER_MAX_PREPARED_STATEMENTS` | `200` | See prepared statements below |
 | `PGBOUNCER_ADMIN_USERS` | `PGBOUNCER_DB_USER` | Who may use the admin console |
 | `PGBOUNCER_STATS_USERS` | `PGBOUNCER_DB_USER` | |
@@ -60,6 +60,24 @@ anything in [`rootfs/allowlist.conf`](rootfs/allowlist.conf).
 variable — they are the shape of the pool rather than a knob every consumer
 sets — and are reachable through `PGBOUNCER_CONF__min_pool_size` and
 `PGBOUNCER_CONF__reserve_pool_size`.
+
+### Pool size
+
+`PGBOUNCER_DEFAULT_POOL_SIZE` is how many Postgres backends the pooler keeps
+for each database and user pair, and `reserve_pool_size` lets a pool open 10
+more once a client has waited 5 seconds. So a pool can reach 30 backends by
+default, and the pools together have to fit in Postgres's `max_connections`.
+
+Each backend holds memory of its own, so the pool sizes Postgres's memory as
+much as `shared_buffers` does. The default was 30 until
+[#122](https://github.com/morzecrew/platform-images/issues/122). On a 4 vCPU
+host under a write-heavy load, a pool of 20 kept the throughput of 30 (34.7
+against 35 requests a second), with Postgres at 2.1–2.3 GiB rather than
+6.4–7.3 GiB, given the postgres image's
+[malloc thresholds](../postgres/README.md#memory-a-backend-keeps). A pool of 12
+queued writes behind each other and fell to 23. Raise the pool with the
+database host's cores, not with the number of clients: a backend with no core
+to run on only waits.
 
 `PGBOUNCER_DB_PASSWORD` is required and there is no default: a pooler with no
 password authenticates nobody, and one that guessed the user would log into

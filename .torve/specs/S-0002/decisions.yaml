@@ -162,14 +162,14 @@ decisions:
       Its own entrypoint writes `pgbouncer.ini` and a 0600 `userlist.txt` on every
       start, then execs `pgbouncer`, as uid 70 (S-0003/D-1 drops to it from root when
       the container starts as root). edoburu's script is not run. The prefix is `PGBOUNCER`,
-      and the curated keys default to what every consumer sets today: `DB_HOST` and
-      `DB_USER` required, `DB_PORT=5432`, `DB_NAME=*`, `DB_PASSWORD` required (with
-      `_FILE`), `LISTEN_PORT=6432`, `AUTH_TYPE=scram-sha-256`, `POOL_MODE=transaction`,
-      `MAX_CLIENT_CONN=1000`, `DEFAULT_POOL_SIZE=30`, `MAX_PREPARED_STATEMENTS=200`,
-      and `ADMIN_USERS` and `STATS_USERS` defaulting to `DB_USER`. `AUTH_TYPE` refuses
-      `trust` and `any`. `min_pool_size=5` and `reserve_pool_size=10` are baked. The
-      image's version label is the version `pgbouncer --version` prints, and its smoke
-      test compares the two.
+      and the curated keys default to what every consumer set when the image was admitted,
+      except the pool: `DB_HOST` and `DB_USER` required, `DB_PORT=5432`, `DB_NAME=*`,
+      `DB_PASSWORD` required (with `_FILE`), `LISTEN_PORT=6432`, `AUTH_TYPE=scram-sha-256`,
+      `POOL_MODE=transaction`, `MAX_CLIENT_CONN=1000`, `DEFAULT_POOL_SIZE=20` where
+      the consumers set 30, `MAX_PREPARED_STATEMENTS=200`, and `ADMIN_USERS` and `STATS_USERS`
+      defaulting to `DB_USER`. `AUTH_TYPE` refuses `trust` and `any`. `min_pool_size=5`
+      and `reserve_pool_size=10` are baked. The image's version label is the version
+      `pgbouncer --version` prints, and its smoke test compares the two.
     paths: [images/pgbouncer/Dockerfile, images/pgbouncer/rootfs/**]
     consequence: >-
       a changed environment takes effect on a restart, the password arrives through
@@ -182,7 +182,7 @@ decisions:
       transaction mode that works only while `max_prepared_statements` is non-zero.
       Both tags default it to 200, which no consumer writes down.
     cites: [S-0001/D-12, S-0001/D-14, S-0001/D-16]
-    fingerprint: 9207bf41a8abd173/2d131f74fdb0e0ec
+    fingerprint: d916b81c8be9570c/2d131f74fdb0e0ec
   - id: D-10
     grade: ASSUMED
     text: >-

@@ -147,7 +147,10 @@ listen_addr="${PGBOUNCER_LISTEN_ADDR:-0.0.0.0}"
 listen_port="${PGBOUNCER_LISTEN_PORT:-6432}"
 pool_mode="${PGBOUNCER_POOL_MODE:-transaction}"
 max_client_conn="${PGBOUNCER_MAX_CLIENT_CONN:-1000}"
-default_pool_size="${PGBOUNCER_DEFAULT_POOL_SIZE:-30}"
+# Not what the consumers set when the image was made, which was 30: each
+# backend keeps memory of its own, and 30 of them took a small database host to
+# 6.8 GB. 20 kept the throughput of 30 there, 12 did not (#122).
+default_pool_size="${PGBOUNCER_DEFAULT_POOL_SIZE:-20}"
 max_prepared_statements="${PGBOUNCER_MAX_PREPARED_STATEMENTS:-200}"
 admin_users="${PGBOUNCER_ADMIN_USERS:-${db_user}}"
 stats_users="${PGBOUNCER_STATS_USERS:-${db_user}}"
