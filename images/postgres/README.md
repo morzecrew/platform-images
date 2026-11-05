@@ -98,6 +98,28 @@ from `/dev/shm`; Postgres puts dynamic shared memory there, mostly parallel
 queries' working memory. Both this config and the baked one start under
 Docker's 64 MB default.
 
+### Memory a backend keeps
+
+The image sets glibc's malloc thresholds in its environment:
+
+```text
+GLIBC_TUNABLES=glibc.malloc.mmap_threshold=131072:glibc.malloc.trim_threshold=131072
+```
+
+Without them a backend keeps the most memory its queries have ever allocated.
+glibc's mmap threshold rises each time a large block is freed, so a later sort
+or hash comes from the heap, and the heap is not returned to the system. Behind
+a pooler the backends live for days and the high-water marks add up: on a
+4 vCPU host with `shared_buffers=128MB` and `work_mem=16MB`, 16 busy clients
+took Postgres to 6.8 GB of anonymous memory, and 2.6 GB with the thresholds
+fixed at 128 KiB, at the same throughput
+([#122](https://github.com/morzecrew/platform-images/issues/122)). The pooler's
+size matters as much; see the pgbouncer image's
+[pool size](../pgbouncer/README.md#pool-size).
+
+`GLIBC_TUNABLES` is glibc's variable, so setting it replaces the whole value,
+and an empty value gives glibc's defaults back.
+
 ### Secrets
 
 Nothing to add here: the official entrypoint, which this image runs unchanged,
