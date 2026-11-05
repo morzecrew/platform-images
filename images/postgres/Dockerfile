@@ -64,6 +64,21 @@ COPY rootfs/entrypoint.sh /usr/local/bin/entrypoint-merge.sh
 RUN chmod +x /usr/local/bin/entrypoint-merge.sh
 
 # ....................... #
+# Memory a backend keeps
+#
+# A backend keeps the most memory its queries have ever allocated. glibc raises
+# its mmap threshold each time a large mmapped block is freed, so the next big
+# sort or hash is served from the heap and freed there, without being returned.
+# Behind a pooler the backends live for days and their high-water marks add up:
+# 6.8 GB of anonymous memory on a small host, against 2.6 GB with these two set
+# (#122). Fixing either threshold turns the dynamic one off. glibc ignores a
+# misspelt tunable in silence, so smoke.sh asks ld.so what it took.
+#
+# glibc's own variable, not this image's: setting it replaces the whole value,
+# and setting it empty gives glibc's defaults back.
+ENV GLIBC_TUNABLES=glibc.malloc.mmap_threshold=131072:glibc.malloc.trim_threshold=131072
+
+# ....................... #
 # Entrypoint
 
 ENTRYPOINT ["/usr/local/bin/entrypoint-merge.sh"]

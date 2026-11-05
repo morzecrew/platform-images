@@ -11,8 +11,6 @@ amendments:
     at: '2026-10-26T10:54:50Z'
     title: >-
       rustfs starts as root and drops to 10001 (S-0003)
-    md: |-
-      S-0003/D-3 gives `images/rustfs` a final `USER root`: the entrypoint reads both credential files as root, exports their values, unsets the `_FILE` names and drops to uid 10001 with `setpriv` before upstream's script runs. D-5 said upstream's script keeps running as 10001, which still holds after the drop, so the row now says where the uid comes from.
     changes:
       - subject: D-5
         field: text
@@ -36,12 +34,16 @@ amendments:
       - subject: D-5
         field: fingerprint
         after: bbcde0b97c6426be/b5a5a048c2ccf468
+    md: >-
+      S-0003/D-3 gives `images/rustfs` a final `USER root`: the entrypoint reads both
+      credential files as root, exports their values, unsets the `_FILE` names and
+      drops to uid 10001 with `setpriv` before upstream's script runs. D-5 said upstream's
+      script keeps running as 10001, which still holds after the drop, so the row
+      now says where the uid comes from.
   - id: A-3
     at: '2026-10-26T10:55:02Z'
     title: >-
       pgbouncer starts as root and drops to 70 (S-0003)
-    md: |-
-      S-0003/D-1 gives `images/pgbouncer` a final `USER root`: the entrypoint reads the password file as root, writes both files, gives them to 70:70 and execs `pgbouncer` through `setpriv`. D-9 said the entrypoint execs `pgbouncer`, which still holds, so the row now names the uid it runs as.
     changes:
       - subject: D-9
         field: text
@@ -75,3 +77,50 @@ amendments:
       - subject: D-9
         field: fingerprint
         after: 9207bf41a8abd173/2d131f74fdb0e0ec
+    md: >-
+      S-0003/D-1 gives `images/pgbouncer` a final `USER root`: the entrypoint reads
+      the password file as root, writes both files, gives them to 70:70 and execs
+      `pgbouncer` through `setpriv`. D-9 said the entrypoint execs `pgbouncer`, which
+      still holds, so the row now names the uid it runs as.
+  - id: A-4
+    at: '2026-11-05T08:23:37Z'
+    title: >-
+      pgbouncer's default pool is 20, not the consumers' 30
+    changes:
+      - subject: D-9
+        field: text
+        before: >-
+          `images/pgbouncer` takes PgBouncer from `edoburu/pgbouncer` at a Renovate-tracked
+          bake tag, starting at v1.26.0-p0, and is tagged with PgBouncer's own version.
+          Its own entrypoint writes `pgbouncer.ini` and a 0600 `userlist.txt` on every
+          start, then execs `pgbouncer`, as uid 70 (S-0003/D-1 drops to it from root
+          when the container starts as root). edoburu's script is not run. The prefix
+          is `PGBOUNCER`, and the curated keys default to what every consumer sets
+          today: `DB_HOST` and `DB_USER` required, `DB_PORT=5432`, `DB_NAME=*`, `DB_PASSWORD`
+          required (with `_FILE`), `LISTEN_PORT=6432`, `AUTH_TYPE=scram-sha-256`,
+          `POOL_MODE=transaction`, `MAX_CLIENT_CONN=1000`, `DEFAULT_POOL_SIZE=30`,
+          `MAX_PREPARED_STATEMENTS=200`, and `ADMIN_USERS` and `STATS_USERS` defaulting
+          to `DB_USER`. `AUTH_TYPE` refuses `trust` and `any`. `min_pool_size=5` and
+          `reserve_pool_size=10` are baked. The image's version label is the version
+          `pgbouncer --version` prints, and its smoke test compares the two.
+        after: >-
+          `images/pgbouncer` takes PgBouncer from `edoburu/pgbouncer` at a Renovate-tracked
+          bake tag, starting at v1.26.0-p0, and is tagged with PgBouncer's own version.
+          Its own entrypoint writes `pgbouncer.ini` and a 0600 `userlist.txt` on every
+          start, then execs `pgbouncer`, as uid 70 (S-0003/D-1 drops to it from root
+          when the container starts as root). edoburu's script is not run. The prefix
+          is `PGBOUNCER`, and the curated keys default to what every consumer set
+          when the image was admitted, except the pool: `DB_HOST` and `DB_USER` required,
+          `DB_PORT=5432`, `DB_NAME=*`, `DB_PASSWORD` required (with `_FILE`), `LISTEN_PORT=6432`,
+          `AUTH_TYPE=scram-sha-256`, `POOL_MODE=transaction`, `MAX_CLIENT_CONN=1000`,
+          `DEFAULT_POOL_SIZE=20` where the consumers set 30, `MAX_PREPARED_STATEMENTS=200`,
+          and `ADMIN_USERS` and `STATS_USERS` defaulting to `DB_USER`. `AUTH_TYPE`
+          refuses `trust` and `any`. `min_pool_size=5` and `reserve_pool_size=10`
+          are baked. The image's version label is the version `pgbouncer --version`
+          prints, and its smoke test compares the two.
+      - subject: D-9
+        field: fingerprint
+        before: 9207bf41a8abd173/2d131f74fdb0e0ec
+        after: d916b81c8be9570c/2d131f74fdb0e0ec
+    md: |-
+      D-9 took every default from what the consumers set, and they set `default_pool_size=30`. Each Postgres backend keeps the most memory its queries have ever allocated, and behind a pooler the backends are long-lived, so the pool size is what sizes the database's memory. On a 4 vCPU host, 30 backends took Postgres to 6.4–7.3 GiB of anonymous memory; 20 kept the same throughput at 2.1–2.3 GiB with the postgres image's new malloc thresholds, while 12 queued writes behind each other and lost a third of it (#122). The default is now 20, and the README says how to size the pool. A consumer that sets 30 keeps 30.

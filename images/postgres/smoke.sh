@@ -170,6 +170,19 @@ last_summary_line=$(logs_of | grep -n "precedence: baked < mounted < env" | head
 	{ echo "FAIL: summary does not precede the server's ready line"; exit 1; }
 echo "ok: summary completes before the server is ready"
 
+# --- glibc's malloc thresholds are fixed, in the server itself (#122) -------
+
+# glibc ignores a tunable it does not know without a word, so the spelling is
+# not evidence: ld.so reports what it took from the container's environment,
+# and PID 1, the postmaster every backend is forked from, has to carry it.
+# Read as postgres: root in the container lacks CAP_SYS_PTRACE.
+tunables="glibc.malloc.mmap_threshold=131072:glibc.malloc.trim_threshold=131072"
+server_env=$("${ENGINE}" exec -u postgres "${CTR}" sh -c "tr '\\0' '\\n' </proc/1/environ")
+expect_in "the postmaster carries the tunables" "${server_env}" "GLIBC_TUNABLES=${tunables}"
+applied=$("${ENGINE}" exec "${CTR}" ld.so --list-tunables)
+expect_in "glibc takes the mmap threshold" "${applied}" "glibc.malloc.mmap_threshold: 0x20000 "
+expect_in "glibc takes the trim threshold" "${applied}" "glibc.malloc.trim_threshold: 0x20000 "
+
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
 # --- refusals ---------------------------------------------------------------

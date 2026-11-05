@@ -223,13 +223,13 @@ esac
 # using, so a value that reached pgbouncer.ini but was not read cannot pass.
 show="$(psql_client "${PW}" pgbouncer -c 'SHOW CONFIG' 2>&1 || true)"
 for pair in pool_mode=transaction auth_type=scram-sha-256 \
-	max_prepared_statements=200 max_client_conn=1000 default_pool_size=30; do
+	max_prepared_statements=200 max_client_conn=1000 default_pool_size=20; do
 	key="${pair%%=*}"
 	value="${pair#*=}"
 	got="$(printf '%s\n' "${show}" | awk -F'|' -v k="${key}" '$1 == k { print $2 }')"
 	[ "${got}" = "${value}" ] || fail "SHOW CONFIG reports ${key}=${got:-<absent>}, expected ${value}"
 done
-echo "SHOW CONFIG: transaction, scram-sha-256, 200, 1000, 30"
+echo "SHOW CONFIG: transaction, scram-sha-256, 200, 1000, 20"
 
 # --- 5. a named prepared statement across several transactions ------------
 
