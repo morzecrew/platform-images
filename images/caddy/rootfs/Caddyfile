@@ -10,11 +10,11 @@ import {$CADDY_SNIPPET_DEFS_DIR}/*.caddy
 
 {$CADDY_EDGE_ADDRESS} {
 	# Caddy's own default types, except that `text/*` is spelled out, from the
-	# Cloudflare list Caddy's is based on, so that `text/event-stream` is not
-	# among them. An encoder is held for as long as its response is open, about
-	# 0.5 MB with gzip, and an event stream stays open for as long as the tab
-	# that reads it (#121). A response matcher cannot negate a value, hence the
-	# list rather than `text/*` minus one.
+	# Cloudflare list Caddy's is based on plus calendar, WebVTT and YAML, so
+	# that `text/event-stream` is not among them. An encoder is held for as
+	# long as its response is open, about 0.5 MB with gzip, and an event stream
+	# stays open for as long as the tab that reads it (#121). A response matcher
+	# cannot negate a value, hence the list rather than `text/*` minus one.
 	encode zstd gzip {
 		match {
 			header Content-Type application/atom+xml*
@@ -51,6 +51,7 @@ import {$CADDY_SNIPPET_DEFS_DIR}/*.caddy
 			header Content-Type image/x-icon*
 			header Content-Type multipart/bag*
 			header Content-Type multipart/mixed*
+			header Content-Type text/calendar*
 			header Content-Type text/css*
 			header Content-Type text/csv*
 			header Content-Type text/html*
@@ -60,11 +61,13 @@ import {$CADDY_SNIPPET_DEFS_DIR}/*.caddy
 			header Content-Type text/plain*
 			header Content-Type text/richtext*
 			header Content-Type text/tab-separated-values*
+			header Content-Type text/vtt*
 			header Content-Type text/x-component*
 			header Content-Type text/x-java-source*
 			header Content-Type text/x-markdown*
 			header Content-Type text/x-script*
 			header Content-Type text/xml*
+			header Content-Type text/yaml*
 		}
 	}
 

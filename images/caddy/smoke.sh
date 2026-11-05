@@ -461,11 +461,17 @@ echo "waf: each exclusion passes its case, and a field it does not name is still
 
 # The encoder for a response is held until it ends, and an event stream ends
 # when its tab closes: with `text/*` in the match, each open stream held one
-# (#121). `text/html` is one of the types the list spells out instead.
+# (#121). `text/html` and `text/calendar` are among the types the list spells
+# out instead; calendar is one Caddy's `text/*` covered and Cloudflare's list,
+# which the image's is based on, does not. The event stream's body can be
+# short: Caddy picks an event stream's encoder when the header is written,
+# before any body, so `minimum_length` (512) never applies to it. The other two
+# are past it.
 mkdir -p "${WORK}/stream"
 {
 	printf 'handle /v1/events {\n\theader Content-Type text/event-stream\n\trespond "data: x\\n\\n" 200\n}\n'
 	printf 'handle /v1/page {\n\theader Content-Type "text/html; charset=utf-8"\n\trespond "%s" 200\n}\n' "$(head -c 2000 /dev/zero | tr '\000' x)"
+	printf 'handle /v1/calendar {\n\theader Content-Type text/calendar\n\trespond "%s" 200\n}\n' "$(head -c 2000 /dev/zero | tr '\000' x)"
 	printf 'handle /v1/* {\n\trespond "upstream" 200\n}\n'
 } >"${WORK}/stream/10-stream.caddy"
 start 18080:8080 -e "CADDY_WAF_SKIP_PATHS=/v1/events /v1/live/*" -v "${WORK}/stream:/etc/caddy/config.d:ro,Z"
@@ -477,9 +483,11 @@ encoding() {
 }
 got=$(encoding /v1/events)
 [ -z "${got}" ] || { echo "FAIL: an event stream came back with Content-Encoding ${got}"; exit 1; }
-got=$(encoding /v1/page)
-[ "${got}" = "gzip" ] || { echo "FAIL: a text/html page came back with Content-Encoding '${got}', expected gzip"; exit 1; }
-echo "encode: an event stream is sent as is, a page is compressed"
+for pair in page=text/html calendar=text/calendar; do
+	got=$(encoding "/v1/${pair%%=*}")
+	[ "${got}" = "gzip" ] || { echo "FAIL: ${pair#*=} came back with Content-Encoding '${got}', expected gzip"; exit 1; }
+done
+echo "encode: an event stream is sent as is, a page and a calendar are compressed"
 
 # --- 15. CADDY_WAF_SKIP_PATHS takes a GET to its paths past the WAF, only ---
 
