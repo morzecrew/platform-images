@@ -3,7 +3,7 @@
 # ....................... #
 
 # renovate: datasource=docker depName=caddy versioning=docker
-ARG CADDY_VERSION="2.11.7"
+ARG CADDY_VERSION="2.11.8"
 # renovate: datasource=github-releases depName=corazawaf/coraza-caddy
 ARG CORAZA_CADDY_VERSION="v2.6.2"
 # renovate: datasource=github-releases depName=coreruleset/coreruleset
