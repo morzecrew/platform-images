@@ -51,7 +51,7 @@ Every row below is a **curated** variable in the sense of the [environment confi
 | `CADDY_BUILTIN_SNIPPETS_DIR` | `/etc/caddy/snippets` | Glob `import {$CADDY_BUILTIN_SNIPPETS_DIR}/*.caddy` runs **between** the global `{ }` block and the site block so bundled **`(name) { }`** snippets are real definitions. Point elsewhere only if you replace the shipped tree. |
 | `CADDY_SNIPPET_DEFS_DIR` | `/etc/caddy/snippet_defs.d` | Extra top-level snippet definitions (`*.caddy` containing `(myapp) { ... }`). Empty directory logs a harmless import warning. |
 | `CADDY_WAF_ENGINE` | `On` | `On` refuses a request over the CRS threshold with `403`. `DetectionOnly` logs it and lets it through, for a first release behind CRS. Any other value refuses to start. See [WAF](#waf-coraza-and-owasp-crs). |
-| `CADDY_WAF_SKIP_PATHS` | `none` | Space-separated path patterns, each starting with `/` (`/v1/realtime/* /v1/events`), where a `GET` skips the WAF. For event streams and other long-lived responses; any other method to those paths is still inspected. `/*`, or an entry without a leading `/`, refuses to start. See [Long-lived responses](#long-lived-responses). |
+| `CADDY_WAF_SKIP_PATHS` | `none` | Space-separated path patterns, each starting with `/` (`/v1/realtime/* /v1/events`), where a `GET` skips the WAF. For event streams and other long-lived responses; any other method to those paths is still inspected. Wildcards are `*` and `?`; `/*`, an entry without a leading `/`, one using `[` or `\`, or a blank value refuses to start. See [Long-lived responses](#long-lived-responses). |
 
 Setting a variable to the empty string means "use the image default", which is what Caddy's own `{$VAR:default}` form does.
 

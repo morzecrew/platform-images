@@ -507,6 +507,12 @@ refuse "a skip path matching every GET" -e "CADDY_WAF_SKIP_PATHS=/v1/events /*"
 expect_in "refusal names /*" "$(cat "${REFUSE_OUT}")" "CADDY_WAF_SKIP_PATHS includes /*"
 refuse "a skip path matching no request" -e "CADDY_WAF_SKIP_PATHS=v1/events"
 expect_in "refusal names the entry" "$(cat "${REFUSE_OUT}")" "CADDY_WAF_SKIP_PATHS includes v1/events, which does not start with /"
+# Caddy discards path.Match's error, so a malformed class started and matched
+# nothing, and blanks alone failed in Caddy's words rather than the image's.
+refuse "a skip path with a malformed class" -e "CADDY_WAF_SKIP_PATHS=/v1/live/["
+expect_in "refusal names the entry" "$(cat "${REFUSE_OUT}")" "CADDY_WAF_SKIP_PATHS includes /v1/live/[."
+refuse "a blank skip path" -e "CADDY_WAF_SKIP_PATHS=   "
+expect_in "refusal says blank" "$(cat "${REFUSE_OUT}")" "CADDY_WAF_SKIP_PATHS is blank"
 echo "waf: a GET to a skip path passes, everything else is inspected, and a bad entry refuses"
 
 echo "PASS: caddy"

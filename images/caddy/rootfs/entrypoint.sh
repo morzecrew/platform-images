@@ -161,21 +161,30 @@ On | DetectionOnly) ;;
 *) envconf_die "CADDY_WAF_ENGINE=${CADDY_WAF_ENGINE} is not On or DetectionOnly." ;;
 esac
 
-# Path patterns for Caddy's `path` matcher. A request path always starts with
-# `/`, so an entry that does not would match nothing and leave the stream it
-# was meant for inspected, in silence. `/*` would take the WAF off every GET,
-# which is what CADDY_WAF_ENGINE is for. `set -f`: the entries are globs for
-# Caddy, not for this shell.
+# Path patterns for Caddy's `path` matcher, refused here rather than left to
+# misbehave:
+# - a request path always starts with `/`, so an entry that does not matches
+#   nothing and leaves the stream it was meant for inspected;
+# - Caddy discards path.Match's error, so a malformed `[` class or a trailing
+#   `\` matches nothing either. Only `*` and `?` are accepted as wildcards;
+# - `/*` would take the WAF off every GET, which is CADDY_WAF_ENGINE's job;
+# - a value of blanks alone leaves Caddy an empty matcher, which it refuses as
+#   "module value cannot be null".
+# `set -f`: the entries are globs for Caddy, not for this shell.
 if [ "${CADDY_WAF_SKIP_PATHS}" != none ]; then
 	set -f
+	n=0
 	for p in ${CADDY_WAF_SKIP_PATHS}; do
+		n=$((n + 1))
 		case "${p}" in
 		/\*) envconf_die "CADDY_WAF_SKIP_PATHS includes /*, which takes the WAF off every GET. Name the paths of the long-lived responses." ;;
+		*[[\\]*) envconf_die "CADDY_WAF_SKIP_PATHS includes ${p}. Use * and ? as wildcards; [ classes and \\ escapes are not accepted, since a malformed one matches nothing." ;;
 		/*) ;;
 		*) envconf_die "CADDY_WAF_SKIP_PATHS includes ${p}, which does not start with / and so matches no request. Set space-separated paths such as /v1/realtime/*, or none." ;;
 		esac
 	done
 	set +f
+	[ "${n}" -gt 0 ] || envconf_die "CADDY_WAF_SKIP_PATHS is blank. Set space-separated paths such as /v1/realtime/*, or none."
 fi
 
 envconf_summary caddy "${SRCMAP}" \
