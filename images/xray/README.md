@@ -114,7 +114,9 @@ file, the JSON path and the referenced path, never a value.
 - A source file that is not valid JSON. **Comments are refused.** Xray's own
   loader accepts them, but this resolver does not.
 - No `.json` file at all, or a source directory that cannot be read.
-- A runtime directory uid 65532 cannot write.
+- A runtime directory uid 65532 cannot write, or one that overlaps the source
+  directory once symlinks are resolved. Emptying it would delete the config or
+  overwrite it with the resolved secrets.
 - A config that `xray run -test` rejects. Xray's message is printed with every
   resolved value replaced by `<redacted>`, because Xray quotes the value it
   rejects (`invalid UUID: <the id>`).
@@ -165,7 +167,7 @@ inbound. `http`, `https`, `socks5` and `socks5h` proxy URLs work.
 | Variable | Default | |
 |---|---|---|
 | `XRAY_SOURCE_DIR` | `/etc/xray` | Where the config is read from. Every file must be `.json`. |
-| `XRAY_RUNTIME_DIR` | `/run/xray` | Where the resolved config is written. Emptied on every start. Must differ from the source. |
+| `XRAY_RUNTIME_DIR` | `/run/xray` | Where the resolved config is written. Emptied on every start, so it may not be the source, hold it or sit inside it, through a symlink or otherwise. |
 | `XRAY_HEALTHCHECK_URL` | `https://www.gstatic.com/generate_204` | What the probe requests. `http` or `https`. |
 | `XRAY_HEALTHCHECK_PROXY` | unset | The loopback inbound the probe goes through. Unset means liveness only. |
 | `XRAY_HEALTHCHECK_TIMEOUT` | `10s` | A Go duration. |

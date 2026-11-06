@@ -334,3 +334,44 @@ func TestSeedRefusals(t *testing.T) {
 		t.Errorf("directory: rc = %d", rc)
 	}
 }
+
+func TestRuntimeMustNotOverlapSource(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "etc", "xray")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(src, filepath.Join(root, "alias")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "etc"), filepath.Join(root, "etc-link")); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, run string
+		refused   bool
+	}{
+		{"the same directory", src + "/", true},
+		{"a symlink alias", filepath.Join(root, "alias"), true},
+		{"its parent", filepath.Join(root, "etc"), true},
+		{"the root", "/", true},
+		{"inside it", filepath.Join(src, "run"), true},
+		{"inside it, through a symlink, not yet created", filepath.Join(root, "alias", "run", "xray"), true},
+		{"its parent, through a symlink", filepath.Join(root, "etc-link"), true},
+		{"a sibling", filepath.Join(root, "run", "xray"), false},
+		{"a sibling sharing a prefix", src + "-run", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := overlap(src, tc.run)
+			if tc.refused && (err == nil || !strings.Contains(err.Error(), "overlap")) {
+				t.Errorf("XRAY_RUNTIME_DIR=%s: err = %v, want a refusal", tc.run, err)
+			}
+			if !tc.refused && err != nil {
+				t.Errorf("XRAY_RUNTIME_DIR=%s: %v", tc.run, err)
+			}
+		})
+	}
+	if _, err := os.Stat(filepath.Join(src, "run")); err == nil {
+		t.Error("the check created a directory")
+	}
+}

@@ -112,8 +112,8 @@ func start(extra []string) error {
 	warnUnknown()
 	src := filepath.Clean(setting("XRAY_SOURCE_DIR"))
 	run := filepath.Clean(setting("XRAY_RUNTIME_DIR"))
-	if src == run {
-		return fmt.Errorf("XRAY_SOURCE_DIR and XRAY_RUNTIME_DIR are both %s, and the runtime directory is emptied on every start", src)
+	if err := overlap(src, run); err != nil {
+		return err
 	}
 	// Checked here as well as by the probe, so a bad value stops the
 	// deployment rather than turning into an unhealthy container later.
@@ -134,6 +134,41 @@ func start(extra []string) error {
 	summary(os.Stderr, version, configs)
 	execXray(append([]string{"run", "-confdir", run}, extra...)...)
 	return nil
+}
+
+// The runtime directory is emptied on every start, so it must not be, hold or
+// sit inside the source. Compared as real paths: a symlink alias of a writable
+// source would otherwise have its config replaced with the resolved secrets,
+// and a parent of it would lose it entirely.
+func overlap(src, run string) error {
+	s, r := canonical(src), canonical(run)
+	if within(s, r) || within(r, s) {
+		return fmt.Errorf("XRAY_RUNTIME_DIR (%s) and XRAY_SOURCE_DIR (%s) overlap, and the runtime directory is emptied on every start. Point them at separate directories", run, src)
+	}
+	return nil
+}
+
+// The absolute path with every symlink resolved. A part that does not exist
+// yet keeps its name under its parent's resolved path, so a runtime directory
+// still to be created is judged by where it would be created.
+func canonical(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	parent := filepath.Dir(p)
+	if parent == p {
+		return p
+	}
+	return filepath.Join(canonical(parent), filepath.Base(p))
+}
+
+// Whether path is parent or lies under it.
+func within(parent, path string) bool {
+	rel, err := filepath.Rel(parent, path)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func execXray(args ...string) {
