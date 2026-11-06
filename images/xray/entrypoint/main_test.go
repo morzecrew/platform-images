@@ -327,10 +327,10 @@ func TestSeedRefusals(t *testing.T) {
 	if _, err := resolveFile(src); err == nil || !strings.Contains(err.Error(), `an object holding "$file" holds nothing else, and this one also holds $vlessDecryption`) {
 		t.Errorf("both keys: err = %v", err)
 	}
-	if rc := vlessEncryptionCmd(nil); rc != 2 {
+	if rc := printClientValue("vless-encryption", vlessEncryptionFile, nil); rc != 2 {
 		t.Errorf("no argument: rc = %d", rc)
 	}
-	if rc := vlessEncryptionCmd([]string{subdir}); rc != exConfig {
+	if rc := printClientValue("vless-encryption", vlessEncryptionFile, []string{subdir}); rc != exConfig {
 		t.Errorf("directory: rc = %d", rc)
 	}
 }
@@ -373,5 +373,70 @@ func TestRuntimeMustNotOverlapSource(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(src, "run")); err == nil {
 		t.Error("the check created a directory")
+	}
+}
+
+// The vector is from #127 and was checked against `xray x25519 -i` on
+// 26.10.31: the "Password (PublicKey)" line for that private key. The second
+// key differs only in the spare bits of its last character, which Xray drops.
+// The last two carry line breaks, which Go's decoder skips; Xray decodes
+// "privateKey" with the same call, so the server accepts those files too and
+// its clients need the same password.
+func TestRealityPasswordMatchesUpstream(t *testing.T) {
+	dir := t.TempDir()
+	const want = "sNLrGAfurBkhSpGRtjUYNivbHdVx0VQXvDkeWROqlkM"
+	for _, key := range []string{
+		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ\n",
+		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPR",
+		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ\r\n",
+		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ\n\n",
+	} {
+		file := write(t, filepath.Join(dir, "key"), key, 0o400)
+		got, err := realityPassword(file)
+		if err != nil || got != want {
+			t.Errorf("%q: got %q, %v; want %q", key, got, err, want)
+		}
+		os.Remove(file)
+	}
+	// A pair `xray x25519` generated on 26.10.31, chosen because both keys
+	// carry `-` and `_`, where base64url and standard base64 differ.
+	file := write(t, filepath.Join(dir, "key"), "4A35WaHxTCmPnZo1Dyt2S_kpwgD_GAPjmJxiJvE3wX8\n", 0o400)
+	if got, err := realityPassword(file); err != nil || got != "fCLp4SvcOx5r97_p-GuC5oHa7eVQulXbNkqv5FYrbW4" {
+		t.Errorf("generated pair: got %q, %v", got, err)
+	}
+}
+
+func TestRealityPasswordRefusals(t *testing.T) {
+	dir := t.TempDir()
+	const key = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ"
+	subdir := filepath.Join(dir, "subdir")
+	if err := os.Mkdir(subdir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ name, content string }{
+		{"42 characters", key[:42]},
+		{"44 characters", key + "A"},
+		{"padded", key + "="},
+		{"standard alphabet", key[:42] + "+"},
+		{"a slash", "/" + key[1:]},
+		{"hex", strings.Repeat("ab", 32)},
+		{"empty", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := write(t, filepath.Join(dir, "key"), tc.content, 0o600)
+			_, err := realityPassword(file)
+			if err == nil || !strings.Contains(err.Error(), "does not hold a REALITY private key") {
+				t.Errorf("err = %v", err)
+			}
+			if rc := printClientValue("reality-password", realityPassword, []string{file}); rc != exConfig {
+				t.Errorf("rc = %d", rc)
+			}
+		})
+	}
+	if _, err := realityPassword(subdir); err == nil || !strings.Contains(err.Error(), "is a directory") {
+		t.Errorf("directory: err = %v", err)
+	}
+	if rc := printClientValue("reality-password", realityPassword, []string{"a", "b"}); rc != 2 {
+		t.Errorf("two arguments: rc = %d", rc)
 	}
 }

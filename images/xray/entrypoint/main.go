@@ -3,6 +3,7 @@
 //	xray-entrypoint [run [xray run flags...]]  resolve, test, then exec xray
 //	xray-entrypoint healthcheck                probe egress through Xray
 //	xray-entrypoint vless-encryption <seed>    print the client's VLESS encryption
+//	xray-entrypoint reality-password <key>     print the client's REALITY password
 //	xray-entrypoint <anything else...>         exec xray with those arguments
 //
 // Xray reads no value from a file and expands no variable, so a secret can
@@ -15,6 +16,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/ecdh"
 	"crypto/mlkem"
 	"encoding/base64"
 	"encoding/hex"
@@ -72,8 +74,10 @@ func main() {
 	if len(args) > 0 && args[0] == "healthcheck" {
 		os.Exit(healthcheck())
 	}
-	if len(args) > 0 && args[0] == "vless-encryption" {
-		os.Exit(vlessEncryptionCmd(args[1:]))
+	if len(args) > 0 {
+		if derive, ok := clientValues[args[0]]; ok {
+			os.Exit(printClientValue(args[0], derive, args[1:]))
+		}
 	}
 	if len(args) > 0 && args[0] != "run" {
 		execXray(args...) // uuid, x25519, vlessenc, version, ...
@@ -413,23 +417,59 @@ func vlessEncryption(seed []byte) (string, error) {
 	return "mlkem768x25519plus.native.0rtt." + base64.RawURLEncoding.EncodeToString(dk.EncapsulationKey().Bytes()), nil
 }
 
-// Prints the client half and nothing else, so a client config can be built
-// from the seed file without the seed reaching a command line.
-func vlessEncryptionCmd(args []string) int {
+func vlessEncryptionFile(name string) (string, error) {
+	seed, err := readSeed(name)
+	if err != nil {
+		return "", err
+	}
+	return vlessEncryption(seed)
+}
+
+// The REALITY password a client sets: the X25519 public key of the server's
+// private key, as `xray x25519 -i` prints it under "Password (PublicKey)".
+// The file holds the private key as Xray's config takes it, 43 base64url
+// characters, and is decoded with the call Xray's loader makes, so any file
+// the server accepts gives the password its clients need. That call is
+// lenient: 43 random characters leave 2 spare bits, which strict decoding
+// refuses three times in four, and it skips line breaks.
+func realityPassword(name string) (string, error) {
+	s, err := readSecret(name)
+	if err != nil {
+		return "", err
+	}
+	// base64's error quotes the offending byte, so it is not passed on.
+	key, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil || len(key) != 32 {
+		return "", errors.New("does not hold a REALITY private key: 43 base64url characters and nothing else, unpadded, the 32 bytes of an X25519 key")
+	}
+	priv, err := ecdh.X25519().NewPrivateKey(key)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes()), nil
+}
+
+// The commands that print what a client config needs from a server secret.
+var clientValues = map[string]func(file string) (string, error){
+	"vless-encryption": vlessEncryptionFile,
+	"reality-password": realityPassword,
+}
+
+// Prints the value and a newline and nothing else, reading the secret from a
+// file so that it never reaches a command line, where it would show in
+// /proc/<pid>/cmdline and in the host's ps.
+func printClientValue(command string, derive func(string) (string, error), args []string) int {
 	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: xray-entrypoint vless-encryption <seed file>")
+		fmt.Fprintf(os.Stderr, "usage: xray-entrypoint %s <file>\n", command)
 		return 2
 	}
-	seed, err := readSeed(args[0])
-	if err == nil {
-		var enc string
-		if enc, err = vlessEncryption(seed); err == nil {
-			fmt.Println(enc)
-			return 0
-		}
+	value, err := derive(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: %s %v\n", args[0], err)
+		return exConfig
 	}
-	fmt.Fprintf(os.Stderr, "FATAL: %s %v\n", args[0], err)
-	return exConfig
+	fmt.Println(value)
+	return 0
 }
 
 func cause(err error) error {

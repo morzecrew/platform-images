@@ -160,17 +160,28 @@ SEED_B64="$(python3 -c 'import base64, sys; print(base64.urlsafe_b64encode(bytes
 printf '%s\n' "${SEED}" >"${WORK}/secrets/vless_seed"
 printf '%s\n' "${SEED:0:127}" >"${WORK}/secrets/seed_127"
 printf '%s\n' "${SEED:0:127}g" >"${WORK}/secrets/seed_not_hex"
+# A REALITY private key as morzer's password generator writes one: 43 random
+# characters of the base64url alphabet. The last is picked with its 2 spare
+# bits set, the form strict decoding would refuse.
+REALITY_KEY="$(python3 -c 'import secrets, string
+a = string.ascii_uppercase + string.ascii_lowercase + string.digits + "-_"
+print("".join(secrets.choice(a) for _ in range(42)) + secrets.choice([c for i, c in enumerate(a) if i % 4]))')"
+printf '%s\n' "${REALITY_KEY}" >"${WORK}/secrets/reality_key"
+printf '%s\n' "${REALITY_KEY:0:42}" >"${WORK}/secrets/reality_42"
+printf '%s\n' "${REALITY_KEY:0:42}+" >"${WORK}/secrets/reality_std"
+printf '%s\n' "${REALITY_KEY}=" >"${WORK}/secrets/reality_padded"
 chmod 0400 "${WORK}/secrets/"*
 mkdir "${WORK}/secrets/a_directory"
 touch "${WORK}/www/generate_204"
-SECRETS=("${uuid}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}")
+SECRETS=("${uuid}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}")
 
-# vless-encryption <path>: the helper's subcommand, with the secrets mounted.
-vless_encryption() {
+# client_value <command> <path>: one of the helper's client-side subcommands,
+# with the secrets mounted.
+client_value() {
 	"${ENGINE}" run --rm "${RUN_ARGS[@]}" -v "${WORK}/secrets:/run/secrets:ro" \
-		"${IMAGE}" vless-encryption "$1"
+		"${IMAGE}" "$1" "$2"
 }
-encryption="$(vless_encryption /run/secrets/vless_seed)"
+encryption="$(client_value vless-encryption /run/secrets/vless_seed)"
 client="$("${ENGINE}" run --rm "${IMAGE}" mlkem768 -i "${SEED_B64}" | sed -n 's/^Client: //p')"
 [ -n "${client}" ] || fail "xray mlkem768 -i printed no Client line"
 [ "${encryption}" = "mlkem768x25519plus.native.0rtt.${client}" ] ||
@@ -179,12 +190,27 @@ echo "ok: vless-encryption is the Client key xray mlkem768 -i derives from the s
 printf '%s\n' "${encryption}" >"${WORK}/secrets/vless_encryption"
 chmod 0400 "${WORK}/secrets/vless_encryption"
 
-for bad in seed_127 seed_not_hex a_directory; do
-	rc=0
-	out="$(vless_encryption "/run/secrets/${bad}" 2>&1)" || rc=$?
+# client_refuses <command> <file>: exit 78, naming the path.
+client_refuses() {
+	local rc=0 out
+	out="$(client_value "$1" "/run/secrets/$2" 2>&1)" || rc=$?
 	ALL_OUTPUT+="${out}"
-	[ "${rc}" = 78 ] || fail "vless-encryption on ${bad}: exited ${rc}, expected 78: ${out}"
-	expect_in "vless-encryption refuses ${bad} (78)" "${out}" "/run/secrets/${bad} "
+	[ "${rc}" = 78 ] || fail "$1 on $2: exited ${rc}, expected 78: ${out}"
+	expect_in "$1 refuses $2 (78)" "${out}" "/run/secrets/$2 "
+}
+for bad in seed_127 seed_not_hex a_directory; do
+	client_refuses vless-encryption "${bad}"
+done
+
+password="$(client_value reality-password /run/secrets/reality_key)"
+ALL_OUTPUT+="${password}"
+public="$("${ENGINE}" run --rm "${IMAGE}" x25519 -i "${REALITY_KEY}" | sed -n 's/^Password (PublicKey): //p')"
+[ -n "${public}" ] || fail "xray x25519 -i printed no Password (PublicKey) line"
+[ "${password}" = "${public}" ] ||
+	fail "reality-password printed '${password}', not the public key xray x25519 -i derives: '${public}'"
+echo "ok: reality-password is the public key xray x25519 -i derives from the private key"
+for bad in reality_42 reality_std reality_padded a_directory; do
+	client_refuses reality-password "${bad}"
 done
 config "${WORK}/conf"
 

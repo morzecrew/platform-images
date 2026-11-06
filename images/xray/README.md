@@ -143,6 +143,31 @@ docker run --rm -v ./secrets/vless_seed:/run/secrets/vless_seed:ro \
 
 A bad seed file exits 78 here too.
 
+## REALITY public key
+
+A REALITY server needs nothing from the image: its private key reaches Xray as
+`"privateKey": {"$file": "/run/secrets/reality_key"}`. The file holds the
+key as Xray's config takes it, 43 base64url characters.
+
+Its clients need the public key, which Xray's client config calls `password`
+(`publicKey` is the older alias) and share links carry as `pbk`.
+`xray-entrypoint reality-password <private key file>` prints it on stdout,
+plus a newline and nothing else. It is the value `xray x25519 -i <key>` prints
+as `Password (PublicKey)`. Unlike that command, it reads the key from a file,
+so the key never shows in `/proc/<pid>/cmdline` or in the host's `ps`.
+
+```sh
+docker run --rm -v ./secrets/reality_key:/run/secrets/reality_key:ro \
+  ghcr.io/morzecrew/xray:26.10.31 reality-password /run/secrets/reality_key
+```
+
+The file is decoded with the call Xray makes for `privateKey`, so any file the
+server accepts gives the password its clients need. That decoding accepts 43
+random characters whose last one has spare bits set, as a password generator
+writes them, and skips line breaks. Anything else exits 78, naming the path:
+a file that fails the `$file` checks, padding, the standard alphabet's `+` or
+`/`, or a length other than 32 bytes, hex included.
+
 ## Healthcheck
 
 `xray-entrypoint healthcheck` sends one `GET XRAY_HEALTHCHECK_URL` through
@@ -205,8 +230,8 @@ A password in a URL is shown as `xxxxx`.
 
 ## Other commands
 
-Any first argument other than `run`, `healthcheck` or `vless-encryption` goes
-straight to `xray`, so upstream's tools work:
+Any first argument other than `run`, `healthcheck`, `vless-encryption` or
+`reality-password` goes straight to `xray`, so upstream's tools work:
 
 ```sh
 docker run --rm ghcr.io/morzecrew/xray:26.10.31 uuid
@@ -248,5 +273,6 @@ and tzdata current.
   key pair `xray vlessenc` printed on 26.10.31, which the derivation must
   reproduce.
 - `smoke.sh`: rootless Podman. Covers the references, the seeded key pair end
-  to end, the healthcheck, the refusals an operator is most likely to meet,
+  to end, both client-side commands against upstream's own derivation, the
+  healthcheck, the refusals an operator is most likely to meet,
   and the absence of every secret from the output.
