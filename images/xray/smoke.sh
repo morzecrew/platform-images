@@ -68,7 +68,9 @@ RUN_ARGS=(--network host --userns keep-id:uid=65532,gid=65532)
 #   connects to the second inbound with the encryption `vless-encryption`
 #   printed for the same seed, so a 2xx from the probe proves the pair;
 # - a direct outbound, allowed to reach loopback, where the probe's target is.
-#   Xray's default blocks private addresses for a proxied user.
+#   Xray's default blocks private addresses for a proxied user;
+# - geoip and geosite rules, so -test fails if Xray cannot find and load the
+#   copied geodata where it looks by default.
 #
 #   config <dir> [id-json] [seeded-decryption-json]
 config() {
@@ -96,7 +98,11 @@ config() {
 		                             "users": [{"id": {"\$file": "/run/secrets/vless_uuid"},
 		                                        "encryption": {"\$file": "/run/secrets/vless_encryption"}}]}]}}
 		  ],
-		  "routing": {"rules": [{"inboundTag": ["probe"], "outboundTag": "to-seeded"}]}
+		  "routing": {"rules": [
+		    {"inboundTag": ["probe"], "outboundTag": "to-seeded"},
+		    {"ip": ["geoip:private"], "outboundTag": "direct"},
+		    {"domain": ["geosite:private"], "outboundTag": "direct"}
+		  ]}
 		}
 	EOF
 }
@@ -198,7 +204,7 @@ done
 	-e XRAY_HEALTHCHECK_PROXY="http://127.0.0.1:${PROBE_PORT}" \
 	-e XRAY_HEALTHCHECK_URL="http://127.0.0.1:${TARGET_PORT}/generate_204" \
 	-e XRAY_CONF__loglevel=debug -e XRAY_SMOKE_TYPO=1 \
-	-e XRAY_LOCATION_ASSET=/usr/local/share/xray \
+	-e XRAY_LOCATION_CERT=/usr/local/bin \
 	"${IMAGE}" >/dev/null
 
 logs=""
@@ -229,7 +235,7 @@ expect_in "summary maps the seeded decryption" "${logs}" \
 expect_in "XRAY_CONF__* is reported, not applied" "${logs}" \
 	"WARN: XRAY_CONF__loglevel is set, but this image has no XRAY_CONF__ passthrough channel"
 expect_in "an unknown XRAY_* name warns" "${logs}" "WARN: XRAY_SMOKE_TYPO is set but neither"
-expect_not_in "Xray's own names do not warn" "${logs}" "XRAY_LOCATION_ASSET"
+expect_not_in "Xray's own names do not warn" "${logs}" "XRAY_LOCATION_CERT"
 
 # --- 4. the healthcheck -------------------------------------------------------
 
