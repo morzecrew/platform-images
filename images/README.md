@@ -81,7 +81,9 @@ contract. It is normative: image READMEs link here rather than restating it.
 >   to upstream's `flyway`. Nothing else here applies to it: it is a CLI.
 > - **`xray`** has five curated names, warns about unknown `XRAY_*` names
 >   without touching Xray's own, reports `XRAY_CONF__*` rather than applying
->   it, and prints the summary with caddy's header and footer. It does not use
+>   it. One delta: an `XRAY_*_FILE` name warns too, because the image reads no
+>   `_FILE` variable and a secret reaches Xray only through its config. It
+>   prints the summary with caddy's header and footer. It does not use
 >   the shared helper, because its runtime has no shell: its entrypoint is a Go
 >   binary. Its secrets are files its JSON config references, checked as a
 >   `_FILE` is and refused with exit 78. See [No templating](#no-templating).
