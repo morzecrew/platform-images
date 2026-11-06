@@ -79,6 +79,14 @@ contract. It is normative: image READMEs link here rather than restating it.
 > - **`flyway`** resolves `FLYWAY_URL_FILE`, `FLYWAY_USER_FILE` and
 >   `FLYWAY_PASSWORD_FILE` through the shared helper, then hands every argument
 >   to upstream's `flyway`. Nothing else here applies to it: it is a CLI.
+> - **`xray`** has five curated names, warns about unknown `XRAY_*` names
+>   without touching Xray's own, reports `XRAY_CONF__*` rather than applying
+>   it. One delta: an `XRAY_*_FILE` name warns too, because the image reads no
+>   `_FILE` variable and a secret reaches Xray only through its config. It
+>   prints the summary with caddy's header and footer. It does not use
+>   the shared helper, because its runtime has no shell: its entrypoint is a Go
+>   binary. Its secrets are files its JSON config references, checked as a
+>   `_FILE` is and refused with exit 78. See [No templating](#no-templating).
 >
 > Where an image's behaviour and this section disagree, this section is the
 > target and the image is the gap. Each image's own README states what it
@@ -223,6 +231,13 @@ Each uses its own native expansion — Caddy's `{$VAR}`, a generated conf file, 
 the upstream server's own env support. A candidate image that cannot be
 configured without `envsubst` is re-examined before it is accepted.
 
+`xray` is the one image whose server has no expansion at all: Xray reads no
+value from a file or the environment. Its entrypoint replaces a JSON object
+that is exactly `{"$file": "<absolute path>"}` with that file's content, or
+`{"$vlessDecryption": "<absolute path>"}` with the key derived from the seed
+in it, and substitutes nothing else. The config is valid JSON before and after
+and has no second syntax. See [its README](xray/README.md#the-config-and-file-references).
+
 See [RFC 0001](../rfcs/0001-shared-env-config-contract.md) for the reasoning and
 the rejected alternatives.
 
@@ -280,6 +295,7 @@ author to remember.
 | OpenTelemetry Collector | — | One repository uses it. Route 1 needs two hand-rolled Dockerfiles and route 2 needs two projects that have diverged; one project satisfies neither. See [RFC 0005](../rfcs/0005-opentelemetry-collector-image.md). | 2026-08-12, **refused** |
 | ClickHouse | — | Two compose services, but the deployed instances are managed (Yandex MDB), so the image would be curating config for something we do not run. See [RFC 0007](../rfcs/0007-clickhouse-image.md). | 2026-08-12, **refused** |
 | `rustfs` | 2 (drift) | Two backends run `rustfs/rustfs:1.0.1` and have already fallen out of step: one probes a health path the other does not, and one has moved the server's log off stdout, so the same upstream reference is configured two ways for the same job. The fallback is closed rather than merely unadopted — MinIO no longer publishes an image, so there is no shared upstream reference to land on. See S-0002/D-4. | 2026-10-21, **admitted** |
+| `xray` | neither | One project, the dotdash bundle, needs Xray-core, so neither route is met. Admitted on the owner's call, because the fallback was a render job in that bundle, which would carry the same file resolution without a reviewed image. See [#125](https://github.com/morzecrew/platform-images/issues/125). | 2026-11-07, **admitted** (owner's call) |
 
 A refusal is recorded rather than left implicit, because the next person to want
 one of these will otherwise re-derive the case from scratch — and because the

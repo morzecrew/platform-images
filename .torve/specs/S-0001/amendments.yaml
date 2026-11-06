@@ -54,3 +54,73 @@ amendments:
       The copy stays, so a bare `docker build images/<name>` still works. It is no
       longer moved by hand: Renovate moves it with the bake value (S-0001/A-1), and
       S-0002/D-1 still fails a pull request where the two differ.
+  - id: A-3
+    at: '2026-11-06T21:01:29Z'
+    title: xray resolves file references, structurally
+    changes:
+      - subject: D-18
+        field: paths
+        before:
+          - images/*/rootfs/entrypoint.sh
+          - images/caddy/rootfs/Caddyfile
+          - images/caddy/Dockerfile
+        after:
+          - images/*/rootfs/entrypoint.sh
+          - images/caddy/rootfs/Caddyfile
+          - images/caddy/Dockerfile
+          - images/xray/entrypoint/main.go
+      - subject: D-18
+        field: text
+        before: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion.
+        after: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's server has none, so its entrypoint
+          replaces a JSON object that is exactly `{"$file": "<absolute path>"}` or
+          `{"$vlessDecryption": "<absolute path>"}` with the value that file yields,
+          and substitutes nothing else.
+      - subject: D-18
+        field: fingerprint
+        after: 94ec24b1ba2f2202/f206374b70c16778
+    md: >-
+      Xray reads no value from a file and expands no variable, so a secret reaches
+      it only inside its JSON config, and its `-confdir` merge replaces an inbound
+      whole rather than patching one field. The alternative, curated `*_FILE`
+      variables rendered into generated fragments, would have made the image own
+      the inbounds' shapes. The resolver keeps what the row is for: the input is
+      valid JSON before and after, a reference replaces one whole value, and there
+      is no environment expansion, expression or second syntax. A file is checked
+      as a `_FILE` is and refused with exit 78 (#125).
+  - id: A-4
+    at: '2026-11-06T21:01:30Z'
+    title: >-
+      xray is admitted on neither route, by the owner's call
+    changes:
+      - subject: D-25
+        field: text
+        before: >-
+          An image is admitted by route 1, hand-rolled in two or more projects, or
+          route 2, the same upstream run and diverged in two or more; a pair counts
+          once. Refusals are recorded under "Admissions on record". An image unused
+          for a year is deleted, its package frozen by default and kept in `PACKAGES`.
+          The annual workflow opens the review issue on 8 January with a consumer
+          scan.
+        after: >-
+          An image is admitted by route 1, hand-rolled in two or more projects, or
+          route 2, the same upstream run and diverged in two or more; a pair counts
+          once. `xray` is the one image admitted on neither, by its owner's call on
+          #125, and its row says so. Refusals are recorded under "Admissions on record".
+          An image unused for a year is deleted, its package frozen by default and
+          kept in `PACKAGES`. The annual workflow opens the review issue on 8 January
+          with a consumer scan.
+      - subject: D-25
+        field: fingerprint
+        after: 9254330abe9927c9/482c6c960e0d6250
+    md: >-
+      One project, the dotdash bundle, needs Xray-core. That meets neither route,
+      as the OpenTelemetry Collector's one repository did not. The owner admitted it
+      on #125 because the fallback was a render job in the bundle, which would have
+      carried the same secret resolution without a reviewed image. The row records
+      that exception and does not open a third route: the next request with one
+      consumer still meets the rule as written.
