@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -438,5 +439,37 @@ func TestRealityPasswordRefusals(t *testing.T) {
 	}
 	if rc := printClientValue("reality-password", realityPassword, []string{"a", "b"}); rc != 2 {
 		t.Errorf("two arguments: rc = %d", rc)
+	}
+}
+
+// stderr runs f and returns what it wrote to os.Stderr.
+func stderr(t *testing.T, f func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	f()
+	w.Close()
+	os.Stderr = old
+	out, _ := io.ReadAll(r)
+	return string(out)
+}
+
+// The secret pasted where its path belongs, as `xray x25519 -i <key>` takes
+// it, is refused without being repeated.
+func TestClientCommandsDoNotEchoANonPath(t *testing.T) {
+	for _, tc := range []struct{ command, secret string }{
+		{"reality-password", "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ"},
+		{"vless-encryption", strings.Repeat("ab", 64)},
+		{"reality-password", "relative/path"},
+	} {
+		var rc int
+		out := stderr(t, func() { rc = printClientValue(tc.command, clientValues[tc.command], []string{tc.secret}) })
+		if rc != 2 || strings.Contains(out, tc.secret) || !strings.Contains(out, "not an absolute path") {
+			t.Errorf("%s %s: rc = %d, stderr %q", tc.command, tc.secret, rc, out)
+		}
 	}
 }

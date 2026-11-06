@@ -212,6 +212,12 @@ echo "ok: reality-password is the public key xray x25519 -i derives from the pri
 for bad in reality_42 reality_std reality_padded a_directory; do
 	client_refuses reality-password "${bad}"
 done
+# The key pasted where its path belongs, as `xray x25519 -i` takes it.
+rc=0
+out="$("${ENGINE}" run --rm "${IMAGE}" reality-password "${REALITY_KEY}" 2>&1)" || rc=$?
+ALL_OUTPUT+="${out}"
+[ "${rc}" = 2 ] || fail "reality-password given the key itself: exited ${rc}, expected 2"
+expect_in "reality-password refuses the key itself as an argument (2)" "${out}" "not an absolute path"
 config "${WORK}/conf"
 
 python3 -m http.server "${TARGET_PORT}" --bind 127.0.0.1 --directory "${WORK}/www" \

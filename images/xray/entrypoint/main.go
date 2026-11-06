@@ -460,7 +460,14 @@ var clientValues = map[string]func(file string) (string, error){
 // /proc/<pid>/cmdline and in the host's ps.
 func printClientValue(command string, derive func(string) (string, error), args []string) int {
 	if len(args) != 1 {
-		fmt.Fprintf(os.Stderr, "usage: xray-entrypoint %s <file>\n", command)
+		fmt.Fprintf(os.Stderr, "usage: xray-entrypoint %s <absolute path>\n", command)
+		return 2
+	}
+	// Neither a hex seed nor a base64url key can start with "/", so this
+	// catches the secret itself pasted in place of its path, as `xray x25519
+	// -i <key>` takes it. The argument is not repeated: it may be that secret.
+	if !filepath.IsAbs(args[0]) {
+		fmt.Fprintf(os.Stderr, "usage: xray-entrypoint %s <absolute path>\nThe argument given is not an absolute path, and is not shown in case it is the secret itself.\n", command)
 		return 2
 	}
 	value, err := derive(args[0])
