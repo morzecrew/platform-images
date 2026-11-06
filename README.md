@@ -49,6 +49,7 @@ Tags follow bake defaults. The image name carries what is inside; bake variables
 | [valkey](./images/valkey) | Valkey with a finite `maxmemory`, one persistence switch, file-first secrets, and env-generated config. |
 | [rustfs](./images/rustfs) | RustFS S3-compatible object storage; console off by default, both credentials required, `RUSTFS_CONF__*` passthrough. |
 | [pgbouncer](./images/pgbouncer) | PgBouncer with an entrypoint-generated config, file-first credentials, and allowlist-based overrides via env. |
+| [xray](./images/xray) | Xray-core as uid 65532 on distroless; `{"$file": ...}` secret references resolved into its JSON config, and a healthcheck that probes egress through it. |
 
 ## Consuming these images
 

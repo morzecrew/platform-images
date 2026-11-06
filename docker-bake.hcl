@@ -42,6 +42,7 @@ variable "DESCRIPTIONS" {
     "valkey"            = "Valkey with a finite maxmemory, one persistence switch, file-first secrets, and env-generated config."
     "rustfs"            = "RustFS S3-compatible object storage: console off by default, both credentials required, env-configured."
     "pgbouncer"         = "PgBouncer with an entrypoint-generated config, file-first credentials, and allowlist-based overrides via env."
+    "xray"              = "Xray-core, non-root on distroless: secrets as files referenced from its JSON config, and a healthcheck that probes egress."
   }
 }
 
@@ -445,9 +446,41 @@ target "pgbouncer" {
 
 # ....................... #
 
+# From GitHub releases, not from the image's tags: upstream publishes its
+# prereleases as image tags of the same form, and only the releases API says
+# which is which.
+# renovate: datasource=github-releases depName=XTLS/Xray-core extractVersion=^v(?<version>.+)$
+variable "XRAY_VERSION" {
+  default = "26.10.31"
+}
+
+# Upstream's binary and geodata, pinned by the index digest of
+# ghcr.io/xtls/xray-core:${XRAY_VERSION}. Renovate moves the version and not the
+# digest, so its pull request fails images/xray/smoke.sh, where the binary's
+# version is compared with the label, until the digest is moved too:
+#
+#   docker buildx imagetools inspect ghcr.io/xtls/xray-core:<version> \
+#     --format '{{json .Manifest.Digest}}'
+target "xray" {
+  inherits   = ["_attested"]
+  context    = "./images/xray"
+  dockerfile = "Dockerfile"
+  tags       = tag("xray", XRAY_VERSION)
+  labels     = label("xray", XRAY_VERSION)
+  args = {
+    XRAY_VERSION      = XRAY_VERSION
+    XRAY_IMAGE_DIGEST = "sha256:ceabeac03a89d991d2a247361825c1d1d2e9c91cd5dc010f298c7dc0c2f325c9"
+    # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
+    GO_VERSION        = "1.27.3"
+  }
+}
+
+# ....................... #
+
 group "default" {
   targets = [
     "flyway", "caddy", "postgres", "postgres-pgvector", "postgres-cron",
     "uv-builder", "npm-builder", "python-distroless", "valkey", "rustfs", "pgbouncer",
+    "xray",
   ]
 }
