@@ -391,6 +391,7 @@ func TestRealityPasswordMatchesUpstream(t *testing.T) {
 		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPR",
 		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ\r\n",
 		"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ\n\n",
+		"abcdefghijklmnopqrstuvwxyz\nABCDEFGHIJKLMNOPQ",
 	} {
 		file := write(t, filepath.Join(dir, "key"), key, 0o400)
 		got, err := realityPassword(file)
