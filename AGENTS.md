@@ -108,6 +108,7 @@ and invariants that govern it. `torve spec show S-NNNN/D-n`, `torve spec paths`
 - `images/uv-builder/rootfs/` — 1 decision(s)
 - `images/valkey/` — 1 decision(s)
 - `images/valkey/rootfs/` — 2 decision(s)
+- `images/xray/entrypoint/` — 1 decision(s)
 - `rfcs/` — 1 decision(s)
 - `shared/` — 1 decision(s)
 - `shared/rootfs/lib/` — 6 decision(s)
