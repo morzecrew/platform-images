@@ -1,7 +1,7 @@
 #!/bin/sh
 # Settle this image's curated settings, refuse the credentials it does not
 # take, hand the passthrough environment to upstream's own names, print what
-# was decided, and exec upstream's entrypoint. See RFC 0001 and
+# was decided, and exec upstream's entrypoint. See S-0002/D-5 and
 # images/rustfs/README.md.
 #
 # Runs before upstream's /entrypoint.sh rather than instead of it: that script
@@ -18,7 +18,7 @@ ALLOWLIST="${RUSTFS_CONF_ALLOWLIST:-${CONF_DIR}/allowlist.conf}"
 DENYLIST="${CONF_DIR}/denylist.conf"
 
 # The upstream keys this image's curated variables write. Setting one of them
-# through the passthrough channel aborts, naming both (RFC 0001 decision 11).
+# through the passthrough channel aborts, naming both (S-0001/D-14).
 CURATED="ADDRESS CONSOLE_ENABLE OBS_LOG_DIRECTORY"
 
 WORK=$(mktemp -d)
@@ -43,7 +43,7 @@ emit() {
 # These are upstream's own names -- upstream owns every RUSTFS_* spelling, and
 # the image only changes what three of them default to. A value equal to the
 # Dockerfile's ENV is indistinguishable from an operator's at runtime, which is
-# why the source is `env-or-default` rather than a guess (RFC 0001 decision 13).
+# why the source is `env-or-default` rather than a guess (S-0001/D-15).
 settle() {
 	# settle <var-name> <image-default>
 	local name="$1" default="$2" value source origin
@@ -65,7 +65,7 @@ settle RUSTFS_CONSOLE_ENABLE "false"
 settle RUSTFS_OBS_LOG_DIRECTORY ""
 
 # ---------------------------------------------------------------------------
-# 2. credentials (RFC 0001 decision 4)
+# 2. credentials (S-0002/D-6)
 # ---------------------------------------------------------------------------
 # RUSTFS_ACCESS_KEY and RUSTFS_SECRET_KEY are required, each through its value
 # or upstream's own `<NAME>_FILE`. Upstream itself only warns about a missing
@@ -131,9 +131,9 @@ done
 # ---------------------------------------------------------------------------
 # 3. the passthrough channel
 # ---------------------------------------------------------------------------
-# RFC 0001 decision 9: a typo'd name is warned about, not ignored. Every
+# S-0001/D-13: a typo'd name is warned about, not ignored. Every
 # RUSTFS_* this image reads is listed here, plus the names its base image sets
-# -- upstream names are never intercepted (RFC 0001 §5.1), and warning about
+# -- upstream names are never intercepted (S-0001/D-12), and warning about
 # variables nobody set is the noise the ignore list exists to prevent. Any
 # `<NAME>_FILE` is skipped by the helper.
 envconf_warn_unknown "${PREFIX}" "\

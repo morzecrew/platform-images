@@ -5,13 +5,13 @@ ARG RUSTFS_VERSION=1.0.4
 
 # Upstream publishes the server, the S3 endpoint on 9000 and its console on
 # 9001, and runs as uid 10001 with /data as the volume. This image adds the
-# environment contract (RFC 0001) and three defaults, and changes nothing else.
+# environment contract and three defaults, and changes nothing else.
 FROM rustfs/rustfs:${RUSTFS_VERSION}
 
 # From the `shared` named context declared in docker-bake.hcl, not a copy in
 # this directory: a target that does not declare the context cannot reference
 # it, so the failure is a build error rather than a stale duplicate drifting
-# out of sync (RFC 0001 decision 6).
+# out of sync (S-0001/D-17).
 #
 # Modes are set by `--chmod` rather than by a following `RUN chmod`: the base
 # image sets `USER rustfs` (uid 10001), so a `RUN` step is not root and cannot
@@ -42,7 +42,7 @@ COPY --chmod=0755 rootfs/entrypoint.sh /usr/local/bin/rustfs-entrypoint
 # The curated defaults live here as well as in the entrypoint, so `docker
 # inspect` shows them and an entrypoint override still lands on them. The
 # entrypoint's summary cannot tell a value set here from one set by an operator
-# -- both are the same string in `environ` (RFC 0001 decision 13) -- which is
+# -- both are the same string in `environ` -- which is
 # why it attributes them `env-or-default`.
 #
 # RUSTFS_OBS_LOG_DIRECTORY is emptied on purpose. Upstream sets /logs, and a

@@ -165,7 +165,7 @@ There is no config file and no mounted layer: the defaults are the image's
 naming layers this image does not have, and attributes every curated value
 `env-or-default` — the process environment cannot tell a value set in the
 Dockerfile from one set by an operator, and inventing attribution it cannot
-compute would be printing a guess (RFC 0001 decision 13).
+compute would be printing a guess (S-0001/D-15).
 
 ```text
 [envconf] RUSTFS: effective configuration

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test for a CLI image: does the tool run and are the bundled drivers
-# actually loadable? See RFC 0002 §5.5.
+# actually loadable? See S-0001/D-11.
 set -euo pipefail
 IMAGE="${1:?usage: smoke.sh <image-ref>}"
 ENGINE="${ENGINE:-podman}"

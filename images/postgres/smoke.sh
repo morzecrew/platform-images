@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test: does this image actually run? See RFC 0002 §5.5.
+# Smoke test: does this image actually run? See S-0001/D-11.
 # Invoked as: smoke.sh <image-ref>. Runs under rootless Podman in CI.
 set -euo pipefail
 IMAGE="${1:?usage: smoke.sh <image-ref>}"
@@ -10,11 +10,11 @@ cleanup() { "${ENGINE}" rm -f "${CTR}" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
 # Expectations are derived from the image, not hard-coded: PG_EXTENSIONS is a
-# build input, and RFC 0004 decision 7 admits three variants. A test that
+# build input, and S-0001/D-19 admits three variants. A test that
 # asserts the default set would reject a healthy variant while proving nothing
 # extra about the default.
 #
-# The label is the build's own record of what was selected (decision 10), and
+# The label is the build's own record of what was selected (S-0001/D-19), and
 # the build refuses a non-canonical spelling, so reading it in order yields
 # manifest order. That is what makes deriving the preload list from it valid.
 selected=$("${ENGINE}" image inspect \
@@ -53,14 +53,14 @@ for name in ${selected}; do
 done
 
 # pg_stat_statements ships with the server and is preloaded unconditionally, so
-# it is outside the label (decision 10) and appended here rather than derived.
+# it is outside the label (S-0001/D-19) and appended here rather than derived.
 expected_preloads+=("pg_stat_statements")
 expected_available+=("pg_stat_statements")
 expected_csv=$(IFS=,; echo "${expected_preloads[*]}")
 
 # The preload line is generated at build time from PG_EXTENSIONS; if it named a
 # library that was not installed the server would not have started at all, so
-# reaching here already proves the RFC 0004 trap is closed. Assert the value too,
+# reaching here already proves the preload trap is closed. Assert the value too,
 # because order is observable and the refactor promised to preserve it.
 preload=$("${ENGINE}" exec "${CTR}" psql -U postgres -tAc "SHOW shared_preload_libraries")
 echo "shared_preload_libraries = ${preload}"
@@ -85,7 +85,7 @@ done
 # The other direction, and it is not symmetry for its own sake: checking only
 # that the label's extensions are present passes an image that installed more
 # than it admits to, and the label is what consumers read to know what is in
-# here (decision 10). The manifest is the closed set of optional extensions --
+# here (S-0001/D-19). The manifest is the closed set of optional extensions --
 # anything in it that was not selected must be absent -- which catches both an
 # under-claiming label and a build that installed something nobody asked for.
 # Contrib modules shipped by the server are not manifest rows, so they are out
@@ -113,9 +113,9 @@ esac
 
 
 # ===========================================================================
-# RFC 0001 §6 — the env-config contract, on the image that motivated it.
+# The env-config contract, on the image that motivated it.
 #
-# Every case below existed as a claim in the README before P4 and was tested by
+# Every case below was a README claim before the retrofit and was tested by
 # nothing. The retrofit is the point at which they became shared behaviour, so
 # they are asserted here rather than trusted to the helper's own suite: the
 # helper's suite proves the functions work, and these prove this image wired
@@ -153,7 +153,7 @@ expect_not_in() {
 logs="$(logs_of)"
 expect_in "summary is printed" "${logs}" "[envconf] postgres: effective non-default settings"
 expect_in "summary states the precedence" "${logs}" "precedence: baked < mounted < env"
-# Decision 13 (LOCKED) requires per-setting attribution from this image, and the
+# S-0001/D-15 requires per-setting attribution from this image, and the
 # baked file is the layer it would be easiest to summarise as one line.
 expect_in "baked file is attributed per setting" "${logs}" "source=baked        shared_buffers"
 expect_in "baked file is named" "${logs}" "(/etc/postgresql.conf)"
@@ -230,11 +230,11 @@ refuse "a denylisted key the operator's allowlist permits" \
 	-e PG_CONF__data_directory=/tmp/elsewhere
 expect_in "denylist outranks the allowlist" "$(cat "${REFUSE_OUT}")" "PG_CONF__data_directory"
 
-# Decision 2: a missing allowlist is a build defect, not a runtime condition.
+# S-0001/D-13: a missing allowlist is a build defect, not a runtime condition.
 refuse "a missing allowlist file" -e PG_CONF_ALLOWLIST_PATH=/nonexistent.conf
 expect_in "missing allowlist names the path" "$(cat "${REFUSE_OUT}")" "/nonexistent.conf"
 
-# The property most likely to regress in a rewrite (§6), and the one this image
+# The property most likely to regress in a rewrite, and the one this image
 # had no test for: ignore mode must not soften the denylist.
 refuse "a denylisted key under strict=ignore" -e PG_CONF_STRICT_MODE=ignore -e PG_CONF__include=/tmp/x
 expect_in "denylist holds in ignore mode" "$(cat "${REFUSE_OUT}")" "PG_CONF__include"
@@ -242,19 +242,19 @@ expect_in "denylist holds in ignore mode" "$(cat "${REFUSE_OUT}")" "PG_CONF__inc
 refuse "a key outside the allowlist" -e PG_CONF__nonexistent_thing=1
 expect_in "allowlist refusal names the variable" "$(cat "${REFUSE_OUT}")" "PG_CONF__nonexistent_thing"
 
-# Decision 12: no config format in scope can represent an embedded newline, so
+# S-0001/D-14: no config format in scope can represent an embedded newline, so
 # it is refused rather than written and left to the server's parser.
 refuse "a value containing a newline" -e "PG_CONF__log_line_prefix=a
 b"
 expect_in "newline refusal names the variable" "$(cat "${REFUSE_OUT}")" "PG_CONF__log_line_prefix"
 
 # Two spellings of one control variable with two values. Neither would silently
-# win before P4 -- the bash script simply never read PG_CONF_STRICT.
+# win before the retrofit -- the bash script simply never read PG_CONF_STRICT.
 refuse "both spellings of the strict control" \
 	-e PG_CONF_STRICT_MODE=fail -e PG_CONF_STRICT=ignore
 expect_in "control collision names both" "$(cat "${REFUSE_OUT}")" "PG_CONF_STRICT_MODE=fail and PG_CONF_STRICT=ignore"
 
-# Decision 4: an unreadable secret file aborts rather than falling back. This
+# S-0001/D-16: an unreadable secret file aborts rather than falling back. This
 # name is upstream's, so upstream's file_env enforces it -- asserted here
 # because the contract requires the behaviour, not a particular implementation.
 set +e
@@ -279,7 +279,7 @@ for _ in $(seq 1 60); do
 done
 logs="$(logs_of)"
 expect_in "ignore mode warns by name" "${logs}" "PG_CONF__nonexistent_thing"
-# Decision 8 (LOCKED): the summary is diagnostic output about configuration and
+# S-0001/D-15: the summary is diagnostic output about configuration and
 # belongs on stderr, so stdout stays clean for anyone shipping structured logs.
 # Asserted by taking stdout alone -- every other assertion here reads the streams
 # merged and so cannot tell the two apart.
@@ -290,10 +290,10 @@ got=$("${ENGINE}" exec "${CTR}" psql -U postgres -tAc "SHOW work_mem")
 echo "ok: an allowed key still applies while an unknown one is skipped"
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
-# --- value safety and redaction (§6) ----------------------------------------
+# --- value safety and redaction ---------------------------------------------
 
 # A tab is the case that made the wire format NUL-delimited rather than
-# `key<TAB>value` (decision 12). It has to survive into the rendered file and
+# `key<TAB>value` (S-0001/D-14). It has to survive into the rendered file and
 # into the running server, not merely be accepted.
 "${ENGINE}" run -d --name "${CTR}" -e POSTGRES_PASSWORD=smoke \
 	-v "${ALT_ALLOWLIST}:/tmp/al.conf:ro,Z" -e PG_CONF_ALLOWLIST_PATH=/tmp/al.conf \
@@ -321,10 +321,10 @@ expect_in "a non-secret key is not redacted" "${logs}" "source=baked        work
 echo "ok: redaction applies per allowlist marker, not per row"
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
-# --- decision 9: a guessed curated name is not silence ----------------------
+# --- S-0001/D-13: a guessed curated name is not silence ---------------------
 
 # This image has no curated channel, so PG_SHARED_BUFFERS is a plausible guess
-# that configures nothing. Warning is the whole point of decision 9.
+# that configures nothing. Warning is the whole point.
 "${ENGINE}" run -d --name "${CTR}" -e POSTGRES_PASSWORD=smoke \
 	-e PG_SHARED_BUFFERS=1GB "${IMAGE}" >/dev/null
 for _ in $(seq 1 60); do
@@ -338,10 +338,10 @@ expect_in "the remedy names the passthrough channel" "${logs}" "PG_CONF__<direct
 # list stops being read.
 expect_not_in "upstream PG_MAJOR not warned" "${logs}" "PG_MAJOR is set but"
 expect_not_in "upstream PG_VERSION not warned" "${logs}" "PG_VERSION is set but"
-echo "ok: decision 9 warns on a guess and stays quiet about upstream's names"
+echo "ok: a guessed name warns and upstream's names do not"
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
-# --- precedence across all three layers (§6's last case) --------------------
+# --- precedence across all three layers -------------------------------------
 
 # work_mem is set by the baked file; a mounted fragment and the environment both
 # override it. The env value must win, and each layer must be attributed.

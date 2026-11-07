@@ -2,7 +2,7 @@
 # Generate pgbouncer.ini and userlist.txt from the environment, refuse what
 # cannot be represented, print what won, and exec PgBouncer -- as the starting
 # uid, or as `postgres` when the container started as root, which is the image's
-# default. See RFC 0001 and images/pgbouncer/README.md.
+# default. See S-0002/D-9 and images/pgbouncer/README.md.
 #
 # edoburu/pgbouncer's own entrypoint is deliberately not run. It writes
 # pgbouncer.ini only when the file is absent, so a changed environment never
@@ -68,7 +68,7 @@ _curated() {
 emit_curated() { _curated emit "$@"; }
 note_curated() { _curated note "$@"; }
 
-# Curated variables the operator actually set, for RFC 0001 decision 11's
+# Curated variables the operator actually set, for S-0001/D-14's
 # collision check. Defaults are deliberately not in here: every curated knob
 # has a default, so counting defaults would make the passthrough channel
 # permanently unusable.
@@ -100,7 +100,7 @@ refuse_unwritable_credential() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. the backend and the credential (RFC 0001 decision 4)
+# 1. the backend and the credential (S-0001/D-16)
 # ---------------------------------------------------------------------------
 # DB_HOST and DB_USER have no sensible default: a pooler pointing at nothing
 # answers every client with a connection error, and one that guessed the user
@@ -118,7 +118,7 @@ db_name="${PGBOUNCER_DB_NAME:-*}"
 [ -n "${db_user}" ] || envconf_die "PGBOUNCER_DB_USER is required: it names the user PgBouncer accepts from clients and logs into Postgres with."
 
 # <NAME>_FILE wins over <NAME>, and an unreadable one aborts rather than
-# falling back (RFC 0001 decision 4). Named PGBOUNCER_DB_PASSWORD so that
+# falling back (S-0001/D-16). Named PGBOUNCER_DB_PASSWORD so that
 # PGBOUNCER_DB_PASSWORD_FILE is the file spelling the contract derives.
 db_password=$(envconf_secret PGBOUNCER_DB_PASSWORD)
 [ -n "${db_password}" ] || envconf_die "PGBOUNCER_DB_PASSWORD is required, through PGBOUNCER_DB_PASSWORD or PGBOUNCER_DB_PASSWORD_FILE. A pooler with no password authenticates nobody."
@@ -252,7 +252,7 @@ curated_if_set PGBOUNCER_MAX_PREPARED_STATEMENTS max_prepared_statements
 curated_if_set PGBOUNCER_ADMIN_USERS admin_users
 curated_if_set PGBOUNCER_STATS_USERS stats_users
 
-# RFC 0001 decision 9: a typo'd curated name warns rather than doing nothing.
+# S-0001/D-13: a typo'd curated name warns rather than doing nothing.
 # Every PGBOUNCER_* this image reads is listed here; a curated variable missing
 # from this list makes the image warn about its own knob.
 envconf_warn_unknown "${PREFIX}" "\

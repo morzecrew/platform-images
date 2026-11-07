@@ -1,6 +1,6 @@
 #!/bin/sh
 # Resolve this image's curated variables, print what was decided, then hand off
-# to Caddy. See RFC 0001 §5.4 (this image gains the summary) and the two-channel
+# to Caddy. See S-0001/D-15 (this image gains the summary) and the two-channel
 # contract in images/README.md.
 set -e
 
@@ -9,7 +9,7 @@ set -e
 
 # Curated variables: canonical name | legacy name | image default.
 #
-# The canonical spelling is `CADDY_<NAME>`, per RFC 0001 decision 1. The legacy
+# The canonical spelling is `CADDY_<NAME>`, per S-0001/D-12. The legacy
 # column is the name this image published before that rule reached it; it still
 # works, and setting it is reported rather than silently honoured, because an
 # operator reading only the README would otherwise never learn the name they
@@ -19,7 +19,7 @@ set -e
 # the baked value is what lets the summary distinguish "you set this" from "the
 # image did". smoke.sh asserts the two copies agree, since nothing at runtime
 # can -- an operator-supplied value and a baked one are the same string in
-# `environ` (RFC 0001 decision 13).
+# `environ`.
 CURATED="
 CADDY_EDGE_ADDRESS|EDGE_ADDRESS|:8080
 CADDY_REQUEST_BODY_MAX_SIZE|REQUEST_BODY_MAX_SIZE|30MB
@@ -34,9 +34,9 @@ CADDY_WAF_ENGINE||On
 CADDY_WAF_SKIP_PATHS||none
 "
 
-# Upstream's own name, set by caddy:*-alpine. RFC 0001 decision 1 says upstream
+# Upstream's own name, set by caddy:*-alpine. S-0001/D-12 says upstream
 # names are never intercepted, so it must not be warned about -- the same trap
-# VALKEY_VERSION sprang in wave 3.
+# VALKEY_VERSION once sprang.
 UPSTREAM_NAMES="CADDY_VERSION"
 
 SRCMAP=$(mktemp)
@@ -50,7 +50,7 @@ trap 'rm -f "${SRCMAP}"' EXIT
 # ignored it. Reading the shell scope covers both cases, since an exported
 # variable is also a shell variable.
 #
-# EXECUTION-LOG D-016 forbids `eval` on a name you did not construct, because
+# Never `eval` a name you did not construct, because
 # shell parameter syntax claims `-`, `:`, `#`, `%` and `?` and returns
 # something plausible instead of failing. Every name here comes from the
 # literal table above; the guard is what keeps that true if someone later adds
@@ -96,11 +96,11 @@ while IFS='|' read -r canon legacy default; do
 	if [ -n "${legacy_value}" ]; then
 		# Both spellings set to different values: one of them would be
 		# discarded, and which one is not something an operator can predict
-		# from the README. Refuse naming both, as RFC 0001 decision 11 does
+		# from the README. Refuse naming both, as S-0001/D-14 does
 		# for a curated name colliding with a passthrough key.
 		#
 		# The one case this cannot catch is a canonical value that equals the
-		# image default -- indistinguishable from unset, by decision 13 -- so
+		# image default -- indistinguishable from unset in `environ` -- so
 		# the warning below names the value that won rather than staying
 		# silent about the choice.
 		if [ -n "${canon_value}" ] &&
@@ -116,7 +116,7 @@ while IFS='|' read -r canon legacy default; do
 		value="${canon_value}"
 		# Not `env`: the Dockerfile's ENV block puts this variable in `environ`
 		# whether or not anybody set it, and nothing here can tell the two
-		# apart (RFC 0001 decision 13).
+		# apart.
 		source="env-or-default"
 		origin="${canon}"
 	else
@@ -134,10 +134,10 @@ done <<EOF
 ${CURATED}
 EOF
 
-# A misspelled CADDY_* name is caught here (RFC 0001 decision 9). A misspelled
+# A misspelled CADDY_* name is caught here (S-0001/D-13). A misspelled
 # legacy name cannot be -- `EDGE_ADRESS` is indistinguishable from an unrelated
-# variable in the operator's environment, which is the concrete failure RFC 0001
-# §2 opens with and the reason to migrate.
+# variable in the operator's environment, which is the concrete failure that
+# motivated the contract and the reason to migrate.
 #
 # The remediation sentence is this image's, not the helper's default: the
 # default points at the passthrough channel, and pointing at a channel the next
@@ -145,10 +145,10 @@ EOF
 envconf_warn_unknown CADDY "${known} ${UPSTREAM_NAMES}" \
 	"this image has no passthrough channel -- Caddy is configured by fragments under CADDY_CONFIG_DIR and CADDY_SERVERS_DIR"
 
-# This image has no passthrough channel (RFC 0001 §5.4: the summary only). The
+# This image has no passthrough channel (S-0001/D-12). The
 # helper skips `<PREFIX>_CONF__*` because for every other image those are the
 # passthrough channel, so without this an operator copying the postgres pattern
-# would get exactly the silence decision 9 exists to prevent.
+# would get exactly the silence S-0001/D-13 exists to prevent.
 awk 'BEGIN { for (k in ENVIRON) if (index(k, "CADDY_CONF__") == 1) print k }' |
 	while IFS= read -r name; do
 		envconf_warn "${name} is set, but this image has no CADDY_CONF__ passthrough channel. Caddy is configured by Caddyfile fragments -- see images/caddy/README.md."
@@ -246,7 +246,7 @@ glob_matches() {
 
 # Coraza skips an Include that matches no file, logs `empty glob result` as a
 # warning, and runs without those rules: that is how this image served with no
-# CRS at all (EXECUTION-LOG D-068). overrides/ ships a placeholder, so the
+# CRS at all (S-0001/D-24). overrides/ ships a placeholder, so the
 # image's own block always matches.
 while IFS= read -r pattern; do
 	[ -n "${pattern}" ] || continue

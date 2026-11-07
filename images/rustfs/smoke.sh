@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for the rustfs image. See RFC 0002 §5.5 and RFC 0001 §6.
+# Smoke test for the rustfs image. See S-0001/D-11.
 #
 # Half of these assert that the container *refuses to start*. That is the point
 # of the image: upstream warns about a missing or default credential and starts

@@ -33,7 +33,7 @@ variable "DESCRIPTIONS" {
     # measured: `:18.6-cron` advertised pgroonga it does not have and
     # `:18.6-pgvector` omitted the extension it exists for. The set each image
     # actually has is the `io.morze.postgres.extensions` label, generated from the
-    # build arg (RFC 0004 row 16), and images/postgres/README.md has the
+    # build arg (S-0001/D-19), and images/postgres/README.md has the
     # per-tag table for humans.
     "postgres"          = "PostgreSQL with allowlist-based config overrides via env; the installed extension set is in the io.morze.postgres.extensions label."
     "uv-builder"        = "uv-based Python build stage: sync, wheel, slim venv via build-uv-app."
@@ -60,7 +60,7 @@ variable "DESCRIPTIONS" {
 # attempt repoint a tag this file calls immutable.
 #
 # Neither tag is a substitute for the digest, which is the only true immutable
-# reference. See RFC 0002.
+# reference. See S-0001/D-4.
 function "tag" {
   params = [name, version]
   result = compact([
@@ -92,8 +92,9 @@ function "label" {
 # emitted by buildx for free on --push, and neither can be applied
 # retroactively to already-published tags.
 #
-# These are UNSIGNED attestations: evidence about what the build did, not proof.
-# Signing is a separate decision with its own identity policy. See RFC 0002.
+# These are UNSIGNED attestations: evidence about what the build did, not proof
+# (S-0001/D-5). The signed statement is a separate GitHub artifact attestation
+# on each promoted index, made by publish.yaml (S-0005).
 #
 # Must be the `attest` list form. The `provenance = "mode=max"` / `sbom = true`
 # shorthand is accepted without error by buildx 0.35 and then silently produces
@@ -144,7 +145,7 @@ target "caddy" {
   labels     = label("caddy", CADDY_VERSION)
 
   # The shared env-config helper reaches this build as a named context rather
-  # than a copy under images/caddy/ (RFC 0001 decision 6).
+  # than a copy under images/caddy/ (S-0001/D-17).
   contexts = {
     shared = "./shared"
   }
@@ -166,21 +167,21 @@ variable "POSTGRES_VERSION" {
   default = "18.6"
 }
 
-# Three extension sets, three targets, one registry name (RFC 0004 decision 3).
+# Three extension sets, three targets, one registry name (S-0001/D-19).
 # The unsuffixed tag keeps its published meaning -- cron + pgroonga -- so nobody
 # pinning `postgres:18.6` sees a change; variants take a suffix.
 #
 # The sets are written literally rather than through a bake variable. A variable
 # is settable from the environment, so anything that exported
 # POSTGRES_EXTENSIONS changed what `postgres:18.6` contained while the tag stayed
-# put -- wave 1's R-7, whose remaining bite this removes. Experimenting locally
-# still works with `--set postgres.args.PG_EXTENSIONS=...`, which is explicit
+# put. Experimenting locally still works with
+# `--set postgres.args.PG_EXTENSIONS=...`, which is explicit
 # about being a one-off.
 #
 # `inherits` merges args per key with the child's value winning, so a variant
-# declares only what it changes (decision 6, measured on buildx 0.35).
+# declares only what it changes (measured on buildx 0.35).
 #
-# Ceiling is three including the default (decision 7), and this reaches it: each
+# Ceiling is three including the default (S-0001/D-19), and this reaches it: each
 # is a full --no-cache slot in the weekly rebuild, so a fourth request is the
 # prompt to ask whether the answer is no.
 target "postgres" {
@@ -196,11 +197,11 @@ target "postgres" {
   }
 }
 
-# The default set plus pgvector. §3.1's measured demand is not "vector instead of
+# The default set plus pgvector. The measured demand is not "vector instead of
 # what this image has" but "vector as well": two projects left for
 # pgvector/pgvector and gave up cron and pgroonga to get it.
 #
-# `image.version` stays the base version, as §5.3's sketch has it -- a variant is
+# `image.version` stays the base version -- a variant is
 # the same Postgres with a different extension set, and the tag is what says
 # which set.
 target "postgres-pgvector" {
@@ -211,8 +212,8 @@ target "postgres-pgvector" {
 }
 
 # The default set minus pgroonga, for a consumer that wants cron and was paying
-# for the groonga apt source, the package and the image size to get it (§3.1,
-# morze-erp-backend-v2). Needs no manifest row: omitting is subtraction.
+# for the groonga apt source, the package and the image size to get it
+# (morze-erp-backend-v2). Needs no manifest row: omitting is subtraction.
 target "postgres-cron" {
   inherits = ["postgres"]
   tags     = tag("postgres", "${POSTGRES_VERSION}-cron")
@@ -256,7 +257,7 @@ target "uv-builder" {
 # The major is chosen against the Node release schedule, not by recency: 24 is
 # the Active LTS line (EOL 2028-04-30). A Renovate proposal moving this to a
 # Current-phase major is a downgrade in support, so it gets read rather than
-# merged -- see RFC 0009 decision 9.
+# merged -- see S-0001/D-21.
 # renovate: datasource=docker depName=node extractVersion=^(?<version>\d+)-trixie$
 variable "BUILDER_NODE_VERSION" {
   default = "24"
@@ -296,7 +297,7 @@ target "valkey" {
   labels     = label("valkey", VALKEY_VERSION)
 
   # The shared env-config helper reaches this build as a named context rather
-  # than a copy under images/valkey/ (RFC 0001 decision 6). Every image that
+  # than a copy under images/valkey/ (S-0001/D-17). Every image that
   # sources envconf.sh declares this line; an image that forgets it fails to
   # build rather than shipping a stale copy.
   contexts = {
@@ -330,7 +331,7 @@ target "rustfs" {
   labels     = label("rustfs", RUSTFS_VERSION)
 
   # The shared env-config helper, as a named context rather than a copy under
-  # images/rustfs/ (RFC 0001 decision 6).
+  # images/rustfs/ (S-0001/D-17).
   contexts = {
     shared = "./shared"
   }
@@ -344,9 +345,9 @@ target "rustfs" {
 
 # The one Python version for both uv-builder and python-distroless: uv-builder
 # produces /opt/venv and python-distroless executes it, on every platform. It
-# used to be two variables checked for matching major.minor (RFC 0008 sec 5.4),
-# which still let the builder float to a newer patch than the runtime; one
-# variable makes the pair the same build by construction. A Renovate bump here
+# used to be two variables checked for matching major.minor, which still let
+# the builder float to a newer patch than the runtime; one variable makes the
+# pair the same build by construction (S-0001/D-22). A Renovate bump here
 # moves both images, and python:<patch>-trixie exists before al3xos publishes
 # the same patch, so the distroless registry sets the pace.
 #
@@ -354,7 +355,7 @@ target "rustfs" {
 # whitespace between: the custom manager in .github/renovate.json matches
 # `# renovate: ...\s+variable "..."`, so a comment in the gap silently unhooks
 # the variable from Renovate entirely. This one sat above these lines until
-# 2026-08-18 and had never produced a bump (EXECUTION-LOG A-42).
+# 2026-08-18 and had never produced a bump.
 # renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
 variable "DISTROLESS_PYTHON_VERSION" {
   default = "3.14.10"
@@ -429,7 +430,7 @@ target "pgbouncer" {
   labels     = label("pgbouncer", pgbouncer_version(PGBOUNCER_VERSION))
 
   # The shared env-config helper reaches this build as a named context rather
-  # than a copy under images/pgbouncer/ (RFC 0001 decision 6). Every image that
+  # than a copy under images/pgbouncer/ (S-0001/D-17). Every image that
   # sources envconf.sh declares this line; an image that forgets it fails to
   # build rather than shipping a stale copy.
   contexts = {

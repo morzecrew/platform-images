@@ -16,7 +16,7 @@ RUN wget -qO "/flyway/drivers/postgresql-${POSTGRES_JDBC_VERSION}.jar" \
     && wget -qO "/flyway/drivers/clickhouse-jdbc-${CLICKHOUSE_JDBC_VERSION}-all.jar" \
     "https://repo1.maven.org/maven2/com/clickhouse/clickhouse-jdbc/${CLICKHOUSE_JDBC_VERSION}/clickhouse-jdbc-${CLICKHOUSE_JDBC_VERSION}-all.jar"
 
-# From the `shared` named context declared in docker-bake.hcl (RFC 0001 decision 6).
+# From the `shared` named context declared in docker-bake.hcl (S-0001/D-17).
 COPY --from=shared --chmod=0644 rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 COPY --chmod=0755 rootfs/entrypoint.sh /usr/local/bin/flyway-entrypoint
 

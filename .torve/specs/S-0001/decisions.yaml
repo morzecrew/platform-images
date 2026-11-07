@@ -67,7 +67,7 @@ decisions:
       Every target inherits `_attested`, written in list form, `attest = ["type=provenance,mode=max",
       "type=sbom"]`, never in the shorthand. Those attestations are described everywhere
       as unsigned evidence. The signed statement is a separate GitHub artifact attestation
-      on each promoted index digest, bound to `publish.yaml` on `main` (RFC 0010).
+      on each promoted index digest, bound to `publish.yaml` on `main` (S-0005).
     paths: [docker-bake.hcl, README.md, .github/workflows/publish.yaml]
     consequence: >-
       every image carries max-mode provenance and an SBOM, and nobody reads them as
@@ -76,7 +76,7 @@ decisions:
       RFC 0002 rows 2, 4 and 13 (LOCKED) and 15 (ASSUMED). Defended: row 13, where
       the shorthand was silently dropped; R-45, where promotion now asserts a mode=max
       `buildConfig` and an SPDX SBOM on each leg.
-    fingerprint: eae5eef2889a1412/fbfb0ffcac06f144
+    fingerprint: c6b9fe6681ca5c09/fbfb0ffcac06f144
   - id: D-6
     grade: ASSUMED
     text: >-
@@ -394,17 +394,4 @@ decisions:
       A38 (a missing row), R-35 and A48 (the scan searched names that never existed),
       A47.
     fingerprint: 9254330abe9927c9/482c6c960e0d6250
-  - id: D-26
-    grade: ASSUMED
-    text: >-
-      An executor never edits a LOCKED row. A departure goes into the append-only
-      execution log with a class and a proposed row, ratified by merging its pull
-      request. An RFC's status block moves with the work, and `rfcs/INDEX.md` stays
-      in step.
-    paths: [rfcs/*.md]
-    consequence: >-
-      a design and what was built from it never silently disagree
-    rationale: >-
-      EXECUTION-LOG.md's header and classes. Defended: A21 was left open rather than
-      flipped (R-22); status lags W-1, D044 and R-26 were corrected. `python3 .agents/skills/rfc-writer/scripts/rfc_index.py
-      check` passes.
+retired: [D-26]

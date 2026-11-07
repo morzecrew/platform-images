@@ -2,16 +2,15 @@
 # Render PG_CONF__* into an overrides file, print what the server will actually
 # use, then hand off to the upstream entrypoint.
 #
-# RFC 0001 P4. This replaced a bash implementation of the same channel: the logic
+# This replaced a bash implementation of the same channel: the logic
 # now lives in the shared helper, so `postgres` and every later image refuse the
 # same keys, quote values the same way, and print the same summary.
 #
-# Nothing that worked before stops working (decision 10): PG_CONF__*,
+# Nothing that worked before stops working (S-0001/D-13): PG_CONF__*,
 # PG_CONF_ALLOWLIST_PATH and PG_CONF_STRICT_MODE all keep their meaning, and the
 # generated file is byte-identical. Three things did change, deliberately -- the
 # summary is new, refusal messages are worded by the helper rather than by this
-# script, and a fragment mounted read-only no longer aborts the container
-# (EXECUTION-LOG D-036).
+# script, and a fragment mounted read-only no longer aborts the container.
 set -eu
 
 # shellcheck disable=SC1091
@@ -24,13 +23,13 @@ CONF_D="/etc/postgresql/conf.d"
 BAKED_LIST="${CONF_D}/.baked-fragments"
 OVERRIDES_FILE="${CONF_D}/99-overrides.conf"
 
-# Published names, kept (RFC 0001 decision 10). The helper reads PG_CONF_STRICT
+# Published names, kept (S-0001/D-13). The helper reads PG_CONF_STRICT
 # and PG_CONF_ALLOWLIST; this image published PG_CONF_STRICT_MODE and
 # PG_CONF_ALLOWLIST_PATH before the contract existed, and breaking a shipped
 # surface to gain a naming convention is not a trade worth making.
 #
 # Both spellings are accepted. Setting both to different values is refused
-# rather than resolved, for the reason decision 11 gives about any one setting
+# rather than resolved, by the rule S-0001/D-14 sets for any one setting
 # reachable two ways: an operator who sets both would otherwise get whichever
 # the code happens to read, and could not tell from the README which that is.
 alias_control() {
@@ -57,13 +56,13 @@ chown postgres:postgres "${CONF_D}"
 
 # The bash version ran `chown -R` here, which aborts the container when any
 # fragment is mounted read-only -- the natural way to mount one, and the layer
-# RFC 0001 decision 3 (`LOCKED`) requires every image to support:
+# S-0001/D-15 requires every image to support:
 #
 #   chown: changing ownership of '/etc/postgresql/conf.d/50-tuning.conf':
 #          Read-only file system
 #
 # Reproduced against the published pre-retrofit image, so this is not a
-# regression from the retrofit -- it is a defect the retrofit's own §6 battery
+# regression from the retrofit -- it is a defect the retrofit's own test battery
 # is what finally caught. Taking ownership is still attempted, because a
 # read-write fragment with a restrictive mode does need it, but failing to
 # re-own a file the image does not own is not this script's business to die
@@ -119,7 +118,7 @@ chmod 0644 "${OVERRIDES_FILE}"
 # alphabetically, then the overrides this script just wrote (which sorts last by
 # its 99- prefix, and is attributed to the environment rather than to the file).
 #
-# Decision 13 requires full source= attribution from an image that generates its
+# S-0001/D-15 requires full source= attribution from an image that generates its
 # configuration from enumerable layers, and this is the image that motivated the
 # row. `caddy` prints env-or-default because it cannot do better; here every
 # value has a file behind it.
@@ -148,7 +147,7 @@ for f in "${CONF_D}"/*.conf; do
 	# it recorded**. A bind mount can replace a fragment at its own path --
 	# `-v ./mine.conf:/etc/postgresql/conf.d/12-cron.conf` -- and matching on
 	# the name alone reported the operator's own value back to them as
-	# `source=baked`, which is the one thing decision 13 exists to prevent.
+	# `source=baked`, which is the one thing S-0001/D-15 exists to prevent.
 	if is_baked_fragment "${f}" "${base}"; then
 		envconf_scan_pgconf "${f}" baked "${f}" >>"${SRCMAP}"
 	else
@@ -164,14 +163,13 @@ done
 # Read through a pipe rather than a here-document: `$(...)` strips trailing
 # newlines, so a final pair whose value is empty -- PG_CONF__log_line_prefix=
 # renders `log_line_prefix = ''` -- would lose its value line and be dropped
-# from the summary while still reaching the file. That is wave 3's A-10 in a
-# different costume.
+# from the summary while still reaching the file.
 tr '\0' '\n' <"${COLLECTED}" |
 	while IFS= read -r key && IFS= read -r value; do
 		printf '%s\0%s\0%s\0%s\0' "${key}" "${value}" env "PG_CONF__${key}" >>"${SRCMAP}"
 	done
 
-# Decision 9. The upstream names are the ones the base image sets; PGDATA has no
+# S-0001/D-13. Upstream names are the ones the base image sets; PGDATA has no
 # underscore after the prefix and never matches.
 #
 # Before the summary, as `caddy` and `valkey` both do: an operator reading the
@@ -190,7 +188,7 @@ envconf_warn_unknown PG "PG_MAJOR PG_VERSION PG_CONF_STRICT_MODE PG_CONF_ALLOWLI
 #
 # Reported rather than prevented: `allow_alter_system=off` would close the
 # bypass and would also stop something this image has always allowed, which is a
-# policy change rather than a retrofit (EXECUTION-LOG W-3).
+# policy change rather than a retrofit.
 AUTO_CONF="${PGDATA:-}/postgresql.auto.conf"
 if [ -n "${PGDATA:-}" ]; then
 	envconf_scan_pgconf "${AUTO_CONF}" sql "${AUTO_CONF} (ALTER SYSTEM)" >>"${SRCMAP}"

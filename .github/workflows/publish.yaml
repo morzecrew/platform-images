@@ -34,7 +34,7 @@ on:
 permissions:
   contents: read
   packages: write
-  # For the scheduled-rebuild failure issue (RFC 0002 decision 8).
+  # For the scheduled-rebuild failure issue (S-0001/D-8).
   issues: write
 
 # Shared with cleanup-images.yaml, and that sharing is the actual safety
@@ -57,10 +57,10 @@ concurrency:
 jobs:
   # The target list the legs fan out over. Refused here, before anything
   # builds, when a target has no smoke script: such an image is a publishing
-  # run that cannot honour decision 10, and discovering that after pushing a
+  # run that cannot honour S-0001/D-6, and discovering that after pushing a
   # dozen digests wastes the run.
   #
-  # Resolved from each target's context rather than from its name. An RFC 0004
+  # Resolved from each target's context rather than from its name. A postgres
   # extension variant is its own target sharing the base image's directory, so
   # `images/<target>/smoke.sh` does not exist for it and the old check refused
   # every variant on sight.
@@ -139,9 +139,9 @@ jobs:
           echo "${GH_TOKEN}" | docker login ghcr.io -u dummy --password-stdin
           echo "${GH_TOKEN}" | podman login ghcr.io -u dummy --password-stdin
 
-      # The gate, in three passes (RFC 0002 §5.4 and decision 10; EXECUTION-LOG
-      # D-008 measured that this shape preserves attestations end to end). This
-      # step is the first two, for one target on one platform:
+      # The gate, in three passes (S-0001/D-6; this shape was measured to keep
+      # attestations end to end). This step is the first two, for one target on
+      # one platform:
       #
       #   1. build   -- push by digest with tags cleared, so nothing is
       #                 reachable by name until it has passed
@@ -161,7 +161,7 @@ jobs:
           export BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           # The scheduled rebuild exists to pick up a rebuilt base layer, which
-          # a cached build cannot do (decision 3). Push-triggered runs stay
+          # a cached build cannot do (S-0001/D-8). Push-triggered runs stay
           # cached and fast.
           nocache=""
           if [ "${EVENT}" = "schedule" ]; then
@@ -240,8 +240,8 @@ jobs:
           # directory per platform.
           merge-multiple: true
 
-      # BUILD_STAMP must be unique per *build*, not per run (RFC 0002 rows 11
-      # and 17). Neither run_id nor run_number changes when a run is re-run --
+      # BUILD_STAMP must be unique per *build*, not per run (S-0001/D-4).
+      # Neither run_id nor run_number changes when a run is re-run --
       # only run_attempt does -- and a re-run rebuilds from moved apt/base
       # state, so without it a second attempt repoints a tag called immutable.
       - name: Promote
@@ -257,10 +257,10 @@ jobs:
 
           # Every target is checked before any is tagged, in two halves.
           #
-          # Each leg's digest must carry what decision 2 promises: an SPDX SBOM
+          # Each leg's digest must carry what S-0001/D-5 promises: an SPDX SBOM
           # and mode=max provenance. Counting attestation manifests is not
           # enough -- BuildKit attaches min-mode provenance by default, so a
-          # bake file whose `attest` stopped applying (the row 13 failure)
+          # bake file whose `attest` stopped applying (the shorthand failure)
           # still yields one per platform. Only max records `buildConfig`.
           #
           # The dry run then prints the index that would be pushed. It must hold
@@ -320,7 +320,7 @@ jobs:
             >>"${GITHUB_OUTPUT}"
           echo "published: ${targets}"
 
-  # RFC 0010: a signed SLSA provenance statement for each promoted index,
+  # S-0005: a signed SLSA provenance statement for each promoted index,
   # bound to this workflow's identity through Sigstore, so a consumer can check
   # that a digest it is about to pin came from publish.yaml on main. It sits
   # beside the unsigned BuildKit attestations and replaces nothing.
@@ -365,7 +365,7 @@ jobs:
           create-storage-record: false
 
   # Scheduled failures are the silent ones -- nobody watches a cron the way
-  # they watch their own push -- and decision 12 makes this notification a
+  # they watch their own push -- and S-0001/D-8 makes this notification a
   # precondition for the schedule existing at all.
   #
   # One reused issue, not one per week: fifty-two open issues describing the

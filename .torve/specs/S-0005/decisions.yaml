@@ -1,0 +1,76 @@
+# yaml-language-server: $schema=../../schemas/decisions.json
+decisions:
+  - id: D-1
+    grade: ASSUMED
+    text: >-
+      The trusted signer is the workflow `morzecrew/platform-images/.github/workflows/publish.yaml`
+      on `refs/heads/main`. The root README gives the `gh attestation verify` command
+      that checks it.
+    paths: [.github/workflows/publish.yaml, README.md]
+    consequence: >-
+      a digest built anywhere else fails a consumer's check, and renaming the workflow
+      or moving promotion breaks every consumer's check at once
+    rationale: >-
+      dotdash is the consumer with an identity policy, and it pins by digest (#134).
+      The path is the identity, so changing it is a change to every consumer.
+  - id: D-2
+    grade: ASSUMED
+    text: >-
+      The subject is each target's index digest, the reference a consumer pins. Per-platform
+      manifests are not attested.
+    paths: [.github/workflows/publish.yaml]
+    consequence: >-
+      the statement covers what a bundle pins, and a per-platform digest carries none
+    rationale: >-
+      No consumer resolves a platform manifest by digest.
+  - id: D-3
+    grade: ASSUMED
+    text: >-
+      The BuildKit provenance and SBOM are unchanged, and are still described as unsigned.
+      The signed statement sits beside them and replaces nothing.
+    paths: [README.md]
+    consequence: >-
+      nobody reads the BuildKit attestations as a signature
+    rationale: >-
+      They describe each platform's build, which S-0001/D-6's promotion already verifies.
+    cites: [S-0001/D-5]
+  - id: D-4
+    grade: ASSUMED
+    text: >-
+      `attest` is a job of its own after `promote`, one leg per target. It is the only
+      job holding `id-token: write`. A failed leg fails the run, and a scheduled run
+      reports it.
+    paths: [.github/workflows/publish.yaml]
+    consequence: >-
+      an attestation failure leaves the tag on an unattested index, which a verifying
+      consumer refuses until the failed jobs are re-run
+    rationale: >-
+      The index has no digest before `imagetools create` pushes it, and the signing
+      identity stays off the job that builds and pushes.
+    cites: [S-0001/D-8]
+  - id: D-5
+    grade: ASSUMED
+    text: >-
+      The bundle is stored in this repository's attestations, and pushed to GHCR as
+      a referrer of the index. No artifact storage record is created.
+    paths: [.github/workflows/publish.yaml]
+    consequence: >-
+      the weekly cleanup keeps each bundle as its index's child, and deletes it only
+      with the index
+    rationale: >-
+      `dataaxiom/ghcr-cleanup-action` resolves referrers as children. A storage record
+      feeds the organization's Linked Artifacts page, which nothing reads, and needs
+      `artifact-metadata: write`.
+  - id: D-6
+    grade: ASSUMED
+    text: >-
+      Signing uses the public-good Sigstore instance, as a public repository does.
+      Digests published before the attest job existed stay unattested.
+    paths: [.github/workflows/publish.yaml]
+    consequence: >-
+      anyone can verify a statement, and a consumer's check starts with the first publish
+      after the change
+    rationale: >-
+      A private repository would sign with GitHub's own instance, which changes what
+      a consumer verifies. A statement signed now for an older digest would claim a
+      build that the signing run did not perform.

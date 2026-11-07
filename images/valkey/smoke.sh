@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Smoke test for the valkey image. See RFC 0006 §6 and RFC 0002 §5.5.
+# Smoke test for the valkey image. See S-0001/D-20 and S-0001/D-11.
 #
 # Half of these assert that the container *refuses to start*. That is the point
-# of the image: the two §5.3 combinations lose data silently, so the test that
+# of the image: the two unsafe combinations lose data silently, so the test that
 # matters is that they are rejected loudly rather than accepted.
 set -euo pipefail
 IMAGE="${1:?usage: smoke.sh <image-ref>}"
@@ -102,7 +102,7 @@ echo "maxmemory-policy: ${policy}"
 
 # CONFIG GET already worked above, which is the assertion: several client
 # libraries call it at connect time to warn about eviction, and disabling it
-# breaks them (RFC 0006 decision 8).
+# breaks them (S-0001/D-20).
 echo "CONFIG GET: works"
 
 for cmd in FLUSHALL FLUSHDB KEYS; do
@@ -195,7 +195,7 @@ expect_refusal "an unreadable VALKEY_PASSWORD_FILE" "not readable" \
 expect_refusal "a VALKEY_PASSWORD_FILE that is a directory" "not a regular file" \
 	-e VALKEY_PASSWORD=fallback -e VALKEY_PASSWORD_FILE=/etc
 
-# --- 6. the two §5.3 refusals ----------------------------------------------
+# --- 6. the two persistence refusals ---------------------------------------
 
 expect_refusal "persistence with an evicting policy" "contradict each other" \
 	-e VALKEY_PERSISTENCE=rdb -e VALKEY_MAXMEMORY_POLICY=allkeys-lru
@@ -203,7 +203,7 @@ expect_refusal "persistence with an evicting policy" "contradict each other" \
 expect_refusal "persistence without an explicit policy" "explicitly" \
 	-e VALKEY_PERSISTENCE=rdb
 
-# --- 7. channel collision (RFC 0001 decision 11) ---------------------------
+# --- 7. channel collision (S-0001/D-14) ------------------------------------
 
 expect_refusal "curated and passthrough setting the same key" "both set it" \
 	-e VALKEY_MAXMEMORY_POLICY=noeviction -e VALKEY_CONF__maxmemory_policy=noeviction
@@ -263,7 +263,7 @@ wait_ready "${CTR}"
 	{ echo "FAIL: a mounted fragment did not reach the server"; exit 1; }
 echo "mounted fragment: applied"
 
-# Per directive, not one "included verbatim" line: RFC 0001 decision 13
+# Per directive, not one "included verbatim" line: S-0001/D-15
 # requires real attribution from an image that assembles enumerable layers.
 case "$("${ENGINE}" logs "${CTR}" 2>&1)" in
 *"source=mounted"*"maxmemory-samples = 9"*) echo "mounted fragment: attributed per directive" ;;
@@ -281,7 +281,7 @@ echo "precedence: env beats mounted"
 
 # A fragment can enable persistence without going through VALKEY_PERSISTENCE.
 # The refusal is checked against the assembled config, so this is caught too --
-# otherwise decision 6 would hold only for the environment channel.
+# otherwise S-0001/D-20 would hold only for the environment channel.
 mkdir -p "${WORK}/bypass"
 printf 'appendonly yes\n' >"${WORK}/bypass/60-persist.conf"
 # The fragment sets appendonly with no policy anywhere, so the missing-policy
@@ -296,7 +296,7 @@ expect_refusal "a fragment enabling persistence under an evicting policy" \
 
 # --- 12. protected-mode, which is the behaviour most likely to surprise ----
 
-# RFC 0006 §5.4 requires the bind behaviour be stated rather than inherited
+# The bind behaviour must be stated rather than inherited
 # silently, so it is asserted rather than described: with no password, a
 # connection from anywhere but loopback is refused.
 #
@@ -327,7 +327,7 @@ case "${peer}" in
 esac
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
-# --- 13. a typo'd curated name is warned about (RFC 0001 decision 9) -------
+# --- 13. a typo'd curated name is warned about (S-0001/D-13) ---------------
 
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 start "${CTR}" -e VALKEY_MAXMEMROY=100mb
@@ -422,7 +422,7 @@ esac
 
 # --- 18. a runtime CONFIG REWRITE does not survive a restart --------------
 #
-# RFC 0006 §10 question 4. `CONFIG SET` changes the running server only, but
+# `CONFIG SET` changes the running server only, but
 # `CONFIG REWRITE` writes that change into the generated valkey.conf -- so a
 # persistence channel does exist, and it outranks nothing only because the
 # entrypoint regenerates the file from the environment on every start.
@@ -433,7 +433,7 @@ esac
 #
 # This is the property postgres does not have: ALTER SYSTEM writes into PGDATA,
 # which is a mounted volume the entrypoint must not overwrite. The difference is
-# where the file lives, not what either RFC decided.
+# where the file lives, not what either design decided.
 
 start "${CTR}" -e VALKEY_MAXMEMORY=100mb
 wait_ready "${CTR}"

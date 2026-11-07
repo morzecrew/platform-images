@@ -218,7 +218,7 @@ curl -s -o /dev/null -w '%{http_code}\n' "http://localhost:8080/x?id=1'%20OR%20'
 
 `PUT`, `PATCH` and `DELETE` are allowed along with CRS's own `GET HEAD POST OPTIONS`; any other method gets `403` (rule 911100).
 
-**Upgrading.** Images built before [EXECUTION-LOG](../../rfcs/EXECUTION-LOG.md) D-068 did not load the CRS rules (their include named a directory that did not exist), so only `coraza.conf`'s own rules ran. An application moving to a newer tag meets CRS for the first time and should look for false positives in its own traffic, JSON bodies above all. The first images with CRS, built before D-079, also refused every `PUT`, `PATCH` and `DELETE`.
+**Upgrading.** Images built before [#69](https://github.com/morzecrew/platform-images/pull/69) (2026-10-18) did not load the CRS rules (their include named a directory that did not exist), so only `coraza.conf`'s own rules ran. An application moving to a newer tag meets CRS for the first time and should look for false positives in its own traffic, JSON bodies above all. The first images with CRS, built before [#77](https://github.com/morzecrew/platform-images/pull/77) (2026-10-20), also refused every `PUT`, `PATCH` and `DELETE`.
 
 **Detection first.** `CADDY_WAF_ENGINE=DetectionOnly` runs the same rules and blocks nothing: a request CRS would refuse is logged, in the audit log on stdout, and passed on. Run a release that way, read what it would have refused, add the exclusions below, then go back to `On`. The startup summary shows the mode, and the entrypoint warns while it is `DetectionOnly`. A `SecRuleEngine` line in `overrides/` is ignored, with a warning: the variable is set after them.
 
@@ -263,7 +263,7 @@ RUN cp /opt/coraza/optional/ip-host.conf /opt/coraza/optional/password-fields.co
 
 Without a derived image, copy one out (`docker run --rm --entrypoint cat ghcr.io/morzecrew/caddy:2.11.7 /opt/coraza/optional/ip-host.conf`) and mount it at `/opt/coraza/overrides/ip-host.conf`. A copy on the host does not change when the image does.
 
-**An `Include` that matches no file stops the container.** Coraza would skip it with an `empty glob result` warning and run without those rules, which is how the D-068 images served with no CRS. The entrypoint checks every WAF `Include` in the adapted config, fragments included, and refuses to start naming the glob. `overrides/` ships `00-placeholder.conf` for this reason: mount single files beside it, or mount a directory holding at least one `.conf`, even a comment-only one.
+**An `Include` that matches no file stops the container.** Coraza would skip it with an `empty glob result` warning and run without those rules, which is how earlier images served with no CRS. The entrypoint checks every WAF `Include` in the adapted config, fragments included, and refuses to start naming the glob. `overrides/` ships `00-placeholder.conf` for this reason: mount single files beside it, or mount a directory holding at least one `.conf`, even a comment-only one.
 
 **The body limit** is `CADDY_REQUEST_BODY_MAX_SIZE`, for the WAF too. The WAF has to refuse an oversized body itself: one that runs into `request_body`'s cap while the WAF is reading it comes back as `500` rather than `413`. So the entrypoint sets the WAF's limit from the variable, and prints it before Caddy starts:
 

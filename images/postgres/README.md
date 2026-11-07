@@ -20,11 +20,11 @@ each image records its own set in the `io.morze.postgres.extensions` label:
 - [pgvector](https://github.com/pgvector/pgvector) — vector similarity search; `CREATE EXTENSION vector`
 
 `pg_stat_statements` is in every tag and is not listed in the label: it ships
-with the server rather than being selected (RFC 0004 decision 10).
+with the server rather than being selected (S-0001/D-19).
 
 Which extensions are selectable is [`rootfs/extensions.manifest`](./rootfs/extensions.manifest),
 and a name absent from it fails the build rather than quietly producing a smaller
-image. Three variants including the default is the ceiling (RFC 0004 decision 7)
+image. Three variants including the default is the ceiling (S-0001/D-19)
 — each is a full uncached rebuild every week, so a fourth request is a
 conversation, not a line.
 
@@ -60,7 +60,7 @@ The image uses a custom entrypoint (`rootfs/entrypoint.sh` → `/usr/local/bin/e
 
 `PG_CONF_STRICT` and `PG_CONF_ALLOWLIST` are accepted as aliases for the two
 control variables above, because they are the names the shared contract uses and
-the ones the helper's own messages name (RFC 0001 decision 10 keeps the longer
+the ones the helper's own messages name (S-0001/D-13 keeps the longer
 spellings as this image's published surface). Setting both spellings of one
 control to **different** values refuses at startup rather than picking a winner.
 
@@ -127,7 +127,7 @@ already reads `POSTGRES_PASSWORD_FILE` and upstream's other `_FILE` variables.
 One difference from the [repo's secrets rule](../README.md#secrets): setting
 both `POSTGRES_PASSWORD` and `POSTGRES_PASSWORD_FILE` is refused at startup
 rather than letting the file win. The names are upstream's, so upstream's rule
-stands (EXECUTION-LOG A-21).
+stands (S-0001/D-16).
 
 ### The startup summary
 

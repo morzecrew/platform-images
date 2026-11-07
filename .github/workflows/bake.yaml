@@ -59,7 +59,7 @@ jobs:
 
       # Driven by targets, not by directories. Iterating images/*/smoke.sh tests
       # one image per directory, which silently skips any target sharing a
-      # directory with another -- every RFC 0004 extension variant. A target's
+      # directory with another -- every postgres extension variant. A target's
       # context *is* its image directory, and a variant inherits it, so
       # `bake --print` already answers "which script tests this target" with no
       # naming convention to get wrong. publish.yaml resolves it the same way.
@@ -168,10 +168,11 @@ jobs:
             | python3 -c "import json,sys; print(json.load(sys.stdin)['target']['${TARGET}']['tags'][0])")"
           bash "${script}" "${ref}"
 
-      # RFC 0004 §6's build-mechanism tests. They cannot live in smoke.sh, which
-      # gets one built image: two assert that a bad PG_EXTENSIONS *fails the
-      # build*, and the third needs an image without cron, which no shipped
-      # variant is. §6 calls that one the test that must never be skipped.
+      # The extension mechanism's build tests (S-0001/D-19). They cannot live
+      # in smoke.sh, which gets one built image: two assert that a bad
+      # PG_EXTENSIONS *fails the build*, and the third needs an image without
+      # cron, which no shipped variant is. That one is the test that must never
+      # be skipped.
       #
       # Two of the three cost nothing -- the validation they exercise happens in
       # the first RUN layer, so they build with type=cacheonly and no exporter.
@@ -180,7 +181,7 @@ jobs:
         if: matrix.target == 'postgres'
         run: bash images/postgres/test-extensions.sh
 
-      # RFC 0009 §6's battery for build-js-app. Same reason it cannot live in
+      # build-js-app's battery (S-0001/D-21). Same reason it cannot live in
       # smoke.sh: it needs fixture projects, builds that must *fail*, and a
       # second image to serve the result. The script builds its own npm-builder.
       #
