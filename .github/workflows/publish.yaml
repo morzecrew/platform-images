@@ -217,6 +217,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     name: Promote
+    outputs:
+      subjects: ${{ steps.promote.outputs.subjects }}
 
     steps:
       - name: Checkout code
@@ -243,6 +245,7 @@ jobs:
       # only run_attempt does -- and a re-run rebuilds from moved apt/base
       # state, so without it a second attempt repoints a tag called immutable.
       - name: Promote
+        id: promote
         run: |
           set -euo pipefail
 
@@ -294,6 +297,7 @@ jobs:
             SOURCES["${t}"]="${refs[*]}"
           done
 
+          subjects=()
           for t in ${targets}; do
             mapfile -t tags < <(printf '%s' "${plan}" | python3 -c \
               "import json,sys; print('\n'.join(json.load(sys.stdin)['target']['${t}']['tags']))")
@@ -302,10 +306,63 @@ jobs:
             read -ra refs <<<"${SOURCES[${t}]}"
             echo "::group::promote ${t} -> ${tags[*]}"
             docker buildx imagetools create "${args[@]}" "${refs[@]}"
+            # The index every tag above now names: what a consumer pins, so
+            # what the attest job signs. Nothing else moves these tags while
+            # this run holds the ghcr-mutations group.
+            digest="$(docker buildx imagetools inspect "${tags[0]}" --format '{{.Manifest.Digest}}')"
+            [[ "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::${t}: index digest '${digest}'"; exit 1; }
+            subjects+=("${t} ${tags[0]%:*} ${digest}")
             echo "::endgroup::"
           done
 
+          printf 'subjects=%s\n' "$(printf '%s\n' "${subjects[@]}" | python3 -c \
+            'import json,sys; print(json.dumps([dict(zip(("target", "name", "digest"), l.split())) for l in sys.stdin]))')" \
+            >>"${GITHUB_OUTPUT}"
           echo "published: ${targets}"
+
+  # RFC 0010: a signed SLSA provenance statement for each promoted index,
+  # bound to this workflow's identity through Sigstore, so a consumer can check
+  # that a digest it is about to pin came from publish.yaml on main. It sits
+  # beside the unsigned BuildKit attestations and replaces nothing.
+  #
+  # A job of its own because the action signs one subject per call, and only
+  # this job holds id-token: write. It runs after the tags move, since the
+  # index has no digest before `imagetools create` pushes it. A failure fails
+  # the run, and a consumer verifying the digest refuses it until a re-run of
+  # the failed jobs attests it.
+  attest:
+    needs: promote
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.promote.outputs.subjects) }}
+    runs-on: ubuntu-latest
+    name: Attest ${{ matrix.target }}
+    # Replaces the workflow's set for this job: no issues: write here.
+    permissions:
+      contents: read
+      packages: write # push-to-registry writes the bundle into the package
+      id-token: write # the OIDC token Sigstore certifies the signing key against
+      attestations: write # the bundle is also stored in this repository's attestations
+
+    steps:
+      - name: Log in to GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "${GH_TOKEN}" | docker login ghcr.io -u dummy --password-stdin
+
+      # push-to-registry stores the bundle in GHCR as a referrer of the index,
+      # which cleanup-images keeps as the index's child, as well as in this
+      # repository's attestations, which `gh attestation verify` reads by default.
+      - name: Attest the index
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ matrix.name }}
+          subject-digest: ${{ matrix.digest }}
+          push-to-registry: true
+          # A storage record feeds the organization's Linked Artifacts page,
+          # which nothing here reads, and needs artifact-metadata: write.
+          create-storage-record: false
 
   # Scheduled failures are the silent ones -- nobody watches a cron the way
   # they watch their own push -- and decision 12 makes this notification a
@@ -314,7 +371,7 @@ jobs:
   # One reused issue, not one per week: fifty-two open issues describing the
   # same broken rebuild is a mailing list, not a signal.
   report-failure:
-    needs: [build, promote]
+    needs: [build, promote, attest]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     name: Report scheduled rebuild failure

@@ -4,7 +4,7 @@ Design proposals for **Morze :: Platform Images**.
 
 ## Allocating a number
 
-The next free number is **0010**. Before creating an RFC, glance at the table
+The next free number is **0011**. Before creating an RFC, glance at the table
 below (or `ls` this directory) and take the next unused integer — numbers
 collide when minted in parallel. Update this table in the same change.
 
@@ -24,6 +24,7 @@ number in the filename in sync.
 | [0007](0007-clickhouse-image.md) | ClickHouse image | 📝 Draft | Upstream ClickHouse assumes a dedicated machine; YAML overlays with `from_env`, container-sane memory and cache defaults, a limited default user profile, and a maintained diff from upstream. |
 | [0008](0008-javascript-builder-and-distroless-runtime-pair.md) | JavaScript builder and distroless runtime pair | ❌ Superseded | Mirroring `uv-builder`/`python-distroless` for JS: which package manager the builder is named for, and one bake variable coupling builder and runtime majors so they cannot drift. |
 | [0009](0009-javascript-static-asset-builder.md) | JavaScript static-asset builder | 🚧 In progress | Five projects each wrote their own Node build stage and diverged; one builder image emitting static assets to a known path, with the published `caddy` image as the runtime. |
+| [0010](0010-signed-build-provenance-for-published-images.md) | Signed build provenance for published images | 🚧 In progress | A pinned digest cannot show which workflow built it; a Sigstore-signed provenance attestation on each promoted index, and the workflow identity a consumer verifies it against. |
 
 Departures found while executing these designs are recorded in
 [EXECUTION-LOG.md](EXECUTION-LOG.md), which is not an RFC and carries no number.

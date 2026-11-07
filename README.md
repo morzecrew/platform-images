@@ -80,15 +80,32 @@ than a rebuild that ought to be equivalent.
 
 ### Attestations
 
-Images carry max-mode [SLSA provenance](https://slsa.dev/) and an SBOM:
+Images carry max-mode [SLSA provenance](https://slsa.dev/) and an SBOM from
+BuildKit:
 
 ```bash
 docker buildx imagetools inspect ghcr.io/morzecrew/postgres:18.6
 ```
 
 These are **unsigned**. They record what the build did and are evidence, not
-proof — anyone with push access to this repository could produce them. Signing
-is a separate decision with its own identity policy and is not in place yet.
+proof — anyone with push access to this repository could produce them.
+
+Each published index also carries a **signed** SLSA provenance statement: a
+GitHub artifact attestation, signed through Sigstore for `publish.yaml` on
+`main` ([RFC 0010](rfcs/0010-signed-build-provenance-for-published-images.md)).
+A digest pushed any other way has none. Check the digest you are about to pin:
+
+```bash
+gh attestation verify oci://ghcr.io/morzecrew/xray@sha256:… \
+  --owner morzecrew \
+  --signer-workflow morzecrew/platform-images/.github/workflows/publish.yaml \
+  --source-ref refs/heads/main
+```
+
+It covers the index digest, the one you pin, not the per-platform manifests.
+It proves where the digest came from, not that the code was sound: anyone who
+can merge to `main` changes what the workflow builds. Digests published before
+it was added carry no signed statement, and cannot be given one afterwards.
 
 Build arguments are recorded in max-mode provenance, so never pass a secret as
 one.

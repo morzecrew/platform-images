@@ -154,3 +154,35 @@ amendments:
       one `<uuid> [name]` per line, and adds no expression or second syntax. An id
       must be a canonical UUID, because Xray maps any other short string to a UUIDv5
       and a typo would lock its device out silently (#130).
+  - id: A-6
+    at: '2026-11-07T09:40:02Z'
+    title: >-
+      Each promoted index carries a signed provenance statement
+    changes:
+      - subject: D-5
+        field: paths
+        before: [docker-bake.hcl, README.md]
+        after: [docker-bake.hcl, README.md, .github/workflows/publish.yaml]
+      - subject: D-5
+        field: text
+        before: >-
+          Every target inherits `_attested`, written in list form, `attest = ["type=provenance,mode=max",
+          "type=sbom"]`, never in the shorthand. The attestations are described everywhere
+          as unsigned evidence.
+        after: >-
+          Every target inherits `_attested`, written in list form, `attest = ["type=provenance,mode=max",
+          "type=sbom"]`, never in the shorthand. Those attestations are described
+          everywhere as unsigned evidence. The signed statement is a separate GitHub
+          artifact attestation on each promoted index digest, bound to `publish.yaml`
+          on `main` (RFC 0010).
+      - subject: D-5
+        field: fingerprint
+        after: eae5eef2889a1412/fbfb0ffcac06f144
+    md: >-
+      dotdash pins the xray index by digest, and Renovate moves that pin every week.
+      Nothing in such a pull request shows that the new digest came from this repository's
+      publish run, and RFC 0002 §8 left signing for an RFC with a consumer's identity
+      policy. RFC 0010 is that RFC (#134): an `attest` job signs each promoted index
+      through Sigstore for `publish.yaml` on `main`. The BuildKit attestations this
+      row governs are unchanged and still unsigned, so the row now says which attestations
+      it means and names the workflow that carries the signed one.

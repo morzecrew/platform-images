@@ -18,7 +18,10 @@
   phases have shipped and §6 passes against GHCR; both are now true, so the
   status is no longer waiting on anything this repo controls. Signing remains
   out of scope by decision 4 and §8, which is a separate RFC rather than an
-  unfinished part of this one.
+  unfinished part of this one. That RFC is
+  [RFC 0010](0010-signed-build-provenance-for-published-images.md) (#134): a
+  signed statement on each index, beside this RFC's attestations, which stay
+  unsigned.
 - **Scope:** What a published `ghcr.io/morzecrew/*` tag guarantees about itself.
   Covers the OCI label set in [docker-bake.hcl](../docker-bake.hcl), buildx
   provenance and SBOM attestations, a stated tag-mutability policy with an
