@@ -65,7 +65,7 @@ jobs:
   # `images/<target>/smoke.sh` does not exist for it and the old check refused
   # every variant on sight.
   plan:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     name: Plan
     outputs:
       targets: ${{ steps.targets.outputs.targets }}

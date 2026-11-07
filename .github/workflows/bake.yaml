@@ -30,7 +30,7 @@ jobs:
   # a broken helper would otherwise surface as a container that will not start.
   # None of them depends on the platform, so they run once.
   plan:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     name: Plan and check
     outputs:
       targets: ${{ steps.targets.outputs.targets }}
