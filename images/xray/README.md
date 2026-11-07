@@ -72,6 +72,7 @@ of these. Everything else in the config stays as written.
 |---|---|
 | `{"$file": "/abs/path"}` | the file's content as a JSON string, minus one trailing newline |
 | `{"$vlessDecryption": "/abs/path"}` | the VLESS Encryption server key derived from the seed in the file (see below) |
+| `{"$vlessClients": "/abs/path"}` | a VLESS inbound's `clients` array, one client per line of the file (see below) |
 
 ```json
 "settings": {
@@ -104,10 +105,11 @@ file, the JSON path and the referenced path, never a value.
   file (a directory counts: Compose leaves one where a secret's source file is
   missing), over 64 KiB, not UTF-8, or holding a NUL byte. These are the
   checks the shared `_FILE` contract makes.
-- An object holding `$file` or `$vlessDecryption` and any other key, or a path
-  that is not an absolute path in a string. A near miss would otherwise reach
-  Xray as a literal.
+- An object holding `$file`, `$vlessDecryption` or `$vlessClients` and any
+  other key, or a path that is not an absolute path in a string. A near miss
+  would otherwise reach Xray as a literal.
 - A seed file that is not exactly 128 hex characters.
+- A client list with a line it refuses (see below).
 - Any file in `XRAY_SOURCE_DIR` that is not a `.json` file, such as `.yaml`,
   `.toml` or `.jsonc`. Xray's `-confdir` would read those too, and nothing
   would have resolved them.
@@ -120,6 +122,53 @@ file, the JSON path and the referenced path, never a value.
 - A config that `xray run -test` rejects. Xray's message is printed with every
   resolved value replaced by `<redacted>`, because Xray quotes the value it
   rejects (`invalid UUID: <the id>`).
+
+## One VLESS client per device
+
+`{"$vlessClients": "/run/secrets/vless_clients"}` resolves to a `clients`
+array, so each device has its own id and one is revoked by deleting its line.
+The file is UTF-8 text, one client per line:
+
+```text
+# <uuid> [name]
+3f2c1f0e-8a4b-4c1d-9e2f-0a1b2c3d4e5f
+6b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e phone
+```
+
+```json
+[{"id": "3f2c1f0e-8a4b-4c1d-9e2f-0a1b2c3d4e5f"}, {"id": "6b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e", "email": "phone"}]
+```
+
+- The id and the optional name are separated by spaces or tabs. Whitespace
+  around them, blank lines and lines starting with `#` are ignored.
+- The id is lower-cased. The name becomes `email`, which Xray shows as the
+  user's label in its logs and stats.
+- A single bare UUID, as morzer's `uuid` generator writes one, is a list of one.
+- The clients carry no `flow`. Set the inbound's `settings.flow`, which Xray
+  gives every client without its own, so one file serves a REALITY + Vision
+  inbound and an XHTTP one:
+
+```json
+"settings": {
+  "clients": {"$vlessClients": "/run/secrets/vless_clients"},
+  "flow": "xtls-rprx-vision",
+  "decryption": "none"
+}
+```
+
+Each of these exits 78. The message names the line, never what is on it:
+
+- An id that is not a UUID written as 8-4-4-4-12 hex digits. Xray itself maps
+  any other string of 1 to 30 bytes to a UUIDv5, so a typo would become a
+  different id that looks valid and locks its device out.
+- A name that is not 1 to 64 of `A-Z a-z 0-9 . _ @ + -`.
+- A line with more than two fields.
+- An id or a name that appears twice, ignoring case. Xray compares emails
+  ignoring case and refuses the second.
+- No client at all once comments and blank lines are skipped.
+
+The summary shows the count, not the ids, and the ids are redacted from
+`xray run -test` output like every other resolved value.
 
 ## VLESS Encryption from one seed
 
@@ -227,6 +276,7 @@ never the value:
 [envconf]   source=config         /etc/xray/10-xray.json
 [envconf]   source=file           inbounds[0].settings.clients[0].id <- /run/secrets/vless_uuid   (/etc/xray/10-xray.json)
 [envconf]   source=file           inbounds[0].settings.decryption <- $vlessDecryption /run/secrets/vless_seed   (/etc/xray/10-xray.json)
+[envconf]   source=file           inbounds[1].settings.clients <- $vlessClients /run/secrets/vless_clients (2 clients)   (/etc/xray/10-xray.json)
 [envconf] precedence: image default < environment
 ```
 

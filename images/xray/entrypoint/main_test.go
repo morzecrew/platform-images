@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -41,8 +42,8 @@ func TestResolveReplacesReferencesAndNothingElse(t *testing.T) {
 		t.Errorf("resolved\n got %s\nwant %s", c.out, want)
 	}
 	wantRefs := []ref{
-		{"inbounds[0].settings.clients[0].id", "$file", uuid},
-		{"inbounds[0].settings.decryption", "$file", key},
+		{"inbounds[0].settings.clients[0].id", "$file", uuid, ""},
+		{"inbounds[0].settings.decryption", "$file", key, ""},
 	}
 	if len(c.refs) != 2 || c.refs[0] != wantRefs[0] || c.refs[1] != wantRefs[1] {
 		t.Errorf("refs = %v, want %v", c.refs, wantRefs)
@@ -175,7 +176,7 @@ func TestRedact(t *testing.T) {
 
 func TestSummaryNamesPathsNotValues(t *testing.T) {
 	t.Setenv("XRAY_HEALTHCHECK_PROXY", "http://probe:pw@127.0.0.1:10809")
-	c := &config{src: "/etc/xray/10.json", refs: []ref{{"inbounds[0].settings.clients[0].id", "$file", "/run/secrets/id"}, {"inbounds[0].settings.decryption", "$vlessDecryption", "/run/secrets/seed"}}, values: []string{"the-id"}}
+	c := &config{src: "/etc/xray/10.json", refs: []ref{{"inbounds[0].settings.clients[0].id", "$file", "/run/secrets/id", ""}, {"inbounds[0].settings.decryption", "$vlessDecryption", "/run/secrets/seed", ""}, {"inbounds[1].settings.clients", "$vlessClients", "/run/secrets/clients", "(2 clients)"}}, values: []string{"the-id"}}
 	var b bytes.Buffer
 	summary(&b, "Xray 26.10.31", []*config{c})
 	out := b.String()
@@ -184,6 +185,7 @@ func TestSummaryNamesPathsNotValues(t *testing.T) {
 		"xray = Xray 26.10.31",
 		"inbounds[0].settings.clients[0].id <- /run/secrets/id   (/etc/xray/10.json)",
 		"inbounds[0].settings.decryption <- $vlessDecryption /run/secrets/seed   (/etc/xray/10.json)",
+		"inbounds[1].settings.clients <- $vlessClients /run/secrets/clients (2 clients)   (/etc/xray/10.json)",
 		"XRAY_HEALTHCHECK_PROXY = http://probe:xxxxx@127.0.0.1:10809",
 		"[envconf] precedence: image default < environment",
 	} {
@@ -287,7 +289,7 @@ func TestVlessKeysMatchUpstream(t *testing.T) {
 	if want := `{"decryption":"` + lines[0] + `"}` + "\n"; string(c.out) != want {
 		t.Errorf("resolved %s", c.out)
 	}
-	if c.refs[0] != (ref{"decryption", "$vlessDecryption", file}) || c.values[0] != lines[0] {
+	if c.refs[0] != (ref{"decryption", "$vlessDecryption", file, ""}) || c.values[0] != lines[0] {
 		t.Errorf("refs %v", c.refs)
 	}
 }
@@ -472,5 +474,77 @@ func TestClientCommandsDoNotEchoANonPath(t *testing.T) {
 		if rc != 2 || strings.Contains(out, tc.secret) || !strings.Contains(out, "not an absolute path") {
 			t.Errorf("%s %s: rc = %d, stderr %q", tc.command, tc.secret, rc, out)
 		}
+	}
+}
+
+const (
+	clientA = "3f2c1f0e-8a4b-4c1d-9e2f-0a1b2c3d4e5f"
+	clientB = "6b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e"
+)
+
+// The format from #130: comments, blank lines, spaces or tabs between the
+// fields, whitespace around them, CRLF, and an id lower-cased.
+func TestVlessClients(t *testing.T) {
+	dir := t.TempDir()
+	list := write(t, filepath.Join(dir, "clients"), "# <uuid> [name]\r\n\n  "+clientA+"  \r\n\t"+strings.ToUpper(clientB)+"\tphone\n   # "+clientA+" old-laptop\n", 0o400)
+	src := write(t, filepath.Join(dir, "c.json"), `{"inbounds": [{"settings": {"clients": {"$vlessClients": "`+list+`"}, "flow": "xtls-rprx-vision"}}]}`, 0o600)
+	c, err := resolveFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"inbounds":[{"settings":{"clients":[{"id":"` + clientA + `"},{"id":"` + clientB + `","email":"phone"}],"flow":"xtls-rprx-vision"}}]}` + "\n"
+	if string(c.out) != want {
+		t.Errorf("resolved\n got %s\nwant %s", c.out, want)
+	}
+	if len(c.refs) != 1 || c.refs[0] != (ref{"inbounds[0].settings.clients", "$vlessClients", list, "(2 clients)"}) {
+		t.Errorf("refs = %v", c.refs)
+	}
+	if !slices.Equal(c.values, []string{clientA, clientB}) {
+		t.Errorf("values to redact = %v", c.values)
+	}
+
+	// What morzer's uuid generator writes at init.
+	bare := write(t, filepath.Join(dir, "bare"), clientA+"\n", 0o400)
+	r, err := vlessClients(bare)
+	if err != nil || r.note != "(1 client)" || !slices.Equal(r.value.([]vlessClient), []vlessClient{{ID: clientA}}) {
+		t.Errorf("a bare UUID: %+v, %v", r, err)
+	}
+}
+
+func TestVlessClientsRefusals(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct{ name, content, want string }{
+		{"three fields", "# devices\n" + clientA + " phone spare\n", "line 2: 3 fields"},
+		{"not hex", clientA[:35] + "g", "line 1: the id is not a UUID"},
+		{"no dashes", strings.ReplaceAll(clientA, "-", ""), "line 1: the id is not a UUID"},
+		{"braces", "{" + clientA + "}", "line 1: the id is not a UUID"},
+		{"a URN", "urn:uuid:" + clientA, "line 1: the id is not a UUID"},
+		{"a short string Xray would map to a UUIDv5", "phone", "line 1: the id is not a UUID"},
+		{"a name with a slash", clientA + " ph/one", "line 1: the name is not 1 to 64"},
+		{"a name of 65 characters", clientA + " " + strings.Repeat("n", 65), "line 1: the name is not 1 to 64"},
+		{"a name that is not ASCII", clientA + " t\u00e9l\u00e9phone", "line 1: the name is not 1 to 64"},
+		{"the same id in another case", clientA + "\n\n" + strings.ToUpper(clientA) + " phone", "line 3: the id is the one on line 1"},
+		{"the same name in another case", clientA + " phone\n" + clientB + " Phone", "line 2: the name is the one on line 1"},
+		{"only comments", "# " + clientA + "\n\n", "lists no client"},
+		{"empty", "", "lists no client"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			list := write(t, filepath.Join(dir, "clients"), tc.content, 0o600)
+			src := write(t, filepath.Join(dir, "c.json"), `{"inbounds": [{"settings": {"clients": {"$vlessClients": "`+list+`"}}}]}`, 0o600)
+			_, err := resolveFile(src)
+			if err == nil || !strings.Contains(err.Error(), "inbounds[0].settings.clients: "+list+" "+tc.want) {
+				t.Fatalf("err = %v\nwant %q", err, tc.want)
+			}
+			for _, id := range []string{clientA, clientB, clientA[:35], strings.ToUpper(clientA)} {
+				if strings.Contains(err.Error(), id) {
+					t.Errorf("error %q carries an id", err)
+				}
+			}
+		})
+	}
+	// A name of exactly 64 characters, every allowed one included.
+	name := strings.Repeat("x", 52) + "Az09._@+-Q.Z"
+	if _, err := parseClients(clientA + " " + name); err != nil || len(name) != 64 {
+		t.Errorf("a 64-character name: %v", err)
 	}
 }
