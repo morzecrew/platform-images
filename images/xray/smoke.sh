@@ -18,12 +18,18 @@ VLESS_PORT=${BASE}
 PROBE_PORT=$((BASE + 1))
 TARGET_PORT=$((BASE + 2))
 SEED_PORT=$((BASE + 3))
+CLIENTS_PORT=$((BASE + 4))
+PROBE_A_PORT=$((BASE + 5))
+PROBE_B_PORT=$((BASE + 6))
+TLS_PORT=$((BASE + 7))
 HTTPD_PID=""
+TLSD_PID=""
 ALL_OUTPUT=""
 
 cleanup() {
 	"${ENGINE}" rm -f "${CTR}" "${CTR}-refusal" >/dev/null 2>&1 || true
 	[ -z "${HTTPD_PID}" ] || kill "${HTTPD_PID}" 2>/dev/null || true
+	[ -z "${TLSD_PID}" ] || kill "${TLSD_PID}" 2>/dev/null || true
 	rm -rf "${WORK}"
 }
 trap cleanup EXIT
@@ -67,16 +73,23 @@ RUN_ARGS=(--network host --userns keep-id:uid=65532,gid=65532)
 # - a loopback HTTP inbound for the probe, routed to a VLESS outbound that
 #   connects to the second inbound with the encryption `vless-encryption`
 #   printed for the same seed, so a 2xx from the probe proves the pair;
+# - a VLESS + REALITY inbound whose clients are a $vlessClients reference and
+#   whose flow, Vision, is the inbound's "settings.flow". Two more probe
+#   inbounds connect to it through Vision, one as each client, so a 2xx from
+#   either proves that client and the flow Xray gave it. Its REALITY target is
+#   a TLS server this script runs on loopback;
 # - a direct outbound, allowed to reach loopback, where the probe's target is.
 #   Xray's default blocks private addresses for a proxied user;
 # - geoip and geosite rules, so -test fails if Xray cannot find and load the
 #   copied geodata where it looks by default.
 #
-#   config <dir> [id-json] [seeded-decryption-json]
+#   config <dir> [id-json] [seeded-decryption-json] [clients-json]
 config() {
-	local id="${2:-}" seeded="${3:-}"
+	local id="${2:-}" seeded="${3:-}" clients="${4:-}"
 	[ -n "${id}" ] || id='{"$file": "/run/secrets/vless_uuid"}'
 	[ -n "${seeded}" ] || seeded='{"$vlessDecryption": "/run/secrets/vless_seed"}'
+	[ -n "${clients}" ] || clients='{"$vlessClients": "/run/secrets/vless_clients"}'
+	local reality_client='{"serverName": "reality.test", "password": {"$file": "/run/secrets/reality_password"}, "shortId": "", "fingerprint": "chrome"}'
 	mkdir -p "$1"
 	cat >"$1/10-xray.json" <<-EOF
 		{
@@ -89,17 +102,34 @@ config() {
 		    {"tag": "seeded", "listen": "127.0.0.1", "port": ${SEED_PORT}, "protocol": "vless",
 		     "settings": {"clients": [{"id": {"\$file": "/run/secrets/vless_uuid"}}],
 		                  "decryption": ${seeded}}},
-		    {"tag": "probe", "listen": "127.0.0.1", "port": ${PROBE_PORT}, "protocol": "http"}
+		    {"tag": "probe", "listen": "127.0.0.1", "port": ${PROBE_PORT}, "protocol": "http"},
+		    {"tag": "clients", "listen": "127.0.0.1", "port": ${CLIENTS_PORT}, "protocol": "vless",
+		     "settings": {"clients": ${clients}, "decryption": "none", "flow": "xtls-rprx-vision"},
+		     "streamSettings": {"network": "raw", "security": "reality",
+		                        "realitySettings": {"target": "127.0.0.1:${TLS_PORT}", "serverNames": ["reality.test"],
+		                                            "privateKey": {"\$file": "/run/secrets/reality_key"}, "shortIds": [""]}}},
+		    {"tag": "probe-a", "listen": "127.0.0.1", "port": ${PROBE_A_PORT}, "protocol": "http"},
+		    {"tag": "probe-b", "listen": "127.0.0.1", "port": ${PROBE_B_PORT}, "protocol": "http"}
 		  ],
 		  "outbounds": [
 		    {"tag": "direct", "protocol": "freedom", "settings": {"finalRules": [{"action": "allow"}]}},
 		    {"tag": "to-seeded", "protocol": "vless",
 		     "settings": {"vnext": [{"address": "127.0.0.1", "port": ${SEED_PORT},
 		                             "users": [{"id": {"\$file": "/run/secrets/vless_uuid"},
-		                                        "encryption": {"\$file": "/run/secrets/vless_encryption"}}]}]}}
+		                                        "encryption": {"\$file": "/run/secrets/vless_encryption"}}]}]}},
+		    {"tag": "to-a", "protocol": "vless",
+		     "settings": {"vnext": [{"address": "127.0.0.1", "port": ${CLIENTS_PORT},
+		                             "users": [{"id": {"\$file": "/run/secrets/vless_uuid"}, "encryption": "none", "flow": "xtls-rprx-vision"}]}]},
+		     "streamSettings": {"network": "raw", "security": "reality", "realitySettings": ${reality_client}}},
+		    {"tag": "to-b", "protocol": "vless",
+		     "settings": {"vnext": [{"address": "127.0.0.1", "port": ${CLIENTS_PORT},
+		                             "users": [{"id": {"\$file": "/run/secrets/vless_uuid_b"}, "encryption": "none", "flow": "xtls-rprx-vision"}]}]},
+		     "streamSettings": {"network": "raw", "security": "reality", "realitySettings": ${reality_client}}}
 		  ],
 		  "routing": {"rules": [
 		    {"inboundTag": ["probe"], "outboundTag": "to-seeded"},
+		    {"inboundTag": ["probe-a"], "outboundTag": "to-a"},
+		    {"inboundTag": ["probe-b"], "outboundTag": "to-b"},
 		    {"ip": ["geoip:private"], "outboundTag": "direct"},
 		    {"domain": ["geosite:private"], "outboundTag": "direct"}
 		  ]}
@@ -170,10 +200,22 @@ printf '%s\n' "${REALITY_KEY}" >"${WORK}/secrets/reality_key"
 printf '%s\n' "${REALITY_KEY:0:42}" >"${WORK}/secrets/reality_42"
 printf '%s\n' "${REALITY_KEY:0:42}+" >"${WORK}/secrets/reality_std"
 printf '%s\n' "${REALITY_KEY}=" >"${WORK}/secrets/reality_padded"
+ID_B="$("${ENGINE}" run --rm "${IMAGE}" uuid)"
+printf '%s\n' "${ID_B}" >"${WORK}/secrets/vless_uuid_b"
+# Two devices as an operator keeps them: a comment, a blank line, a tab, and a
+# name on the second.
+printf '# <uuid> [name]\n\n%s\n\t%s\tphone\n' "${uuid}" "${ID_B}" >"${WORK}/secrets/vless_clients"
+# Client lists section 6 refuses, each naming the line at fault.
+printf '# devices\n%s phone spare\n' "${uuid}" >"${WORK}/secrets/clients_three_fields"
+printf '%s\n%s\n' "${uuid}" "${ID_B:0:35}g" >"${WORK}/secrets/clients_not_uuid"
+printf '%s ph/one\n' "${uuid}" >"${WORK}/secrets/clients_bad_name"
+printf '%s\n\n%s phone\n' "${uuid}" "${uuid^^}" >"${WORK}/secrets/clients_same_id"
+printf '%s phone\n%s Phone\n' "${uuid}" "${ID_B}" >"${WORK}/secrets/clients_same_name"
+printf '# nobody yet\n\n' >"${WORK}/secrets/clients_none"
 chmod 0400 "${WORK}/secrets/"*
 mkdir "${WORK}/secrets/a_directory"
 touch "${WORK}/www/generate_204"
-SECRETS=("${uuid}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}")
+SECRETS=("${uuid}" "${uuid^^}" "${ID_B}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}")
 
 # client_value <command> <path>: one of the helper's client-side subcommands,
 # with the secrets mounted.
@@ -209,6 +251,9 @@ public="$("${ENGINE}" run --rm "${IMAGE}" x25519 -i "${REALITY_KEY}" | sed -n 's
 [ "${password}" = "${public}" ] ||
 	fail "reality-password printed '${password}', not the public key xray x25519 -i derives: '${public}'"
 echo "ok: reality-password is the public key xray x25519 -i derives from the private key"
+# What the REALITY clients below connect with, so a handshake also proves it.
+printf '%s\n' "${password}" >"${WORK}/secrets/reality_password"
+chmod 0400 "${WORK}/secrets/reality_password"
 for bad in reality_42 reality_std reality_padded a_directory; do
 	client_refuses reality-password "${bad}"
 done
@@ -225,6 +270,33 @@ python3 -m http.server "${TARGET_PORT}" --bind 127.0.0.1 --directory "${WORK}/ww
 HTTPD_PID=$!
 for _ in $(seq 1 50); do
 	curl -fs -o /dev/null "http://127.0.0.1:${TARGET_PORT}/" && break
+	sleep 0.2
+done
+
+# The REALITY inbound's target, which must speak TLS 1.3: a TLS server with a
+# throwaway certificate on loopback, so the test needs no internet.
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 \
+	-keyout "${WORK}/tls.key" -out "${WORK}/tls.crt" -subj /CN=reality.test \
+	-addext subjectAltName=DNS:reality.test 2>/dev/null
+python3 - "${WORK}" "${TLS_PORT}" >"${WORK}/tlsd.log" 2>&1 <<'PY' &
+import socket, ssl, sys, threading
+work, port = sys.argv[1], int(sys.argv[2])
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ctx.load_cert_chain(work + "/tls.crt", work + "/tls.key")
+ctx.set_alpn_protocols(["h2", "http/1.1"])
+srv = socket.create_server(("127.0.0.1", port))
+def serve(conn):
+    try:
+        with ctx.wrap_socket(conn, server_side=True) as tls:
+            tls.recv(1)
+    except OSError:
+        pass
+while True:
+    threading.Thread(target=serve, args=(srv.accept()[0],), daemon=True).start()
+PY
+TLSD_PID=$!
+for _ in $(seq 1 50); do
+	(: <"/dev/tcp/127.0.0.1/${TLS_PORT}") 2>/dev/null && break
 	sleep 0.2
 done
 
@@ -268,8 +340,40 @@ expect_in "XRAY_CONF__* is reported, not applied" "${logs}" \
 	"WARN: XRAY_CONF__loglevel is set, but this image has no XRAY_CONF__ passthrough channel"
 expect_in "an unknown XRAY_* name warns" "${logs}" "WARN: XRAY_SMOKE_TYPO is set but neither"
 expect_not_in "Xray's own names do not warn" "${logs}" "XRAY_LOCATION_CERT"
+expect_in "summary counts the client list" "${logs}" \
+	"inbounds[3].settings.clients <- \$vlessClients /run/secrets/vless_clients (2 clients)   (/etc/xray/10-xray.json)"
 
-# --- 4. the healthcheck -------------------------------------------------------
+# --- 4. one client per device -------------------------------------------------
+
+# via <port>: the status of a GET to the target through that probe inbound.
+via() {
+	curl --noproxy '' -s -o /dev/null -w '%{http_code}' --max-time 10 \
+		-x "http://127.0.0.1:$1" "http://127.0.0.1:${TARGET_PORT}/generate_204" || true
+}
+[ "$(via "${PROBE_A_PORT}")" = 200 ] || fail "the first client did not connect over REALITY + Vision"
+[ "$(via "${PROBE_B_PORT}")" = 200 ] || fail "the named client did not connect over REALITY + Vision"
+echo "ok: both clients in the list connect through one REALITY + Vision inbound"
+
+# Revoked by deleting its line and restarting. What is left is a bare UUID and
+# a newline, which is how morzer's uuid generator writes the file.
+rm -f "${WORK}/secrets/vless_clients"
+printf '%s\n' "${uuid}" >"${WORK}/secrets/vless_clients"
+chmod 0400 "${WORK}/secrets/vless_clients"
+"${ENGINE}" restart "${CTR}" >/dev/null
+for _ in $(seq 1 30); do
+	logs="$("${ENGINE}" logs "${CTR}" 2>&1)"
+	[ "$(printf '%s\n' "${logs}" | grep -c "Xray ${VERSION} started")" -ge 2 ] && break
+	sleep 1
+done
+ALL_OUTPUT+="${logs}"
+expect_in "a single bare UUID is a list of one" "${logs}" "/run/secrets/vless_clients (1 client)"
+code="$(via "${PROBE_B_PORT}")"
+[ "${code}" != 200 ] || fail "the revoked client still connects"
+echo "ok: the revoked client is refused (${code})"
+[ "$(via "${PROBE_A_PORT}")" = 200 ] || fail "the client left in the list no longer connects"
+echo "ok: the client left in the list still connects"
+
+# --- 5. the healthcheck -------------------------------------------------------
 
 hc() { "${ENGINE}" exec "$@" "${CTR}" /usr/local/bin/xray-entrypoint healthcheck 2>&1; }
 
@@ -297,7 +401,7 @@ expect_in "without a proxy it checks liveness and says egress was not probed" \
 
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
-# --- 5. refusals --------------------------------------------------------------
+# --- 6. refusals --------------------------------------------------------------
 
 # refuse <label> <needle> <conf-dir> [run args...]: exit 78, needle in output.
 # Bounded, so a case that starts Xray instead fails rather than hangs.
@@ -356,12 +460,26 @@ config "${WORK}/short-seed" "" '{"$vlessDecryption": "/run/secrets/seed_127"}'
 refuse "a seed of 127 hex characters" \
 	"inbounds[1].settings.decryption: /run/secrets/seed_127 does not hold a seed" "${WORK}/short-seed"
 
+# label:file:message, the message after the path. ids must not be in any.
+for case in "three fields:three_fields:line 2: 3 fields" \
+	"an id that is not a UUID:not_uuid:line 2: the id is not a UUID" \
+	"a name outside the allowed characters:bad_name:line 1: the name is not 1 to 64" \
+	"the same id twice, in another case:same_id:line 3: the id is the one on line 1" \
+	"the same name twice, in another case:same_name:line 2: the name is the one on line 1" \
+	"only comments and blank lines:none:lists no client"; do
+	label="${case%%:*}" rest="${case#*:}"
+	file="clients_${rest%%:*}" needle="${rest#*:}"
+	config "${WORK}/${file}" "" "" "{\"\$vlessClients\": \"/run/secrets/${file}\"}"
+	refuse "a client list with ${label}" \
+		"inbounds[3].settings.clients: /run/secrets/${file} ${needle}" "${WORK}/${file}"
+done
+
 # Docker's read_only. Podman's --read-only also mounts a tmpfs on /run, which
 # the image works with.
 refuse "a read-only root without a tmpfs" "XRAY_RUNTIME_DIR is /run/xray, which is not writable by uid 65532" \
 	"${WORK}/conf" --read-only --read-only-tmpfs=false
 
-# --- 6. no secret anywhere ----------------------------------------------------
+# --- 7. no secret anywhere ----------------------------------------------------
 
 for s in "${SECRETS[@]}"; do
 	case "${ALL_OUTPUT}" in

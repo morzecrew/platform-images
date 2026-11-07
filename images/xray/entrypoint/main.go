@@ -10,8 +10,9 @@
 // only reach it inside its JSON config. This replaces each JSON object that is
 // exactly {"$file": "/absolute/path"} with that file's content as a string, or
 // exactly {"$vlessDecryption": "/absolute/path"} with the VLESS Encryption
-// server key derived from the seed in that file, and changes nothing else. The
-// contract is in images/xray/README.md.
+// server key derived from the seed in that file, or exactly
+// {"$vlessClients": "/absolute/path"} with the VLESS clients that file lists,
+// and changes nothing else. The contract is in images/xray/README.md.
 package main
 
 import (
@@ -30,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -202,16 +204,33 @@ type config struct {
 	values []string // the resolved contents, so Xray's messages can be redacted
 }
 
-type ref struct{ path, kind, file string }
+// note follows the path in the summary, as a count where the value is a list.
+type ref struct{ path, kind, file, note string }
+
+// What a reference resolves to.
+type resolution struct {
+	value   any      // replaces the reference
+	secrets []string // redacted from Xray's output
+	note    string
+}
 
 // The reference forms, in the order they are looked for: an object whose one
 // key is one of these, naming an absolute path.
 var references = []struct {
 	key     string
-	resolve func(file string) (string, error)
+	resolve func(file string) (resolution, error)
 }{
-	{"$file", readSecret},
-	{"$vlessDecryption", vlessDecryption},
+	{"$file", secret(readSecret)},
+	{"$vlessDecryption", secret(vlessDecryption)},
+	{"$vlessClients", vlessClients},
+}
+
+// A reference that resolves to one string, which is itself the secret.
+func secret(read func(string) (string, error)) func(string) (resolution, error) {
+	return func(file string) (resolution, error) {
+		s, err := read(file)
+		return resolution{value: s, secrets: []string{s}}, err
+	}
 }
 
 func resolveDir(dir string) ([]*config, error) {
@@ -310,7 +329,7 @@ func (c *config) resolve(v any, path string) (any, error) {
 
 // A near miss is an error rather than a literal, or a typo would reach Xray
 // as an object it rejects with a message about some other field, or accepts.
-func (c *config) reference(obj map[string]any, key string, target any, resolve func(string) (string, error), path string) (any, error) {
+func (c *config) reference(obj map[string]any, key string, target any, resolve func(string) (resolution, error), path string) (any, error) {
 	if len(obj) != 1 {
 		var others []string
 		for k := range obj {
@@ -325,13 +344,13 @@ func (c *config) reference(obj map[string]any, key string, target any, resolve f
 	if !ok || !filepath.IsAbs(file) {
 		return nil, c.errorf(path, `%q must be an absolute path, as a string`, key)
 	}
-	value, err := resolve(file)
+	r, err := resolve(file)
 	if err != nil {
 		return nil, c.errorf(path, "%s %v", file, err)
 	}
-	c.refs = append(c.refs, ref{path, key, file})
-	c.values = append(c.values, value)
-	return value, nil
+	c.refs = append(c.refs, ref{path, key, file, r.note})
+	c.values = append(c.values, r.secrets...)
+	return r.value, nil
 }
 
 // Names the file, the JSON path and the referenced path; never a value.
@@ -447,6 +466,82 @@ func realityPassword(name string) (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes()), nil
+}
+
+// One VLESS client as Xray's inbound takes it. Xray shows the email as the
+// user's label in its logs and stats.
+type vlessClient struct {
+	ID    string `json:"id"`
+	Email string `json:"email,omitempty"`
+}
+
+var (
+	uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	nameRE = regexp.MustCompile(`^[A-Za-z0-9._@+-]{1,64}$`)
+)
+
+// A client list holds one client per line, "<uuid> [name]", so one device is
+// revoked by deleting its line and the others keep their ids. The flow is the
+// inbound's "settings.flow", which Xray gives every client without its own.
+func vlessClients(name string) (resolution, error) {
+	s, err := readSecret(name)
+	if err != nil {
+		return resolution{}, err
+	}
+	clients, err := parseClients(s)
+	if err != nil {
+		return resolution{}, err
+	}
+	r := resolution{value: clients, note: fmt.Sprintf("(%d clients)", len(clients))}
+	if len(clients) == 1 {
+		r.note = "(1 client)"
+	}
+	for _, c := range clients {
+		r.secrets = append(r.secrets, c.ID)
+	}
+	return r, nil
+}
+
+// The errors name a line, never what is on it. An id must be a UUID as
+// written: Xray maps any other string of 1 to 30 bytes to a UUIDv5, so a typo
+// would become a valid id that locks its device out. Names are compared
+// ignoring case, as Xray compares emails, which refuses the second.
+func parseClients(s string) ([]vlessClient, error) {
+	var clients []vlessClient
+	idLine, nameLine := map[string]int{}, map[string]int{}
+	for i, line := range strings.Split(s, "\n") {
+		n, line := i+1, strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		f := strings.Fields(line)
+		if len(f) > 2 {
+			return nil, fmt.Errorf(`line %d: %d fields, where a client is "<uuid> [name]"`, n, len(f))
+		}
+		if !uuidRE.MatchString(f[0]) {
+			return nil, fmt.Errorf("line %d: the id is not a UUID, 8-4-4-4-12 hex digits", n)
+		}
+		c := vlessClient{ID: strings.ToLower(f[0])}
+		if first, ok := idLine[c.ID]; ok {
+			return nil, fmt.Errorf("line %d: the id is the one on line %d", n, first)
+		}
+		idLine[c.ID] = n
+		if len(f) == 2 {
+			if !nameRE.MatchString(f[1]) {
+				return nil, fmt.Errorf("line %d: the name is not 1 to 64 of the characters A-Z a-z 0-9 . _ @ + -", n)
+			}
+			if first, ok := nameLine[strings.ToLower(f[1])]; ok {
+				return nil, fmt.Errorf("line %d: the name is the one on line %d, ignoring case", n, first)
+			}
+			nameLine[strings.ToLower(f[1])] = n
+			c.Email = f[1]
+		}
+		clients = append(clients, c)
+	}
+	if len(clients) == 0 {
+		return nil, errors.New("lists no client: every line is blank or a comment")
+	}
+	return clients, nil
 }
 
 // The commands that print what a client config needs from a server secret.
@@ -566,6 +661,9 @@ func summary(w io.Writer, version string, configs []*config) {
 			from := r.file
 			if r.kind != "$file" {
 				from = r.kind + " " + r.file
+			}
+			if r.note != "" {
+				from += " " + r.note
 			}
 			fmt.Fprintf(w, "[envconf]   source=%-14s %s <- %s   (%s)\n", "file", r.path, from, c.src)
 		}

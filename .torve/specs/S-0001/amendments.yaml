@@ -86,12 +86,12 @@ amendments:
     md: >-
       Xray reads no value from a file and expands no variable, so a secret reaches
       it only inside its JSON config, and its `-confdir` merge replaces an inbound
-      whole rather than patching one field. The alternative, curated `*_FILE`
-      variables rendered into generated fragments, would have made the image own
-      the inbounds' shapes. The resolver keeps what the row is for: the input is
-      valid JSON before and after, a reference replaces one whole value, and there
-      is no environment expansion, expression or second syntax. A file is checked
-      as a `_FILE` is and refused with exit 78 (#125).
+      whole rather than patching one field. The alternative, curated `*_FILE` variables
+      rendered into generated fragments, would have made the image own the inbounds'
+      shapes. The resolver keeps what the row is for: the input is valid JSON before
+      and after, a reference replaces one whole value, and there is no environment
+      expansion, expression or second syntax. A file is checked as a `_FILE` is and
+      refused with exit 78 (#125).
   - id: A-4
     at: '2026-11-06T21:01:30Z'
     title: >-
@@ -119,8 +119,38 @@ amendments:
         after: 9254330abe9927c9/482c6c960e0d6250
     md: >-
       One project, the dotdash bundle, needs Xray-core. That meets neither route,
-      as the OpenTelemetry Collector's one repository did not. The owner admitted it
-      on #125 because the fallback was a render job in the bundle, which would have
-      carried the same secret resolution without a reviewed image. The row records
-      that exception and does not open a third route: the next request with one
-      consumer still meets the rule as written.
+      as the OpenTelemetry Collector's one repository did not. The owner admitted
+      it on #125 because the fallback was a render job in the bundle, which would
+      have carried the same secret resolution without a reviewed image. The row records
+      that exception and does not open a third route: the next request with one consumer
+      still meets the rule as written.
+  - id: A-5
+    at: '2026-11-07T00:54:10Z'
+    title: xray resolves a client list from one secret file
+    changes:
+      - subject: D-18
+        field: text
+        before: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's server has none, so its entrypoint
+          replaces a JSON object that is exactly `{"$file": "<absolute path>"}` or
+          `{"$vlessDecryption": "<absolute path>"}` with the value that file yields,
+          and substitutes nothing else.
+        after: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's server has none, so its entrypoint
+          replaces a JSON object that is exactly `{"$file": "<absolute path>"}`, `{"$vlessDecryption":
+          "<absolute path>"}` or `{"$vlessClients": "<absolute path>"}` with the value
+          that file yields, and substitutes nothing else.
+      - subject: D-18
+        field: fingerprint
+        before: 94ec24b1ba2f2202/f206374b70c16778
+        after: 8a6d866ce3179170/f206374b70c16778
+    md: >-
+      dotdash wants one VLESS id per device, so that one device is revoked without
+      re-keying the others. The ids are credentials and so a secret file, which an
+      operator already edits with `morzer secret edit`. The new form keeps the row's
+      line: it replaces one whole value, here the `clients` array, from a file of
+      one `<uuid> [name]` per line, and adds no expression or second syntax. An id
+      must be a canonical UUID, because Xray maps any other short string to a UUIDv5
+      and a typo would lock its device out silently (#130).

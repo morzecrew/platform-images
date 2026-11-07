@@ -233,9 +233,10 @@ configured without `envsubst` is re-examined before it is accepted.
 
 `xray` is the one image whose server has no expansion at all: Xray reads no
 value from a file or the environment. Its entrypoint replaces a JSON object
-that is exactly `{"$file": "<absolute path>"}` with that file's content, or
+that is exactly `{"$file": "<absolute path>"}` with that file's content,
 `{"$vlessDecryption": "<absolute path>"}` with the key derived from the seed
-in it, and substitutes nothing else. The config is valid JSON before and after
+in it, or `{"$vlessClients": "<absolute path>"}` with the clients it lists, and
+substitutes nothing else. The config is valid JSON before and after
 and has no second syntax. See [its README](xray/README.md#the-config-and-file-references).
 
 See [RFC 0001](../rfcs/0001-shared-env-config-contract.md) for the reasoning and
