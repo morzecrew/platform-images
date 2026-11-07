@@ -215,6 +215,7 @@ printf '# nobody yet\n\n' >"${WORK}/secrets/clients_none"
 chmod 0400 "${WORK}/secrets/"*
 mkdir "${WORK}/secrets/a_directory"
 touch "${WORK}/www/generate_204"
+printf '203.0.113.7\n' >"${WORK}/www/ip"
 SECRETS=("${uuid}" "${uuid^^}" "${ID_B}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}")
 
 # client_value <command> <path>: one of the helper's client-side subcommands,
@@ -395,6 +396,17 @@ out="$(hc -e XRAY_HEALTHCHECK_PROXY=http://127.0.0.1:1)" || rc=$?
 [ "${rc}" = 1 ] || fail "dead proxy: healthcheck exited ${rc}: ${out}"
 echo "ok: the probe goes through the proxy (a dead one fails a reachable URL)"
 
+# #133: the body against XRAY_HEALTHCHECK_EXPECT. /ip answers with a fixed
+# address, as an IP-echo endpoint would.
+ip=(-e XRAY_HEALTHCHECK_URL="http://127.0.0.1:${TARGET_PORT}/ip")
+out="$(hc "${ip[@]}" -e XRAY_HEALTHCHECK_EXPECT='^203\.0\.113\.7\s*$')" || fail "the expected exit IP: ${out}"
+expect_in "a body matching XRAY_HEALTHCHECK_EXPECT passes" "${out}" "matches XRAY_HEALTHCHECK_EXPECT"
+rc=0
+out="$(hc "${ip[@]}" -e XRAY_HEALTHCHECK_EXPECT='^198\.51\.100\.9\s*$')" || rc=$?
+[ "${rc}" = 1 ] || fail "a changed exit IP: healthcheck exited ${rc}: ${out}"
+expect_in "a changed exit IP exits 1 and shows the body" "${out}" \
+	'does not match XRAY_HEALTHCHECK_EXPECT: "203.0.113.7\n"'
+
 out="$(hc -e XRAY_HEALTHCHECK_PROXY=)" || fail "liveness: ${out}"
 expect_in "without a proxy it checks liveness and says egress was not probed" \
 	"${out}" "egress was not probed"
@@ -473,6 +485,11 @@ for case in "three fields:three_fields:line 2: 3 fields" \
 	refuse "a client list with ${label}" \
 		"inbounds[3].settings.clients: /run/secrets/${file} ${needle}" "${WORK}/${file}"
 done
+
+# RE2 has no lookahead. Found at deployment, not as an unhealthy container.
+refuse "a healthcheck expression that does not compile" \
+	"XRAY_HEALTHCHECK_EXPECT is not a regular expression in Go's RE2 syntax" \
+	"${WORK}/conf" -e 'XRAY_HEALTHCHECK_EXPECT=^(?!10\.)'
 
 # Docker's read_only. Podman's --read-only also mounts a tmpfs on /run, which
 # the image works with.

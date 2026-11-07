@@ -206,10 +206,13 @@ func TestHealthSettings(t *testing.T) {
 		{"XRAY_HEALTHCHECK_TIMEOUT", "-1s", "not a duration"},
 		{"XRAY_HEALTHCHECK_PROXY", "127.0.0.1:10809", "XRAY_HEALTHCHECK_PROXY must be"},
 		{"XRAY_HEALTHCHECK_PROXY", "vless://127.0.0.1:443", "XRAY_HEALTHCHECK_PROXY must be"},
+		{"XRAY_HEALTHCHECK_EXPECT", `^203\.0\.113\.(7\s*$`, "XRAY_HEALTHCHECK_EXPECT is not a regular expression"},
+		// RE2 has no lookahead, which a PCRE habit reaches for.
+		{"XRAY_HEALTHCHECK_EXPECT", `^(?!10\.)`, "XRAY_HEALTHCHECK_EXPECT is not a regular expression"},
 	} {
 		t.Run(tc.name+"="+tc.value, func(t *testing.T) {
 			t.Setenv(tc.name, tc.value)
-			if _, _, _, err := healthSettings(); err == nil || !strings.Contains(err.Error(), tc.want) {
+			if _, err := healthSettings(); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v, want %q", err, tc.want)
 			}
 		})
@@ -249,6 +252,65 @@ func TestHealthcheckThroughProxy(t *testing.T) {
 	proxy.Close()
 	if rc := healthcheck(); rc != 1 {
 		t.Errorf("proxy down: rc = %d", rc)
+	}
+}
+
+// #133: with XRAY_HEALTHCHECK_EXPECT set, a 2xx passes only when the first
+// 64 KiB of the body match it, and a mismatch shows the start of the body.
+func TestHealthcheckExpect(t *testing.T) {
+	status, body := http.StatusOK, ""
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(status)
+		io.WriteString(w, body)
+	}))
+	defer proxy.Close()
+	t.Setenv("XRAY_HEALTHCHECK_URL", "http://ip.example/")
+	t.Setenv("XRAY_HEALTHCHECK_PROXY", proxy.URL)
+	t.Setenv("XRAY_HEALTHCHECK_TIMEOUT", "5s")
+	const anchored, bare = `^203\.0\.113\.7\s*$`, `203\.0\.113\.7`
+	pad := func(n int) string { return strings.Repeat(" ", n) }
+
+	for _, tc := range []struct {
+		name, expect string
+		status       int
+		body         string
+		rc           int
+		want         string
+	}{
+		{"match", anchored, 200, "203.0.113.7\n", 0, "matches XRAY_HEALTHCHECK_EXPECT"},
+		{"anchored", anchored, 200, "203.0.113.71", 1, `does not match XRAY_HEALTHCHECK_EXPECT: "203.0.113.71"`},
+		{"control characters escaped", anchored, 200, "198.51.100.9\r\n\x1b[2J", 1, `"198.51.100.9\r\n\x1b[2J"`},
+		{"excerpt of 128 bytes", anchored, 200, strings.Repeat("x", 127) + "yz", 1, `"` + strings.Repeat("x", 127) + `y"`},
+		{"match ending at 64 KiB", bare, 200, pad(maxBody-11) + "203.0.113.7", 0, "matches"},
+		{"match crossing 64 KiB", bare, 200, pad(maxBody-10) + "203.0.113.7", 1, "does not match"},
+		{"non-2xx with a matching body", anchored, 503, "203.0.113.7", 1, "503 Service Unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("XRAY_HEALTHCHECK_EXPECT", tc.expect)
+			status, body = tc.status, tc.body
+			var rc int
+			out := stderr(t, func() { rc = healthcheck() })
+			if rc != tc.rc || !strings.Contains(out, tc.want) {
+				t.Errorf("rc = %d, want %d; stderr %q, want %q", rc, tc.rc, out, tc.want)
+			}
+			if tc.status != 200 && strings.Contains(out, "XRAY_HEALTHCHECK_EXPECT") {
+				t.Errorf("the body was checked after a %d: %q", tc.status, out)
+			}
+		})
+	}
+}
+
+// Without a proxy the probe fetches nothing, so an expression would be a
+// check that silently never runs.
+func TestExpectWithoutProxyIsReported(t *testing.T) {
+	t.Setenv("XRAY_HEALTHCHECK_EXPECT", `^203\.0\.113\.7$`)
+	t.Setenv("XRAY_HEALTHCHECK_PROXY", "")
+	if out := stderr(t, warnUnknown); !strings.Contains(out, "WARN: XRAY_HEALTHCHECK_EXPECT is set, but XRAY_HEALTHCHECK_PROXY is unset") {
+		t.Errorf("stderr %q", out)
+	}
+	t.Setenv("XRAY_HEALTHCHECK_PROXY", "http://127.0.0.1:10809")
+	if out := stderr(t, warnUnknown); strings.Contains(out, "XRAY_HEALTHCHECK_EXPECT") {
+		t.Errorf("warned with a proxy set: %q", out)
 	}
 }
 
@@ -452,13 +514,18 @@ func stderr(t *testing.T, f func()) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Read while f runs: a pipe holds 64 KiB, and f would block on more.
+	out := make(chan string)
+	go func() {
+		b, _ := io.ReadAll(r)
+		out <- string(b)
+	}()
 	old := os.Stderr
 	os.Stderr = w
 	f()
 	w.Close()
 	os.Stderr = old
-	out, _ := io.ReadAll(r)
-	return string(out)
+	return <-out
 }
 
 // The secret pasted where its path belongs, as `xray x25519 -i <key>` takes
