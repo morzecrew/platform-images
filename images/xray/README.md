@@ -234,6 +234,20 @@ inbound. `http`, `https`, `socks5` and `socks5h` proxy URLs work.
 
 - A redirect counts as a failure and is not followed. A captive portal or a
   block page answers with one more often than not.
+- `XRAY_HEALTHCHECK_EXPECT` also checks where traffic leaves from. Point
+  `XRAY_HEALTHCHECK_URL` at an IP-echo endpoint and set the expression to the
+  exit IP you chose. A 2xx then passes only if the first 64 KiB of the body
+  match it, and a mismatch prints the first 128 bytes of the body, which is the
+  exit IP now in use:
+
+  ```yaml
+  XRAY_HEALTHCHECK_URL: https://api.ipify.org
+  XRAY_HEALTHCHECK_EXPECT: '^203\.0\.113\.7\s*$'
+  ```
+
+  Anchor it: unanchored, `203\.0\.113\.7` also matches `203.0.113.71`. This
+  fits a static exit IP. A rotating pool needs an ASN or country check, which
+  the image does not make.
 - With `XRAY_HEALTHCHECK_PROXY` unset, the check passes if PID 1 is Xray and
   the runtime config exists. It says on stderr that egress was not probed.
 - The image bakes no `HEALTHCHECK`, because the probe needs an inbound only
@@ -248,11 +262,12 @@ inbound. `http`, `https`, `socks5` and `socks5h` proxy URLs work.
 | `XRAY_RUNTIME_DIR` | `/run/xray` | Where the resolved config is written. Emptied on every start, so it may not be the source, hold it or sit inside it, through a symlink or otherwise. |
 | `XRAY_HEALTHCHECK_URL` | `https://www.gstatic.com/generate_204` | What the probe requests. `http` or `https`. |
 | `XRAY_HEALTHCHECK_PROXY` | unset | The loopback inbound the probe goes through. Unset means liveness only. |
-| `XRAY_HEALTHCHECK_TIMEOUT` | `10s` | A Go duration. |
+| `XRAY_HEALTHCHECK_TIMEOUT` | `10s` | A Go duration. Reading the body counts against it. |
+| `XRAY_HEALTHCHECK_EXPECT` | unset | A regular expression in [Go's RE2 syntax](https://github.com/google/re2/wiki/Syntax) the response body must match. Unset means any 2xx passes and the body is not read. Ignored, with a warning at start, while `XRAY_HEALTHCHECK_PROXY` is unset. |
 
-A value set to the empty string takes the default. A bad URL or timeout
-refuses at start (78), so it is found at deployment rather than as an
-unhealthy container later.
+A value set to the empty string takes the default. A bad URL, timeout or
+expression refuses at start (78), so it is found at deployment rather than as
+an unhealthy container later.
 
 The prefix is `XRAY`. Xray's own names (`XRAY_LOCATION_ASSET`,
 `XRAY_BUF_READV`, `XRAY_JSON_STRICT` and the rest from `common/platform`) reach
@@ -272,6 +287,7 @@ never the value:
 [envconf]   source=env-or-default XRAY_HEALTHCHECK_URL = https://www.gstatic.com/generate_204
 [envconf]   source=env-or-default XRAY_HEALTHCHECK_PROXY = http://127.0.0.1:10809
 [envconf]   source=env-or-default XRAY_HEALTHCHECK_TIMEOUT = 10s
+[envconf]   source=env-or-default XRAY_HEALTHCHECK_EXPECT = (unset: any 2xx passes)
 [envconf]   source=image          xray = Xray 26.10.31 (Xray, Penetrates Everything.) Custom (go1.27.3 linux/amd64)
 [envconf]   source=config         /etc/xray/10-xray.json
 [envconf]   source=file           inbounds[0].settings.clients[0].id <- /run/secrets/vless_uuid   (/etc/xray/10-xray.json)

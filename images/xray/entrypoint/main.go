@@ -46,6 +46,8 @@ const (
 	// configuration with.
 	exConfig  = 78
 	maxSecret = 64 << 10
+	// The most of a response body XRAY_HEALTHCHECK_EXPECT is matched against.
+	maxBody = 64 << 10
 )
 
 // The image's own settings, in summary order. The Dockerfile sets the same
@@ -57,6 +59,7 @@ var curated = []struct{ name, def string }{
 	{"XRAY_HEALTHCHECK_URL", "https://www.gstatic.com/generate_204"},
 	{"XRAY_HEALTHCHECK_PROXY", ""},
 	{"XRAY_HEALTHCHECK_TIMEOUT", "10s"},
+	{"XRAY_HEALTHCHECK_EXPECT", ""},
 }
 
 // Xray's own names, from common/platform. They reach Xray untouched and are
@@ -123,7 +126,7 @@ func start(extra []string) error {
 	}
 	// Checked here as well as by the probe, so a bad value stops the
 	// deployment rather than turning into an unhealthy container later.
-	if _, _, _, err := healthSettings(); err != nil {
+	if _, err := healthSettings(); err != nil {
 		return err
 	}
 	configs, err := resolveDir(src)
@@ -193,6 +196,9 @@ func warnUnknown() {
 		default:
 			fmt.Fprintf(os.Stderr, "WARN: %s is set but neither this image nor Xray reads it. Check the spelling against images/xray/README.md.\n", name)
 		}
+	}
+	if setting("XRAY_HEALTHCHECK_EXPECT") != "" && setting("XRAY_HEALTHCHECK_PROXY") == "" {
+		fmt.Fprintln(os.Stderr, "WARN: XRAY_HEALTHCHECK_EXPECT is set, but XRAY_HEALTHCHECK_PROXY is unset, so the healthcheck fetches nothing and the expression is not checked.")
 	}
 }
 
@@ -647,6 +653,8 @@ func summary(w io.Writer, version string, configs []*config) {
 		switch {
 		case c.name == "XRAY_HEALTHCHECK_PROXY" && v == "":
 			v = "(unset: the healthcheck checks only that Xray is running)"
+		case c.name == "XRAY_HEALTHCHECK_EXPECT" && v == "":
+			v = "(unset: any 2xx passes)"
 		case strings.HasSuffix(c.name, "_URL"), strings.HasSuffix(c.name, "_PROXY"):
 			if u, err := url.Parse(v); err == nil {
 				v = u.Redacted()
@@ -671,50 +679,77 @@ func summary(w io.Writer, version string, configs []*config) {
 	fmt.Fprintln(w, "[envconf] precedence: image default < environment")
 }
 
-func healthSettings() (target, proxy *url.URL, timeout time.Duration, err error) {
-	target, err = url.Parse(setting("XRAY_HEALTHCHECK_URL"))
-	if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" {
-		return nil, nil, 0, errors.New("XRAY_HEALTHCHECK_URL must be an http or https URL")
+type health struct {
+	target, proxy *url.URL // proxy is nil when unset
+	timeout       time.Duration
+	expect        *regexp.Regexp // nil when unset
+}
+
+func healthSettings() (h health, err error) {
+	h.target, err = url.Parse(setting("XRAY_HEALTHCHECK_URL"))
+	if err != nil || (h.target.Scheme != "http" && h.target.Scheme != "https") || h.target.Host == "" {
+		return h, errors.New("XRAY_HEALTHCHECK_URL must be an http or https URL")
 	}
 	t := setting("XRAY_HEALTHCHECK_TIMEOUT")
-	if timeout, err = time.ParseDuration(t); err != nil || timeout <= 0 {
-		return nil, nil, 0, fmt.Errorf("XRAY_HEALTHCHECK_TIMEOUT is %q, which is not a duration such as 10s", t)
+	if h.timeout, err = time.ParseDuration(t); err != nil || h.timeout <= 0 {
+		return h, fmt.Errorf("XRAY_HEALTHCHECK_TIMEOUT is %q, which is not a duration such as 10s", t)
 	}
 	if p := setting("XRAY_HEALTHCHECK_PROXY"); p != "" {
-		proxy, err = url.Parse(p)
-		if err != nil || proxy.Host == "" || !slices.Contains([]string{"http", "https", "socks5", "socks5h"}, proxy.Scheme) {
-			return nil, nil, 0, errors.New("XRAY_HEALTHCHECK_PROXY must be a proxy URL such as http://127.0.0.1:10809 or socks5://127.0.0.1:10808")
+		h.proxy, err = url.Parse(p)
+		if err != nil || h.proxy.Host == "" || !slices.Contains([]string{"http", "https", "socks5", "socks5h"}, h.proxy.Scheme) {
+			return h, errors.New("XRAY_HEALTHCHECK_PROXY must be a proxy URL such as http://127.0.0.1:10809 or socks5://127.0.0.1:10808")
 		}
 	}
-	return target, proxy, timeout, nil
+	if e := setting("XRAY_HEALTHCHECK_EXPECT"); e != "" {
+		if h.expect, err = regexp.Compile(e); err != nil {
+			return h, fmt.Errorf("XRAY_HEALTHCHECK_EXPECT is not a regular expression in Go's RE2 syntax: %v", err)
+		}
+	}
+	return h, nil
 }
 
 func healthcheck() int {
-	target, proxy, timeout, err := healthSettings()
+	h, err := healthSettings()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "healthcheck:", err)
 		return 1
 	}
-	if proxy == nil {
+	if h.proxy == nil {
 		return liveness()
 	}
 	client := &http.Client{
-		Timeout:   timeout,
-		Transport: &http.Transport{Proxy: http.ProxyURL(proxy)},
+		// Covers reading the body as well as the request.
+		Timeout:   h.timeout,
+		Transport: &http.Transport{Proxy: http.ProxyURL(h.proxy)},
 		// A redirect is a captive portal or a block page as often as not, so
 		// it is the answer rather than a step towards one.
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	resp, err := client.Get(target.String())
+	resp, err := client.Get(h.target.String())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "healthcheck: GET %s through %s: %v\n", target.Redacted(), proxy.Redacted(), err)
+		fmt.Fprintf(os.Stderr, "healthcheck: GET %s through %s: %v\n", h.target.Redacted(), h.proxy.Redacted(), err)
 		return 1
 	}
-	resp.Body.Close()
-	fmt.Fprintf(os.Stderr, "healthcheck: GET %s through %s: %s\n", target.Redacted(), proxy.Redacted(), resp.Status)
+	defer resp.Body.Close()
+	fmt.Fprintf(os.Stderr, "healthcheck: GET %s through %s: %s\n", h.target.Redacted(), h.proxy.Redacted(), resp.Status)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return 1
 	}
+	if h.expect == nil {
+		return 0
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "healthcheck: reading the response body:", err)
+		return 1
+	}
+	if !h.expect.Match(body) {
+		// For an IP-echo endpoint the excerpt is the exit IP the traffic
+		// leaves from now, which is what the operator needs to see.
+		fmt.Fprintf(os.Stderr, "healthcheck: the response body does not match XRAY_HEALTHCHECK_EXPECT: %q\n", body[:min(len(body), 128)])
+		return 1
+	}
+	fmt.Fprintln(os.Stderr, "healthcheck: the response body matches XRAY_HEALTHCHECK_EXPECT")
 	return 0
 }
 
