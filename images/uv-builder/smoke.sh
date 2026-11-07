@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Smoke test for a build-stage image. See RFC 0002 §5.5.
+# Smoke test for a build-stage image. See S-0001/D-11.
 #
-# RFC 0002 §5.5 prescribes running "their entrypoint helper with a --help
-# equivalent". build-uv-app has no such flag -- it is a straight-line build
+# A build stage is not smoked with a --help
+# equivalent: build-uv-app has no such flag -- it is a straight-line build
 # script that would attempt a real sync against a project that is not there.
 # So this asserts the things a build stage can be wrong about instead:
 # the toolchain runs, the helper is present and executable, and it is valid

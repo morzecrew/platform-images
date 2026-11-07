@@ -1,12 +1,6 @@
 {
   "version": 1,
   "skills": {
-    "flag-dont-flip": {
-      "source": "morzecrew/agent-skills",
-      "sourceType": "github",
-      "skillPath": "skills/flag-dont-flip/SKILL.md",
-      "computedHash": "ec5f549919bc7d03857772d0bb64fe204f92a9aafede3b6cbe1d1872d10f85b2"
-    },
     "gitmoji-conventional": {
       "source": "morzecrew/agent-skills",
       "sourceType": "github",
@@ -30,12 +24,6 @@
       "sourceType": "github",
       "skillPath": "skills/reading-isnt-proof/SKILL.md",
       "computedHash": "fbbb0d9f4bc984c85ffb4c26eb7eb1f9ef26e90a506a6d08679a4c27add628c2"
-    },
-    "rfc-writer": {
-      "source": "morzecrew/agent-skills",
-      "sourceType": "github",
-      "skillPath": "skills/rfc-writer/SKILL.md",
-      "computedHash": "d782072d829a6a125f3b51fac5e22e5522e4a77857d78dc6e7e2a4004a6f8bb1"
     },
     "self-audit": {
       "source": "morzecrew/agent-skills",

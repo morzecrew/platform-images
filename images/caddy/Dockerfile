@@ -72,7 +72,7 @@ RUN apk add --no-cache gettext
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 COPY --from=crs /opt/coraza /opt/coraza
 
-# Named bake context, not a copy under images/caddy/ (RFC 0001 decision 6).
+# Named bake context, not a copy under images/caddy/ (S-0001/D-17).
 COPY --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 
 COPY rootfs/waf/ /opt/coraza/config/
@@ -101,7 +101,7 @@ RUN addgroup -S caddy && adduser -S -G caddy caddy \
     /config \
     /data
 
-# Canonical spelling is CADDY_<NAME> (RFC 0001 decision 1). The unprefixed
+# Canonical spelling is CADDY_<NAME> (S-0001/D-12). The unprefixed
 # names this image published first still work -- entrypoint.sh maps them and
 # warns -- but they are deliberately not ENV here: a legacy name present in
 # `environ` because the image set it is indistinguishable from one an operator

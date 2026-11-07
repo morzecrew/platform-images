@@ -3,14 +3,14 @@
 # renovate: datasource=docker depName=valkey/valkey extractVersion=^(?<version>\d+\.\d+)\.\d+-alpine$
 ARG VALKEY_VERSION=9.1
 
-# Alpine, so RFC 0001's POSIX-sh helper runs unmodified with no added bash
-# (RFC 0006 decision 9, RFC 0001 decision 7).
+# Alpine, so the shared POSIX-sh helper runs unmodified with no added bash
+# (S-0001/D-20, S-0001/D-17).
 FROM valkey/valkey:${VALKEY_VERSION}-alpine
 
 # From the `shared` named context declared in docker-bake.hcl, not a copy in
 # this directory: a target that does not declare the context cannot reference
 # it, so the failure is a build error rather than a stale duplicate drifting
-# out of sync (RFC 0001 decision 6).
+# out of sync (S-0001/D-17).
 COPY --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 
 COPY rootfs/allowlist.conf /etc/valkey/allowlist.conf
@@ -24,7 +24,7 @@ RUN chmod 0755 /usr/local/bin/valkey-entrypoint \
 
 # Mount fragments here to set directives the curated variables and the
 # passthrough allowlist do not cover. They are read after the baked defaults
-# and before the environment, which is the precedence RFC 0001 decision 3 fixes.
+# and before the environment, which is the precedence S-0001/D-15 fixes.
 VOLUME /data
 
 ENTRYPOINT ["/usr/local/bin/valkey-entrypoint"]

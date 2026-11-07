@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for the pgbouncer image. See RFC 0001 §6 and RFC 0003 §5.5.
+# Smoke test for the pgbouncer image. See S-0001/D-11.
 #
 # This image is a pooler, so it needs something to pool: a `postgres:18` sidecar
 # on a network of its own runs with scram-sha-256, which means the password the
@@ -196,7 +196,7 @@ got="$(psql_client "${PW}" postgres -c 'select current_user' 2>&1 || true)"
 	fail "a login through 6432 returned '${got}', expected the pooled user"
 
 # The plain variable is set to a value that must *not* be in force: _FILE wins
-# (RFC 0001 decision 4).
+# (S-0001/D-16).
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 start_pooler -e PGBOUNCER_DB_PASSWORD=not-the-file-password
 wait_pooler

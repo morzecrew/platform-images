@@ -1,0 +1,99 @@
+# yaml-language-server: $schema=../../schemas/document.json
+id: S-0005
+title: >-
+  Each promoted index carries signed build provenance
+kind: design
+change:
+  type: feat
+  scope: ci
+status: draft
+implementation: complete
+depends_on: [S-0001]
+informed_by: []
+supersedes: []
+superseded_by: null
+owner: Lev Litvinov
+schema_version: 4
+summary: |-
+  Each promoted image index gets a signed SLSA provenance statement. It is a GitHub artifact attestation, keyless through Sigstore and bound to `publish.yaml` on `main`.
+
+  A consumer accepts a pinned digest only if `gh attestation verify` finds such a statement for it. The BuildKit provenance and SBOM are unchanged and stay unsigned.
+motivation: |-
+  dotdash pins `ghcr.io/morzecrew/xray:<tag>@sha256:<index digest>`, and Renovate opens a pull request each time that digest moves, weekly rebuilds included. Nothing in that pull request shows that the new digest came from this repository's publish run, rather than from anyone else who can push to the package.
+
+  The smoke gate proves the image works, not where it came from. S-0001/D-5's attestations are unsigned metadata, and anyone with push access can produce them (#134).
+current_state: |-
+  - `promote` checks every leg's mode=max provenance and SPDX SBOM, then runs `imagetools create` for each target. That pushes one index per target, with every tag naming it. The BuildKit attestations are attestation manifests inside that index, and nothing signs them.
+  - `cleanup-images.yaml` runs `dataaxiom/ghcr-cleanup-action` v1.2.2. It keeps referrers as children of their subject, and deletes a `sha256-…` referrer only when its subject digest no longer exists.
+  - The repository is public, so `actions/attest` signs with the public-good Sigstore instance and records each signature in its public transparency log.
+goals: |-
+  - A consumer can check, before a pin moves, that the digest was built by `publish.yaml` on `main`.
+  - The statement covers the digest a consumer pins: the index.
+  - A digest pushed any other way carries no statement, and fails the check.
+non_goals: |-
+  - Signing the BuildKit statements. They describe each platform's build, and a consumer pins the index.
+  - Verifying in this repository. The consumer holds the policy, so the check belongs in its CI.
+design:
+  - key: attest-job
+    md: |-
+      `promote` reads each index digest right after `imagetools create`, with `imagetools inspect <first tag> --format '{{.Manifest.Digest}}'`, and refuses anything that is not `sha256:<64 hex digits>`. It emits `subjects`, a list of `{target, name, digest}`. The run holds the `ghcr-mutations` concurrency group, so nothing moves the tag in that window.
+
+      `attest` is a matrix over `subjects`, one leg per target, and the only job with `id-token: write`. Each leg logs in to GHCR and runs `actions/attest` v4.2.2 with `subject-name` set to `ghcr.io/morzecrew/<package>`, `subject-digest` set to the index digest, `push-to-registry: true` and `create-storage-record: false`. With no predicate input, the action generates SLSA build provenance.
+  - key: failure
+    md: >-
+      Attestation runs after the tags move, because the index has no digest until
+      `imagetools create` pushes it. A failed leg fails the run, and on a schedule
+      `report-failure` files its issue. Until then the tag names an unattested
+      index, which a verifying consumer refuses. Re-running the failed jobs attests
+      the same digest from `promote`'s recorded outputs. A digest attested twice
+      carries two valid statements.
+  - key: identity-policy
+    md: |-
+      A digest is trusted if it carries a provenance attestation signed for the workflow `morzecrew/platform-images/.github/workflows/publish.yaml`, on `refs/heads/main`:
+
+      ```sh
+      gh attestation verify oci://ghcr.io/morzecrew/xray@sha256:… \
+        --owner morzecrew \
+        --signer-workflow morzecrew/platform-images/.github/workflows/publish.yaml \
+        --source-ref refs/heads/main
+      ```
+
+      `publish.yaml` is triggered only by `push`, `schedule` and `workflow_dispatch`, so the workflow identity restricts the trigger too. A `workflow_dispatch` from another branch publishes, but its statement carries that branch's ref, and `--source-ref` refuses it.
+tests: |-
+  - `zizmor` reports nothing new on `publish.yaml`. The subjects fragment, run against a real GHCR index, gives the `sha256sum` of `imagetools inspect --raw`.
+  - After a publish, `gh attestation verify` with the identity policy's flags passes on a target's new index digest. It refuses a digest published before the attest job existed, and it refuses the new digest under `--source-ref refs/heads/other`.
+docs: |-
+  The root README's Attestations section separates the unsigned BuildKit statements from the signed index statement, and gives the verify command.
+out_of_scope: |-
+  - Attesting older digests. A statement signed now for a digest built earlier would claim a build that this run did not perform.
+  - A signed SBOM. `actions/attest` can sign one with `sbom-path`, and no consumer asks for it.
+  - Admission control. Enforcing the policy at deploy time is the consumer's choice of tool.
+risks: |-
+  - The identity is a path. Renaming `publish.yaml`, moving promotion into a reusable workflow, or publishing from another branch changes the signer, and breaks every consumer's check at once.
+  - The statement proves origin, not soundness. Anyone who can merge to `main` can change what the workflow builds.
+  - The attestation service becomes a dependency of every publish run. An outage fails the run after the tags have moved, and the failure design describes the recovery.
+alternatives:
+  - option: >-
+      Attest inside `promote`, as #134 sketched.
+    rejected_because: >-
+      The action signs one subject per call, and a step cannot loop over targets.
+      It would also put `id-token: write` on the job that runs `bake` and pushes
+      every index.
+  - option: >-
+      `actions/attest-build-provenance`, as #134 named it.
+    rejected_because: >-
+      From v4 it is a wrapper around `actions/attest`, and upstream directs new
+      workflows to `actions/attest`. The statement and its verification are the
+      same.
+  - option: >-
+      Attest each platform manifest as well.
+    rejected_because: >-
+      No consumer resolves those by digest, so each would add a leg and a statement
+      nobody reads.
+  - option: >-
+      Attest before the tags move.
+    rejected_because: >-
+      That needs the index pushed untagged first, a second promotion path to keep
+      correct. The cost of the order chosen is a window in which a tag names an
+      unattested index, and a verifying consumer refuses that index rather than
+      trusting it.

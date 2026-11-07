@@ -14,7 +14,7 @@
     "automergeType": "pr",
     "packageRules": [
         {
-            "description": "PR titles, and the squash commits GitHub makes from them, follow gitmoji-conventional: `⬆️ build(deps): update ...`. A rule for every package, because config:recommended's own rules set `chore` and `fix`; Renovate lowercases what follows the prefix. Nothing here produces a pin or a rollback, so neither gets its own emoji. See EXECUTION-LOG D-084.",
+            "description": "PR titles, and the squash commits GitHub makes from them, follow gitmoji-conventional: `⬆️ build(deps): update ...`. A rule for every package, because config:recommended's own rules set `chore` and `fix`; Renovate lowercases what follows the prefix. Nothing here produces a pin or a rollback, so neither gets its own emoji.",
             "matchPackageNames": [
                 "*"
             ],
@@ -36,7 +36,7 @@
             "enabled": true
         },
         {
-            "description": "Node major bumps are a judgement this repo makes against the release schedule, not by recency. The value is major-only, so every update is a major, and an automerged one can move the builder off Active LTS onto a Current-phase major -- shortening its support window with no human in the loop. See RFC 0009 decision 9 and EXECUTION-LOG A-41.",
+            "description": "Node major bumps are a judgement this repo makes against the release schedule, not by recency. The value is major-only, so every update is a major, and an automerged one can move the builder off Active LTS onto a Current-phase major -- shortening its support window with no human in the loop. See S-0001/D-21.",
             "matchPackageNames": [
                 "node"
             ],

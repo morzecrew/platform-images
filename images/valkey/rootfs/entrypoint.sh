@@ -1,6 +1,6 @@
 #!/bin/sh
 # Generate valkey.conf from the environment, refuse the unsafe combinations,
-# print what won, and hand off to the upstream entrypoint. See RFC 0006.
+# print what won, and hand off to the upstream entrypoint. See S-0001/D-20.
 #
 # Runs before upstream's docker-entrypoint.sh rather than instead of it: that
 # script chowns /data and drops to the `valkey` user with setpriv, and
@@ -17,7 +17,7 @@ FRAGMENT_DIR="${CONF_DIR}/conf.d"
 ALLOWLIST="${VALKEY_CONF_ALLOWLIST:-${CONF_DIR}/allowlist.conf}"
 DENYLIST="${CONF_DIR}/denylist.conf"
 
-# Decision 10 was left OPEN by RFC 0006 with one instruction: prefer
+# The fallback (S-0001/D-20) was picked by one rule: prefer
 # embarrassingly small, because an evicting cache is recoverable and an
 # OOM-killed host is not. 256 MiB is small enough to be obviously a fallback
 # and large enough to start and serve.
@@ -47,7 +47,7 @@ emit() {
 }
 
 # Curated variables the operator actually set. Defaults are deliberately not in
-# here: the collision rule (RFC 0001 decision 11) is about an operator setting
+# here: the collision rule (S-0001/D-14) is about an operator setting
 # the same thing twice, and every curated knob has a default, so counting
 # defaults would make the passthrough channel permanently unusable.
 CURATED=""
@@ -60,7 +60,7 @@ curated_if_set() {
 }
 
 # ---------------------------------------------------------------------------
-# 1. maxmemory (RFC 0006 §5.2)
+# 1. maxmemory (S-0001/D-20)
 # ---------------------------------------------------------------------------
 maxmemory_percent="${VALKEY_MAXMEMORY_PERCENT:-75}"
 case "${maxmemory_percent}" in
@@ -98,7 +98,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 2. eviction policy, and 3. persistence (RFC 0006 §5.2, §5.3)
+# 2. eviction policy, and 3. persistence (S-0001/D-20)
 # ---------------------------------------------------------------------------
 policy_set="${VALKEY_MAXMEMORY_POLICY:-}"
 policy="${policy_set:-allkeys-lru}"
@@ -109,7 +109,7 @@ off | rdb | aof) ;;
 *) envconf_die "VALKEY_PERSISTENCE must be off, rdb or aof, got '${persistence}'" ;;
 esac
 
-# Both §5.3 refusals are evaluated in section 8, against the assembled
+# Both persistence refusals are evaluated in section 8, against the assembled
 # configuration. Checking them here would only see the curated channel, and
 # `VALKEY_CONF__maxmemory-policy` is an allowlisted spelling of the same knob --
 # so a genuinely safe durable setup expressed through the passthrough channel
@@ -142,7 +142,7 @@ aof)
 esac
 
 # ---------------------------------------------------------------------------
-# 4. secrets from files first (RFC 0006 §5.2, RFC 0001 decision 4)
+# 4. secrets from files first (S-0001/D-16)
 # ---------------------------------------------------------------------------
 password=$(envconf_secret VALKEY_PASSWORD)
 if [ -n "${password}" ]; then
@@ -176,10 +176,10 @@ emit protected-mode yes baked "image default"
 emit dir /data baked "image default"
 
 # ---------------------------------------------------------------------------
-# 6. dangerous commands (RFC 0006 §5.4)
+# 6. dangerous commands (S-0001/D-20)
 # ---------------------------------------------------------------------------
 # The variable is the explicit list of commands to rename, so the default
-# documents itself and adding CONFIG is how §5.4's CONFIG opt-in is expressed.
+# documents itself and adding CONFIG is how CONFIG's rename is opted into.
 # Empty disables renaming entirely.
 rename_list="${VALKEY_RENAME_DANGEROUS-FLUSHALL FLUSHDB KEYS}"
 for cmd in ${rename_list}; do
@@ -211,7 +211,7 @@ if [ -d "${FRAGMENT_DIR}" ]; then
 		cat "${fragment}" >>"${CONF_TMP}"
 
 		# Attributed per directive, not as one "included verbatim" line.
-		# RFC 0001 decision 13 requires full source= attribution of images that
+		# S-0001/D-15 requires full source= attribution of images that
 		# generate their config from enumerable layers, and this is one --
 		# "which layer won" is unanswerable if a whole file collapses to a
 		# single summary row.
@@ -257,13 +257,13 @@ curated_if_set VALKEY_LOGLEVEL loglevel
 curated_if_set VALKEY_TCP_KEEPALIVE tcp-keepalive
 curated_if_set VALKEY_APPENDFSYNC appendfsync
 
-# RFC 0001 decision 9: a typo'd curated name is warned about, not ignored.
+# S-0001/D-13: a typo'd curated name is warned about, not ignored.
 # Every VALKEY_* the image reads is listed here; adding a curated variable
 # without adding it here makes the image warn about its own knob.
 #
-# VALKEY_VERSION is last and is not ours: the upstream image sets it, and §5.1
-# says upstream names are never intercepted. Without it this warns on every
-# start about a variable no operator set.
+# VALKEY_VERSION is last and is not ours: the upstream image sets it, and
+# S-0001/D-12 says upstream names are never intercepted. Without it this warns
+# on every start about a variable no operator set.
 envconf_warn_unknown "${PREFIX}" "\
 VALKEY_MAXMEMORY VALKEY_MAXMEMORY_PERCENT VALKEY_MAXMEMORY_POLICY \
 VALKEY_PERSISTENCE VALKEY_APPENDFSYNC VALKEY_PASSWORD \
@@ -292,8 +292,8 @@ fi
 # The checks in section 2 read the environment. This one reads what was
 # actually assembled, and it is the one that holds: a mounted fragment can set
 # `appendonly yes` directly, which turns on persistence without going through
-# VALKEY_PERSISTENCE and would otherwise walk straight past a refusal decision
-# 6 marks LOCKED. valkey.conf takes the last occurrence of a directive, so the
+# VALKEY_PERSISTENCE and would otherwise walk straight past the S-0001/D-20
+# refusal. valkey.conf takes the last occurrence of a directive, so the
 # effective value is the last match.
 effective() {
 	awk -v key="$1" '

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Install, build, and hand a verified static bundle to /srv.
 #
-# RFC 0009 §5.2. The verification is the reason this script exists: a build that
+# S-0001/D-21. The verification is the reason this script exists: a build that
 # emits nothing currently produces a container that serves 404 for every path,
 # diagnosed in a browser long after publish. Here it fails the build instead.
 set -Eeuo pipefail
@@ -18,7 +18,7 @@ die() {
 
 # What the failure message shows when the output directory is wrong. Naming the
 # variable is not enough on its own -- the operator needs to see what the build
-# *did* emit to know what to set it to (RFC 0009 decision 7).
+# *did* emit to know what to set it to.
 emitted() {
 	local found
 	# Sorted so the message is the same on every run -- find walks the
@@ -37,7 +37,7 @@ cd "${APP_ROOT}"
 
 [ -f package.json ] || die "no package.json in ${APP_ROOT}. Is the project copied in before this runs?"
 
-# Decision 3 (LOCKED): installs use a frozen lockfile. `npm ci` requires one and
+# S-0001/D-21: installs use a frozen lockfile. `npm ci` requires one and
 # refuses when it disagrees with package.json, which is exactly the guarantee
 # the two projects running `npm install` today do not have. Checked explicitly
 # so the failure names the cause rather than quoting npm's own wording, which

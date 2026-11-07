@@ -35,12 +35,9 @@ contract. It is normative: image READMEs link here rather than restating it.
 > - **`valkey`** implements all of it, through the shared helper at
 >   [`shared/rootfs/lib/envconf.sh`](../shared/rootfs/lib/envconf.sh): two
 >   channels, allowlist and denylist, collision refusal, value safety,
->   `_FILE` secrets, and the startup summary. **One deliberate exception:**
->   redaction matches `KEY`/`KEYS` as a whole segment rather than as the
->   substring this section's rule states, because the substring form hides
->   `notify-keyspace-events` — a real allowlisted directive. The amendment is
->   proposed and not yet accepted (EXECUTION-LOG D-018), so the rule below is
->   still the normative one and this is the gap.
+>   `_FILE` secrets, and the startup summary. Redaction matches `KEY` as a
+>   whole segment, because a substring match would hide
+>   `notify-keyspace-events`, a real allowlisted directive (S-0001/D-15).
 > - **`rustfs`** implements the whole contract through the shared helper: two
 >   channels, allowlist and denylist, collision refusal, `_FILE` secrets and the
 >   startup summary. Its curated channel is deliberately three settings, because
@@ -58,20 +55,19 @@ contract. It is normative: image READMEs link here rather than restating it.
 >   value; and the denylist is wider than the six names that decision requires,
 >   adding `auth_ident_file`, `syslog` and the three peering names.
 > - **`postgres`** implements the passthrough channel, the allowlist, a denylist
->   file and the startup summary, through the same helper (RFC 0001 P4). It is
+>   file and the startup summary, through the same helper. It is
 >   the one image that attributes **every** value to the file or variable it came
 >   from, because it is the one whose layers are all enumerable. It has no
 >   curated channel: every setting is either a `PG_CONF__*` override or comes
 >   from a config file. Its two control variables keep their published spellings
 >   — `PG_CONF_STRICT_MODE` and `PG_CONF_ALLOWLIST_PATH` — with the contract's
->   `PG_CONF_STRICT` and `PG_CONF_ALLOWLIST` accepted as aliases (decision 10).
-> - **`caddy`** emits the summary and warns about unknown `CADDY_*` names
->   (RFC 0001 P3). It has **no passthrough channel** — Caddy is configured by
+>   `PG_CONF_STRICT` and `PG_CONF_ALLOWLIST` accepted as aliases (S-0001/D-13).
+> - **`caddy`** emits the summary and warns about unknown `CADDY_*` names.
+>   It has **no passthrough channel** — Caddy is configured by
 >   Caddyfile fragments, not key-value directives — so a `CADDY_CONF__*`
 >   variable is reported rather than applied. Its curated names are the
 >   `CADDY_*` spellings; the unprefixed names it published first still work and
->   warn (EXECUTION-LOG D-022), which supersedes §4's "renaming existing
->   variables" non-goal and is proposed, not yet accepted.
+>   warn (S-0001/D-12).
 > - **`python-distroless`** ships `envfile-exec`, the opt-in launcher that
 >   gives application images `<NAME>_FILE` for the names they declare (see
 >   [Application images](#application-images)). It has no other runtime
@@ -222,7 +218,7 @@ the helper's: an image with no config file and no mounted layer says
 `effective configuration` over `precedence: image default < environment`, because
 printing "non-default settings" above a list of defaults, under the names of
 layers it does not have, would be two false sentences per start (`caddy` is the
-case; EXECUTION-LOG D-023).
+case; S-0001/D-15).
 
 ### No templating
 
@@ -239,8 +235,7 @@ in it, or `{"$vlessClients": "<absolute path>"}` with the clients it lists, and
 substitutes nothing else. The config is valid JSON before and after
 and has no second syntax. See [its README](xray/README.md#the-config-and-file-references).
 
-See [RFC 0001](../rfcs/0001-shared-env-config-contract.md) for the reasoning and
-the rejected alternatives.
+The decisions behind this section are S-0001/D-12 to S-0001/D-18.
 
 ## Which images belong here
 
@@ -277,7 +272,7 @@ versions accumulate in GHCR forever. Neither produces a red check.
 
 Item 7 used to be the third of those. A missing `DESCRIPTIONS` entry now
 **fails the build** rather than publishing an empty
-`org.opencontainers.image.description` — see RFC 0002 decision 16.
+`org.opencontainers.image.description` — see S-0001/D-2.
 
 Item 9 is a script taking one argument, the image reference, exiting non-zero on
 failure. It runs under rootless Podman, so it asserts what rootless is what
@@ -289,12 +284,12 @@ author to remember.
 
 | Image | Route | Evidence | Decided |
 |---|---|---|---|
-| `valkey` | 2 (drift) | 14 projects running a cache/queue on four distinct upstream references — `redis:7-alpine` (floating), `redis:7.2.3-alpine`, `redis:8.0.3-alpine`, `valkey/valkey:9.0` — with one migration to Valkey already begun and no shared image to land on. See [RFC 0006](../rfcs/0006-valkey-image.md) §3.1. | 2026-08-12, **admitted** |
+| `valkey` | 2 (drift) | 14 projects running a cache/queue on four distinct upstream references — `redis:7-alpine` (floating), `redis:7.2.3-alpine`, `redis:8.0.3-alpine`, `valkey/valkey:9.0` — with one migration to Valkey already begun and no shared image to land on. | 2026-08-12, **admitted** |
 | `pgbouncer` | 2 (drift) | Two projects run `edoburu/pgbouncer` on different tags — `v1.25.1-p0` in eis-backend, `v1.26.0-p0` in erp-backend — with environment blocks copied byte-for-byte between them and into the erp-standalone bundle, so one pooler's settings are maintained in three places and there is no shared image to land on. See `eis-backend` `compose/compose.yml:76-104`, `erp-backend` `compose/compose.yml:40-69`, and decision D-8 of the specification. | 2026-10-21, **admitted** |
-| `npm-builder` | 1 | Five projects hand-roll a Node build stage, and they diverge: two use `npm install` rather than `npm ci`, none has a dependency cache mount, one is on end-of-life `node:16`, and two ship byte-identical copies of the same file. See [RFC 0009](../rfcs/0009-javascript-static-asset-builder.md) §2. | 2026-08-12, **admitted** (as RFC 0008; re-cut as RFC 0009 after its gate measurement) |
-| Node runtime / `node-distroless` | — | Proposed as the other half of the builder pair. No Morze project executes Node in production — all five build static assets and serve them from nginx or Caddy — so the runtime would have been maintained for nobody. See [RFC 0008](../rfcs/0008-javascript-builder-and-distroless-runtime-pair.md) §3.1. | 2026-08-12, **refused** |
-| OpenTelemetry Collector | — | One repository uses it. Route 1 needs two hand-rolled Dockerfiles and route 2 needs two projects that have diverged; one project satisfies neither. See [RFC 0005](../rfcs/0005-opentelemetry-collector-image.md). | 2026-08-12, **refused** |
-| ClickHouse | — | Two compose services, but the deployed instances are managed (Yandex MDB), so the image would be curating config for something we do not run. See [RFC 0007](../rfcs/0007-clickhouse-image.md). | 2026-08-12, **refused** |
+| `npm-builder` | 1 | Five projects hand-roll a Node build stage, and they diverge: two use `npm install` rather than `npm ci`, none has a dependency cache mount, one is on end-of-life `node:16`, and two ship byte-identical copies of the same file. | 2026-08-12, **admitted** (as a builder and runtime pair; re-cut to the builder alone after its gate measurement) |
+| Node runtime / `node-distroless` | — | Proposed as the other half of the builder pair. No Morze project executes Node in production — all five build static assets and serve them from nginx or Caddy — so the runtime would have been maintained for nobody. See S-0001/D-21. | 2026-08-12, **refused** |
+| OpenTelemetry Collector | — | One repository uses it. Route 1 needs two hand-rolled Dockerfiles and route 2 needs two projects that have diverged; one project satisfies neither. | 2026-08-12, **refused** |
+| ClickHouse | — | Two compose services, but the deployed instances are managed (Yandex MDB), so the image would be curating config for something we do not run. | 2026-08-12, **refused** |
 | `rustfs` | 2 (drift) | Two backends run `rustfs/rustfs:1.0.1` and have already fallen out of step: one probes a health path the other does not, and one has moved the server's log off stdout, so the same upstream reference is configured two ways for the same job. The fallback is closed rather than merely unadopted — MinIO no longer publishes an image, so there is no shared upstream reference to land on. See S-0002/D-4. | 2026-10-21, **admitted** |
 | `xray` | neither | One project, the dotdash bundle, needs Xray-core, so neither route is met. Admitted on the owner's call, because the fallback was a render job in that bundle, which would carry the same file resolution without a reviewed image. See [#125](https://github.com/morzecrew/platform-images/issues/125). | 2026-11-07, **admitted** (owner's call) |
 
@@ -353,8 +348,7 @@ repo is retired even if it builds cleanly.
 runs on 8 January and opens an issue carrying both questions, the image list
 read from `docker-bake.hcl`, and a scan of which repositories reference each
 tag — with this repository excluded from its own results, since it references
-every image it publishes. A calendar promise is not a mechanism (RFC 0003
-decision 6).
+every image it publishes. A calendar promise is not a mechanism (S-0001/D-25).
 
 Two things about that scan are worth knowing before you trust a row:
 
@@ -418,5 +412,4 @@ image and record it in the PR:
 Freeze is the default because this is a public registry and a deleted tag breaks
 builds we cannot see.
 
-See [RFC 0003](../rfcs/0003-image-admission-and-retirement-rule.md) for the
-reasoning, the alternatives, and a known limitation of the bar.
+See S-0001/D-25.

@@ -17,7 +17,7 @@ COPY --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 ```
 
 Named contexts rather than copies, and rather than moving every build context
-to the repository root (RFC 0001 decision 6). A target that does not declare
+to the repository root (S-0001/D-17). A target that does not declare
 the context **cannot reference it** — the build fails — whereas a copy in each
 image directory guarantees N copies and a drift check that gets silenced the
 first time it is inconvenient.
@@ -26,7 +26,7 @@ first time it is inconvenient.
 
 | Path | Consumed by | What it is |
 |---|---|---|
-| [`rootfs/lib/envconf.sh`](rootfs/lib/envconf.sh) | `valkey`, `postgres`, `caddy`, `flyway` | The env-config contract: allowlist, denylist, secrets, startup summary. See [RFC 0001](../rfcs/0001-shared-env-config-contract.md). `flyway` uses only `envconf_secret`. |
+| [`rootfs/lib/envconf.sh`](rootfs/lib/envconf.sh) | `valkey`, `postgres`, `caddy`, `flyway` | The env-config contract: allowlist, denylist, secrets, startup summary. See [Environment configuration](../images/README.md#environment-configuration) and S-0001/D-12 to D-16. `flyway` uses only `envconf_secret`. |
 
 ## Rules
 

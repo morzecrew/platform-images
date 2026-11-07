@@ -1,6 +1,6 @@
 # shellcheck shell=sh
 #
-# envconf.sh — the shared env-config contract. See RFC 0001.
+# envconf.sh — the shared env-config contract. See S-0001/D-12 to D-16.
 #
 # Sourced by an image's entrypoint, never executed. POSIX sh: it has to run on
 # Alpine without adding bash, which rules out associative arrays and ${var,,}.
@@ -85,7 +85,7 @@ _envconf_allow_canon() {
 
 # A value that contains a newline cannot be represented by postgresql.conf,
 # valkey.conf or a key-value file. Accepting one only defers the corruption to
-# the server's parser, at a much worse moment (RFC 0001 decision 12).
+# the server's parser, at a much worse moment (S-0001/D-14).
 _envconf_has_newline() {
 	case "$1" in
 	*"$_ENVCONF_NL"* | *"$_ENVCONF_CR"*) return 0 ;;
@@ -162,7 +162,7 @@ envconf_load_denylist() {
 #
 # $2, if given, is the space-delimited set of upstream keys the image wrote
 # from curated variables. A passthrough key that targets one of them aborts,
-# naming both (RFC 0001 decision 11) -- the check lives here because this is
+# naming both (S-0001/D-14) -- the check lives here because this is
 # where the passthrough keys already are.
 envconf_collect() {
 	local prefix="$1"
@@ -199,7 +199,7 @@ envconf_collect() {
 		# expands as ${VALKEY_CONF__notify-...}, which is "use
 		# VALKEY_CONF__notify, or the literal 'keyspace-events' if unset" --
 		# so the lookup silently returns a plausible wrong value rather than
-		# failing. Dashed keys are explicitly expected here (§5.1 normalizes
+		# failing. Dashed keys are explicitly expected here (keys normalize
 		# `-` to `_`), which is what makes this reachable rather than
 		# theoretical.
 		#
@@ -234,7 +234,7 @@ envconf_collect() {
 }
 
 # Warn about <prefix>_* variables that are neither a curated name nor a
-# passthrough key (RFC 0001 decision 9). A typo'd curated knob that silently
+# passthrough key (S-0001/D-13). A typo'd curated knob that silently
 # does nothing is the failure this contract exists to prevent, and one log line
 # is cheaper than that.
 #
@@ -248,7 +248,7 @@ envconf_collect() {
 #
 # $2 is every <prefix>_* name that is legitimately present: this image's
 # curated variables **and** any its base image defines. The second half is not
-# optional -- RFC 0001 §5.1 says upstream names are never intercepted, and
+# optional -- S-0001/D-12 says upstream names are never intercepted, and
 # `valkey/valkey` sets `VALKEY_VERSION`, so omitting them makes this warn on
 # every start about a variable nobody set. A warning that always fires is the
 # thing the ignore list exists to prevent.
@@ -301,7 +301,7 @@ envconf_render() {
 	pgconf) renderer=_envconf_render_pgconf ;;
 	pgbouncerconf) renderer=_envconf_render_pgbouncerconf ;;
 	keyvalue)
-		envconf_die "envconf_render: format '${fmt}' is declared by RFC 0001 but not implemented; it ships with its first consumer"
+		envconf_die "envconf_render: format '${fmt}' is declared by the contract but not implemented; it ships with its first consumer"
 		;;
 	*) envconf_die "envconf_render: unknown format '${fmt}'" ;;
 	esac
@@ -429,7 +429,7 @@ _envconf_render_pgbouncerconf() {
 }
 
 # Emit NUL-delimited quads for every setting a postgresql.conf-format file
-# assigns, for an image building the source map decision 13 requires.
+# assigns, for an image building the source map S-0001/D-15 requires.
 #
 #   envconf_scan_pgconf <file> <source> <origin>
 #
@@ -517,7 +517,7 @@ _envconf_is_secret() {
 	*PASSWORD* | *TOKEN* | *SECRET* | *HEADERS*) return 0 ;;
 	esac
 
-	# KEY is different, and RFC 0001 §5.2's bare *KEY* is too broad. Config
+	# KEY is different, and a bare *KEY* substring is too broad. Config
 	# namespaces are full of innocent "key": `notify-keyspace-events` is an
 	# allowlisted valkey directive, and redacting it would hide a setting an
 	# operator specifically needs to read while protecting nothing. So match
@@ -541,12 +541,12 @@ _envconf_is_secret() {
 # Quads rather than the key/source/origin triple this was specified as: the
 # summary prints the effective *value* (that is most of its output), and the
 # helper cannot obtain it. A triple would have forced every image to pass the
-# values through a second channel. See EXECUTION-LOG D-014.
+# values through a second channel.
 #
 # The header and footer are overridable because both defaults are claims about
 # the image, not about the helper, and they are false for an image that has no
 # config file: `caddy` prints every variable it reads rather than only the
-# non-default ones (it cannot tell which are default -- RFC 0001 decision 13),
+# non-default ones (`environ` cannot tell a default from a supplied value),
 # and its layers are an ENV default and the environment, not three. Printing
 # "non-default" over a list of defaults, under a precedence line naming layers
 # the image does not have, would be two false sentences per start.
@@ -602,8 +602,8 @@ _envconf_summary_body() {
 	tr '\n\r\0' '  \n' | _envconf_effective |
 		while IFS= read -r key && IFS= read -r value &&
 			IFS= read -r source && IFS= read -r origin; do
-			# The key stays visible and only the value is hidden. RFC 0001's
-			# example line shows `<redacted>` in place of the whole pair, but
+			# The key stays visible and only the value is hidden. The first
+			# design put `<redacted>` in place of the whole pair, but
 			# the origin column names the variable anyway -- so hiding the key
 			# conceals nothing and costs the reader the one thing the summary
 			# is for, which is knowing what got set.
@@ -623,11 +623,11 @@ _envconf_summary_body() {
 
 # <NAME>_FILE wins over <NAME>. An unreadable <NAME>_FILE aborts rather than
 # falling back: starting with the wrong credential is worse than not starting
-# (RFC 0001 decision 4).
+# (S-0001/D-16).
 #
 # Prints the value on stdout and nothing else, so it is safe to capture.
 # Refuse a newline-bearing value, for images that do not go through
-# envconf_collect. Decision 12's rule is about what a config format can carry,
+# envconf_collect. S-0001/D-14's rule is about what a config format can carry,
 # and `caddy` reaches the same hazard by a different road: its values are
 # substituted into the Caddyfile by Caddy itself, where a newline is not a
 # corrupt record but a second directive. Verified: a newline in
@@ -636,7 +636,7 @@ _envconf_summary_body() {
 #   envconf_refuse_newline <label> <value>
 envconf_refuse_newline() {
 	if _envconf_has_newline "$2"; then
-		envconf_die "$1 contains a newline or carriage return, which no config format in scope can represent (RFC 0001 decision 12)."
+		envconf_die "$1 contains a newline or carriage return, which no config format in scope can represent (S-0001/D-14)."
 	fi
 }
 

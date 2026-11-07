@@ -11,17 +11,17 @@ ARG POSTGRES_IMAGE_TAG
 
 # Which extensions to install. Every name must appear in
 # rootfs/extensions.manifest; an unknown one fails the build rather than
-# quietly producing a smaller image. See RFC 0004.
+# quietly producing a smaller image. See S-0001/D-19.
 ARG PG_EXTENSIONS="cron pgroonga"
 
 # The extensions label is written here, from the same string that drives the
-# install, rather than in docker-bake.hcl beside the tags (RFC 0004 §5.3's
-# sketch put it there). Two literals -- one for `args`, one for `labels` -- can
+# install, rather than in docker-bake.hcl beside the tags (S-0001/D-19 puts it
+# here). Two literals -- one for `args`, one for `labels` -- can
 # disagree, and `--set postgres.args.PG_EXTENSIONS=pgroonga` proved it: the image
-# installed pgroonga alone and went on claiming `cron pgroonga`, which decision
-# 10 (`LOCKED`) forbids. From here it cannot disagree, because there is one
+# installed pgroonga alone and went on claiming `cron pgroonga`, which
+# S-0001/D-19 forbids. From here it cannot disagree, because there is one
 # string; and build-extensions refuses a non-canonical spelling, so the one
-# string is the canonical one decision 10 requires.
+# string is the canonical spelling the label must carry.
 LABEL io.morze.postgres.extensions="${PG_EXTENSIONS}"
 
 # ....................... #
@@ -50,13 +50,13 @@ RUN chown -R postgres:postgres /etc/postgresql
 
 COPY rootfs/allowlist.conf /etc/postgresql/allowlist.conf
 # The denylist is data too, and lives beside the allowlist so the whole policy
-# reads in one place (RFC 0001 §5.4).
+# reads in one place.
 COPY rootfs/denylist.conf /etc/postgresql/denylist.conf
 RUN chown postgres:postgres /etc/postgresql/allowlist.conf /etc/postgresql/denylist.conf \
     && chmod 0644 /etc/postgresql/allowlist.conf /etc/postgresql/denylist.conf
 
 # The shared env-config helper, from the `shared` named context wired up in
-# docker-bake.hcl (RFC 0001 decision 6). A target that does not declare the
+# docker-bake.hcl (S-0001/D-17). A target that does not declare the
 # context cannot reference it, so a stale copy is not a failure mode here.
 COPY --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 

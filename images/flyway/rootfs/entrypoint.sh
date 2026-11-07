@@ -1,6 +1,6 @@
 #!/bin/sh
 # Resolves FLYWAY_URL, FLYWAY_USER and FLYWAY_PASSWORD from their _FILE
-# variants (RFC 0001 decision 4), then hands every argument to upstream's
+# variants (S-0001/D-16), then hands every argument to upstream's
 # flyway unchanged. Flyway itself has no _FILE support.
 set -eu
 

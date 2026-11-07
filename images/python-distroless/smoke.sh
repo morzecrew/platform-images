@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for a distroless runtime. See RFC 0002 §5.5.
+# Smoke test for a distroless runtime. See S-0001/D-11.
 #
 # No shell in the image, so everything goes through the python entrypoint.
 set -euo pipefail

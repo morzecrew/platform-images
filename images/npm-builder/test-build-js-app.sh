@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# RFC 0009 §6's battery: what build-js-app actually does.
+# The multi-build battery (S-0001/D-11): what build-js-app actually does.
 #
 # This cannot live in smoke.sh, which receives one built image reference and is
 # meant to be cheap. Every assertion here needs a fixture project and a real
 # build, several need a build that must *fail*, and one needs a second image to
 # serve the result. Same split as images/postgres/test-extensions.sh.
 #
-# Rootless Podman throughout, like every other test in this repo (RFC 0002
-# §5.5). An earlier revision used `docker buildx` on the belief that
+# Rootless Podman throughout, like every other test in this repo (S-0001/D-11).
+# An earlier revision used `docker buildx` on the belief that
 # `--mount=type=cache` was BuildKit-only; Podman supports it, and the buildx
 # route was actively wrong here -- CI's buildx builder uses the docker-container
 # driver, which cannot resolve a locally built image in `FROM` and tried to pull
@@ -113,15 +113,15 @@ got=$("${ENGINE}" run --rm "${FIXTURE}" cat /srv/index.html | tr -d '\r\n')
 ok "assets land in /srv"
 
 echo
-echo "=== 2. a build emitting nothing fails (§6: must never be skipped) ==="
+echo "=== 2. a build emitting nothing fails (must never be skipped) ==="
 # The directory exists and is empty -- the case a `-d` check alone would pass.
 d=$(fixture empty '"mkdir -p dist"')
 expect_build_fails "empty output dir refused" "${d}" "which exists but is empty"
-# Decision 7 requires the message to name the variable and the resolved path.
+# The message must name the variable and the resolved path.
 out=$("${ENGINE}" build -t "${FIXTURE}" "${d}" 2>&1 || true)
 case "${out}" in
 *"BUILD_OUTPUT_DIR='dist'"*"/app/dist"*) ok "the refusal names the variable and the path" ;;
-*) die "the refusal does not name BUILD_OUTPUT_DIR and the resolved path (decision 7)" ;;
+*) die "the refusal does not name BUILD_OUTPUT_DIR and the resolved path" ;;
 esac
 
 echo
@@ -148,13 +148,13 @@ for conv in out build; do
 done
 
 echo
-echo "=== 6. no lockfile is refused (decision 3) ==="
+echo "=== 6. no lockfile is refused (S-0001/D-21) ==="
 d=$(fixture nolock '"mkdir -p dist && echo ok > dist/index.html"')
 rm -f "${d}/package-lock.json"
 expect_build_fails "missing lockfile refused" "${d}" "requires a lockfile"
 
 echo
-echo "=== 7. a lockfile disagreeing with package.json fails (decision 3) ==="
+echo "=== 7. a lockfile disagreeing with package.json fails (S-0001/D-21) ==="
 # The defect two projects ship today: `npm install` would resolve a fresh tree
 # and carry on. `npm ci` must refuse instead of silently installing something
 # the lockfile never described.
@@ -212,7 +212,7 @@ fi
 
 echo
 echo "=== 9. a stale output directory in the context is refused ==="
-# The subtler half of decision 2: a project that commits its output directory,
+# The subtler half of S-0001/D-21: a project that commits its output directory,
 # or copies one in with `COPY . .`, hands build-js-app a complete-looking bundle
 # the build never touched. Every other check here passes on last release's
 # assets. Reported by review on PR #37 and reproduced before fixing.
@@ -221,7 +221,7 @@ mkdir -p "${d}/dist"
 echo "STALE-FROM-LAST-YEAR" >"${d}/dist/index.html"
 # Aged to match its name. Written moments before the build, it was older than
 # build-js-app's start marker by under a second, and an arm64 CI run once saw
-# the order inverted (EXECUTION-LOG D-062). A committed bundle is days old.
+# the order inverted. A committed bundle is days old.
 touch -d '1 year ago' "${d}/dist/index.html"
 expect_build_fails "stale output refused" "${d}" "is older than this build"
 
@@ -235,7 +235,7 @@ echo
 echo "=== 11. the runtime handoff: caddy serves it, deep paths get index.html ==="
 # Not a skip. The package is public and anonymously pullable, so a failure here
 # is an infrastructure problem, not an optional test -- and a skip would leave
-# the battery green with §6's handoff assertion never run, which is exactly the
+# the battery green with the handoff assertion never run, which is exactly the
 # silent gap this image exists to remove.
 #
 # A local image is used as-is rather than re-pulled: CI points CADDY_REF at the

@@ -92,7 +92,7 @@ proof — anyone with push access to this repository could produce them.
 
 Each published index also carries a **signed** SLSA provenance statement: a
 GitHub artifact attestation, signed through Sigstore for `publish.yaml` on
-`main` ([RFC 0010](rfcs/0010-signed-build-provenance-for-published-images.md)).
+`main` ([S-0005](.torve/specs/S-0005/document.yaml)).
 A digest pushed any other way has none. Check the digest you are about to pin:
 
 ```bash

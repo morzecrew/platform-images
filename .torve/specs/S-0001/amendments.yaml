@@ -186,3 +186,38 @@ amendments:
       through Sigstore for `publish.yaml` on `main`. The BuildKit attestations this
       row governs are unchanged and still unsigned, so the row now says which attestations
       it means and names the workflow that carries the signed one.
+  - id: A-7
+    at: '2026-11-07T09:49:11Z'
+    title: >-
+      rfcs/ is retired; torve documents are the only design record
+    changes:
+      - subject: D-26
+        field: retired
+        before: rfcs/*.md
+        after: >-
+          rfcs/ is deleted: torve documents under .torve/specs are the only design
+          record, and each S-0001 rationale's RFC citation reads at 9c0d6f7
+    md: >-
+      This document read its rows from rfcs/ and kept that directory as the record
+      of how each design was reached. Two places for a design invited the wrong one:
+      #134's signing design was written as RFC 0010 and moved to S-0005. rfcs/ is deleted, and torve
+      documents are the only design record. Code and docs cite rows as S-NNNN/D-n.
+      The RFC citations in this document's rationales stay as written, as history
+      readable at 9c0d6f7. D-26 governed rfcs/*.md, so it retires with the directory.
+editorial:
+  - subject: D-5
+    field: text
+    before: >-
+      Every target inherits `_attested`, written in list form, `attest = ["type=provenance,mode=max",
+      "type=sbom"]`, never in the shorthand. Those attestations are described everywhere
+      as unsigned evidence. The signed statement is a separate GitHub artifact attestation
+      on each promoted index digest, bound to `publish.yaml` on `main` (RFC 0010).
+    after: >-
+      Every target inherits `_attested`, written in list form, `attest = ["type=provenance,mode=max",
+      "type=sbom"]`, never in the shorthand. Those attestations are described everywhere
+      as unsigned evidence. The signed statement is a separate GitHub artifact attestation
+      on each promoted index digest, bound to `publish.yaml` on `main` (S-0005).
+  - subject: D-5
+    field: fingerprint
+    before: eae5eef2889a1412/fbfb0ffcac06f144
+    after: c6b9fe6681ca5c09/fbfb0ffcac06f144

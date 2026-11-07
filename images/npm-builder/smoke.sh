@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Smoke test for a build-stage image. See RFC 0002 §5.5.
+# Smoke test for a build-stage image. See S-0001/D-11.
 #
-# RFC 0002 §5.5 prescribes running "their entrypoint helper with a --help
-# equivalent". build-js-app has no such flag -- it is a straight-line build
+# A build-stage image is smoked for its toolchain and helpers, not for --help
+# (S-0001/D-11). build-js-app has no such flag -- it is a straight-line build
 # script that would attempt a real install against a project that is not there.
 # So this asserts what a build stage can be wrong about on its own: the
 # toolchain runs, the helper is present and executable, it is valid shell, and
@@ -11,7 +11,7 @@
 #
 # What build-js-app actually *does* is verified by test-build-js-app.sh, which
 # needs fixture projects and several builds and so cannot run from one image
-# reference. RFC 0009 §6 is that file's contract, not this one's.
+# reference.
 set -euo pipefail
 IMAGE="${1:?usage: smoke.sh <image-ref>}"
 ENGINE="${ENGINE:-podman}"
@@ -29,7 +29,7 @@ echo "npm: ok"
 # image ever disagree -- a bake edit that misses the Dockerfile default, a
 # hand-built image -- every consumer pins a major they are not getting, with no
 # error anywhere. Wave 6 shipped exactly this divergence in the postgres
-# extensions label (D-040); it is cheap to pin and invisible when it breaks.
+# extensions label; it is cheap to pin and invisible when it breaks.
 want="$("${ENGINE}" image inspect "${IMAGE}" \
 	--format '{{ index .Config.Labels "org.opencontainers.image.version" }}' 2>/dev/null | tr -d '\r')"
 case "${want}" in
@@ -65,7 +65,7 @@ echo "build-js-app: present and executable"
 echo "build-js-app: parses"
 
 # The npm store path is the half of the cache contract this image can keep
-# (decision 12). A consumer mounts a cache over it; if the path moves, every
+# (S-0001/D-21). A consumer mounts a cache over it; if the path moves, every
 # consumer's mount silently stops matching and the cache goes cold without any
 # error -- the exact failure mode a smoke test should catch.
 got="$("${ENGINE}" run --rm "${IMAGE}" npm config get cache | tr -d '\r')"

@@ -2,7 +2,7 @@
 
 Build-stage image for JavaScript applications that produce **static assets**. Based on the official `node` Debian images, with a **`build-js-app`** helper that installs from a frozen lockfile, runs the project's build, and hands a **verified** bundle to `/srv`.
 
-There is no matching runtime image, and that is deliberate (RFC 0009 decision 1): the runtime for static assets is the already-published [`caddy`](../caddy) image, so this builder pairs with something that exists rather than shipping a second half nobody asked for.
+There is no matching runtime image, and that is deliberate (S-0001/D-21): the runtime for static assets is the already-published [`caddy`](../caddy) image, so this builder pairs with something that exists rather than shipping a second half nobody asked for.
 
 ## Contents
 
@@ -98,7 +98,7 @@ This image passes the build environment through untouched, because the variables
 
 **Do not pass secrets this way.** Two separate reasons, and the second is the worse one:
 
-- Every image this repo publishes carries `mode=max` provenance (RFC 0002 decision 2), so build args are recorded in the attestation and readable by anyone who can pull the image.
+- Every image this repo publishes carries `mode=max` provenance (S-0001/D-5), so build args are recorded in the attestation and readable by anyone who can pull the image.
 - A static bundle **ships whatever it was built with**. An API key baked into a `REACT_APP_*` variable is in the JavaScript served to every visitor, whether or not this repo ever attested it.
 
 If a value must stay secret, it cannot be a build-time variable of a static site at all — it belongs behind a backend the browser calls.
@@ -118,8 +118,8 @@ Three things worth checking before you migrate:
 
 ## Tests
 
-- [`smoke.sh`](./smoke.sh) — RFC 0002 §5.5's build-stage shape: the toolchain runs, the helper is present and parses, the npm cache path is where consumers mount, and the two footgun variables are unset.
-- [`test-build-js-app.sh`](./test-build-js-app.sh) — RFC 0009 §6's battery: the three output conventions, the refusals, the cache mount proven by an offline second build, and the caddy handoff serving a deep path.
+- [`smoke.sh`](./smoke.sh) — S-0001/D-11's build-stage shape: the toolchain runs, the helper is present and parses, the npm cache path is where consumers mount, and the two footgun variables are unset.
+- [`test-build-js-app.sh`](./test-build-js-app.sh) — the multi-build battery (S-0001/D-11): the three output conventions, the refusals, the cache mount proven by an offline second build, and the caddy handoff serving a deep path.
 
 ## Layout
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Tests for shared/rootfs/lib/envconf.sh. See RFC 0001 §6.
+# Tests for shared/rootfs/lib/envconf.sh.
 #
 # These run the helper's functions directly, with no container and no server.
 # That is the point: the properties most worth pinning here -- a newline
@@ -121,7 +121,7 @@ out=$(VALKEY_CONF__nope=1 VALKEY_CONF_STRICT=ignore \
 	run "unknown key warns under strict=ignore" 0 'envconf_collect VALKEY')
 expect_contains "  ...warns" "${out}" "WARN"
 
-# The property most likely to regress in a rewrite (RFC 0001 §6): a denylisted
+# The property most likely to regress in a rewrite: a denylisted
 # key must abort in BOTH modes. strict=ignore governs the allowlist only.
 out=$(VALKEY_CONF__include=/etc/evil.conf \
 	run "denylisted key aborts under strict=fail" 1 'envconf_collect VALKEY')
@@ -142,7 +142,7 @@ out=$(VALKEY_CONF__max=1 run "a prefix of an allowed key is not allowed" 1 \
 	'envconf_collect VALKEY')
 expect_contains "  ...names the variable" "${out}" "VALKEY_CONF__max"
 
-# --- value safety (RFC 0001 decision 12) ----------------------------------
+# --- value safety (S-0001/D-14) -------------------------------------------
 
 out=$(VALKEY_CONF__loglevel="a	b" run "a tab survives collection" 0 \
 	'envconf_collect VALKEY | tr "\0" "|"')
@@ -176,7 +176,7 @@ out=$(VALKEY_CONF__SERVER_CPULIST=0-3 run "an underscore directive keeps its und
 	'envconf_collect VALKEY | tr "\0" "|"')
 expect_contains "  ...not dashed" "${out}" "server_cpulist|0-3|"
 
-# A dashed variable name is not exotic -- §5.1 normalizes `-` to `_`, so it is
+# A dashed variable name is not exotic -- keys normalize `-` to `_`, so it is
 # an expected spelling -- and it is the case where `eval "v=\${$name}"` silently
 # returns a wrong value: ${VALKEY_CONF__notify-keyspace-events} parses as
 # "VALKEY_CONF__notify, defaulting to the literal keyspace-events".
@@ -218,7 +218,7 @@ else
 	echo "       covered against busybox ash by images/valkey/smoke.sh" >&2
 fi
 
-# --- channel collision (RFC 0001 decision 11) -----------------------------
+# --- channel collision (S-0001/D-14) --------------------------------------
 
 out=$(VALKEY_CONF__maxmemory_policy=noeviction \
 	run "passthrough colliding with a curated key aborts" 1 \
@@ -237,7 +237,7 @@ out=$(VALKEY_CONF__loglevel=a VALKEY_CONF__databases=1 VALKEY_CONF__timeout=2 \
 	run "collect emits keys in sorted order" 0 'envconf_collect VALKEY | tr "\0" "|"')
 expect_equals "  ...deterministic" "${out}" "databases|1|loglevel|a|timeout|2|"
 
-# --- unknown curated names (RFC 0001 decision 9) --------------------------
+# --- unknown curated names (S-0001/D-13) ----------------------------------
 
 out=$(VALKEY_MAXMEMROY=1 run "a typo'd curated name warns" 0 \
 	'envconf_warn_unknown VALKEY "VALKEY_MAXMEMORY"')
@@ -254,7 +254,7 @@ out=$(VALKEY_CONF_STRICT=fail VALKEY_CONF_ALLOWLIST=/x VALKEY_CONF__loglevel=a \
 	'envconf_warn_unknown VALKEY "VALKEY_MAXMEMORY"')
 expect_equals "  ...silent" "${out}" ""
 
-# A name the base image defines is not the operator's doing, and §5.1 says
+# A name the base image sets is not the operator's doing, and S-0001/D-12 says
 # upstream names are never intercepted -- so the caller lists them too and they
 # must not warn. Left out, this fires on every start of the real image.
 out=$(VALKEY_VERSION=9.0.5 run "an upstream-defined name does not warn" 0 \
@@ -290,15 +290,15 @@ out=$(run "valkeyconf quotes an empty value" 0 \
 	'printf "loglevel\000\000" | envconf_render valkeyconf')
 expect_contains "  ...quoted empty" "${out}" 'loglevel ""'
 
-# Declared by RFC 0001 §5.2, deliberately unimplemented until they have a
+# Declared by the helper, deliberately unimplemented until they have a
 # consumer. They must refuse loudly rather than emit nothing. `pgconf` moved to
-# the implemented side with RFC 0001 P4 and is covered below.
+# the implemented side with the postgres retrofit and is covered below.
 run "keyvalue refuses, it has no consumer yet" 1 \
 	'printf "a\000b\000" | envconf_render keyvalue' >/dev/null
 run "an unknown format refuses" 1 \
 	'printf "a\000b\000" | envconf_render nonsense' >/dev/null
 
-# --- secrets (RFC 0001 decision 4) ----------------------------------------
+# --- secrets (S-0001/D-16) ------------------------------------------------
 
 printf 'from-file' >"${TMP}/secret"
 printf 'with-newline\n' >"${TMP}/secret-nl"
@@ -451,7 +451,7 @@ case "${out}" in
 *) ok "  ...api_key redacted" ;;
 esac
 
-# RFC 0001 §5.2's bare *KEY* substring would redact this, and it is a real
+# A bare *KEY* substring match would redact this, and it is a real
 # allowlisted valkey directive whose value an operator needs to read.
 out=$(run "summary does NOT redact notify-keyspace-events" 0 \
 	'printf "notify-keyspace-events\000KEA\000env\000X\000" | envconf_summary VALKEY')
@@ -661,7 +661,7 @@ expect_contains "  ...two rows" "${out}" "2"
 
 # --- newline refusal outside envconf_collect -------------------------------
 
-# Decision 12 for images that never call envconf_collect. `caddy` substitutes
+# S-0001/D-14 for images that never call envconf_collect. `caddy` substitutes
 # values into a Caddyfile, where a newline is a second directive rather than a
 # corrupt record.
 out=$(run "a newline-bearing value is refused by name" 1 \

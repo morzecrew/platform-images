@@ -11,8 +11,8 @@
 # renovate: datasource=docker depName=edoburu/pgbouncer versioning=docker
 ARG PGBOUNCER_IMAGE_TAG=v1.26.1-p0
 
-# Alpine, so RFC 0001's POSIX-sh helper runs unmodified with no added bash
-# (RFC 0001 decision 7).
+# Alpine, so the shared POSIX-sh helper runs unmodified with no added bash
+# (S-0001/D-17).
 #
 # The base image ships /etc/pgbouncer owned by the `postgres` user it runs as,
 # with an empty userlist.txt and an example config -- which is what this image
@@ -22,7 +22,7 @@ FROM edoburu/pgbouncer:${PGBOUNCER_IMAGE_TAG}
 # From the `shared` named context declared in docker-bake.hcl, not a copy in
 # this directory: a target that does not declare the context cannot reference
 # it, so the failure is a build error rather than a stale duplicate drifting
-# out of sync (RFC 0001 decision 6).
+# out of sync (S-0001/D-17).
 COPY --from=shared --chmod=0644 rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 
 # --chmod rather than a RUN: the base image's USER is `postgres`, so a RUN step

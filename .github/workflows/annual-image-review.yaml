@@ -1,12 +1,12 @@
 name: Annual Image Review
 
-# RFC 0003 decision 6 (LOCKED): the annual review is opened by a scheduled
-# workflow, not by a calendar promise. Its own words -- "a self-opening issue is
-# the difference between a review that happens and a calendar promise that does
-# not" -- are the reason this file exists.
+# S-0001/D-25: the annual review is opened by a scheduled workflow, not by a
+# calendar promise. A self-opening issue is the difference between a review
+# that happens and a calendar promise that does not, and that is the reason
+# this file exists.
 #
 # 8 January rather than the 1st: an issue opened on a public holiday is read in
-# February. The RFC says the month matters, not the day.
+# February. The month matters, not the day.
 #
 # KNOWN LIMITATION, and it is the one that would silently defeat this workflow:
 # GitHub disables scheduled workflows in public repositories after 60 days
@@ -17,7 +17,7 @@ name: Annual Image Review
 # The mitigation is manual and worth knowing before January: re-enable with
 # `gh workflow enable "Annual Image Review"` (or the Actions UI), then run the
 # review immediately with the workflow_dispatch trigger below rather than
-# waiting another year. See EXECUTION-LOG D-055 and R-36.
+# waiting another year.
 
 on:
   schedule:
@@ -113,7 +113,7 @@ jobs:
           # for an image with consumers.
           #
           # The exact TAG is what separates targets sharing one package (the
-          # RFC 0004 variants all publish under `postgres`), where the package
+          # postgres extension variants all publish under `postgres`), where the package
           # path would credit every variant with the base image's consumers.
           # Emitted only for those, since elsewhere it adds a column of noise.
           shared = collections.Counter(r.split(":")[0] for r in refs.values())
@@ -127,7 +127,7 @@ jobs:
           [ -s plan.tsv ] || { echo "::error title=No targets::bake produced no tagged targets"; exit 1; }
           cat plan.tsv
 
-      # RFC 0003 decision 5 (ASSUMED): the review reads consuming repositories,
+      # S-0001/D-25's consumer scan reads consuming repositories,
       # NOT GHCR pull counts -- a scheduled CI job pulling an image is a pull
       # count, not a user. So this searches code, and there is deliberately no
       # call to the packages API anywhere in this file.
@@ -217,20 +217,20 @@ jobs:
                   return "⚠️ >100 hits, truncated — check by hand"
               return hits if hits else "**none found**"
 
-          print("Opened automatically. RFC 0003 decision 6.\n")
+          print("Opened automatically (S-0001/D-25).\n")
           print("Two questions, and the second is easy to forget:\n")
           print("1. **Does a live project reference this image?** One whose only")
           print("   consumer is this repository -- a builder used by no downstream")
-          print("   project -- is retired even if it builds cleanly (RFC 0003 §4.2).")
+          print("   project -- is retired even if it builds cleanly.")
           print("2. **Does a live project reimplement an image we already publish?**")
           print("   A hit is feedback about the image, not a violation by the project.")
-          print("   The useful output is *why* they did not adopt it (decision 10).\n")
-          print("**The bar is one year without a project consumer** (§4.1). Outcomes")
+          print("   The useful output is *why* they did not adopt it.\n")
+          print("**The bar is one year without a project consumer.** Outcomes")
           print("are keep or retire; there is no \"keep for now\", which is the state")
           print("that produces images nobody has used since 2024.\n")
           print("Evidence is consuming repositories, **not GHCR pull counts**: a")
-          print("scheduled CI job pulling an image is a pull count, not a user")
-          print("(decision 5). Nothing here queries the packages API.\n")
+          print("scheduled CI job pulling an image is a pull count, not a user.")
+          print("Nothing here queries the packages API.\n")
           print("---\n")
 
           if scanned:
@@ -265,7 +265,7 @@ jobs:
 
           print("\n---\n")
           print("### If anything is retired\n")
-          print("The checklist is RFC 0003 §4.3, and step 5 is the one that gets missed:\n")
+          print("The checklist, from images/README.md, and step 5 is the one that gets missed:\n")
           print("1. Announce in the image's README that the tag is frozen, with a date.")
           print("2. Remove the bake target, its variable, and its `default` group entry.")
           print("3. Remove the row from the root README images table.")
@@ -274,11 +274,11 @@ jobs:
           print("   published package still exists and its untagged children still need")
           print("   collecting.")
           print("6. Decide the published package's fate explicitly: **freeze** (default)")
-          print("   or **delete**, recorded in the PR (§4.4).\n")
+          print("   or **delete**, recorded in the PR.\n")
           print("Steps 2-4 are one PR. Git history keeps the Dockerfile, so retirement")
           print("costs nothing irreversible -- which is the argument that makes it easy")
           print("to agree to.\n")
-          print("See [RFC 0003](../blob/main/rfcs/0003-image-admission-and-retirement-rule.md)")
+          print("See [S-0001/D-25](../blob/main/.torve/specs/S-0001/decisions.yaml)")
           print("and [images/README.md](../blob/main/images/README.md).")
           PY
           echo "--- issue body ---"
@@ -288,10 +288,9 @@ jobs:
         if: steps.dupe.outputs.skip == 'false' && inputs.dry_run != true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Decision 6 says the owner is whoever the issue is assigned to at open
-          # time, which presumes an assignee it never names. This makes that true
-          # rather than aspirational; RFC 0003 row 12 records the literal default
-          # and the post-creation timing.
+          # The review's owner is whoever the issue is assigned to at open time,
+          # which presumes an assignee nothing names. This makes that true rather
+          # than aspirational: a literal default, assigned after creation.
           ASSIGNEE: ${{ vars.REVIEW_ASSIGNEE || 'Misery7100' }}
         run: |
           set -euo pipefail

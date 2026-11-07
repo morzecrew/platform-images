@@ -10,7 +10,7 @@ FROM node:${NODE_VERSION}-${DEBIAN_SUITE}
 # `RUN --mount=type=cache,target=/cache` has something stable to mount over.
 # The image cannot carry the mount itself -- that is a flag on the consumer's
 # RUN instruction -- so the contract this image can keep is the path.
-# See images/npm-builder/README.md and RFC 0009 decision 12.
+# See images/npm-builder/README.md and S-0001/D-21.
 ENV npm_config_cache=/cache \
     npm_config_update_notifier=false \
     npm_config_fund=false \

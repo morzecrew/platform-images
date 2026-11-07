@@ -4,7 +4,7 @@
 # Runs once, at build time. The preload line is generated from the same input
 # that drives the install, which is the whole point: shared_preload_libraries
 # naming a library that is not installed is a fatal startup error, so an image
-# that builds green can otherwise refuse to start. See RFC 0004.
+# that builds green can otherwise refuse to start. See S-0001/D-19.
 set -euo pipefail
 
 MANIFEST="${MANIFEST:-/usr/local/share/postgres-extensions/extensions.manifest}"
@@ -62,7 +62,7 @@ done
 
 # The image label is set from PG_EXTENSIONS as given, so the given string has
 # to already be the canonical one -- otherwise two builds of the same set carry
-# different labels and the label stops describing the build (RFC 0004 dec. 10).
+# different labels and the label stops describing the build (S-0001/D-19).
 # Rather than canonicalising silently, refuse and name the correct spelling.
 canonical="${selected[*]}"
 requested="$(echo ${PG_EXTENSIONS} | xargs || true)"
@@ -150,7 +150,7 @@ chmod 0644 "${CONF_D}"/*.conf
 # Record what this build put in conf.d, so the startup summary can tell an
 # image-shipped fragment from an operator-mounted one. The build is the only
 # place that knows: at runtime both are just files in the include directory,
-# and RFC 0001 decision 13 requires this image to attribute each of them.
+# and S-0001/D-15 requires this image to attribute each of them.
 #
 # A filename convention would be cheaper and wrong the moment an operator
 # mounts a file whose name looks baked.

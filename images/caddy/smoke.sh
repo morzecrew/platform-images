@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Smoke test: does this image actually serve, and does it say what it decided?
-# See RFC 0002 §5.5 and RFC 0001 §6 (the summary, the two spellings, decision 9).
+# See S-0001/D-11 and D-15, D-14, D-13 (the summary, the two spellings, typos).
 set -euo pipefail
 IMAGE="${1:?usage: smoke.sh <image-ref>}"
 ENGINE="${ENGINE:-podman}"
@@ -106,7 +106,7 @@ for var in "${CURATED[@]}"; do
 done
 echo "summary: one row for each of ${#CURATED[@]} curated variables"
 
-# RFC 0001 §6: the whole summary appears before the server's first log line.
+# S-0001/D-15: the whole summary appears before the server's first log line.
 # Caddy logs JSON; the summary is plain text on stderr.
 last_summary=$(grep -n '^\[envconf\]' <<<"${logs}" | tail -1 | cut -d: -f1)
 # -m1, not `| head -1`: under pipefail, grep killed by SIGPIPE once its output
@@ -142,7 +142,7 @@ echo "legacy: honoured, attributed, and flagged"
 # Leaves the container's output in ${REFUSE_OUT} rather than printing it, so
 # every caller runs in the main shell. A `$( )`-captured helper would put its
 # `exit 1` inside a subshell, where it ends the substitution and not the
-# script -- the failure mode that let wave 3's test suite report "failed 0".
+# script -- the failure mode that once let a test suite report "failed 0".
 refuse() {
 	# refuse <label> [engine args...]
 	local label="$1"
@@ -180,7 +180,7 @@ echo "refused: one setting spelled two ways with two values"
 
 # The pair the image *cannot* tell apart: a canonical value equal to the baked
 # default is indistinguishable from unset, so this must not refuse. It takes
-# the alias and says which value it started with (README, decision 21).
+# the alias and says which value it started with (README).
 start 18081:8081 -e CADDY_EDGE_ADDRESS=:8080 -e EDGE_ADDRESS=:8081
 wait_health "http://127.0.0.1:18081/__platform_healthz"
 logs="$(logs_of)"
@@ -202,7 +202,7 @@ expect_in "newline refusal names the variable" "$(cat "${REFUSE_OUT}")" \
 	"CADDY_EDGE_ADDRESS contains a newline"
 echo "refused: a value containing a newline"
 
-# --- 6. a typo is not silence (RFC 0001 decision 9) ------------------------
+# --- 6. a typo is not silence (S-0001/D-13) --------------------------------
 
 start 18080:8080 -e CADDY_EDGE_ADRESS=:9999 -e CADDY_CONF__loglevel=debug
 wait_health "http://127.0.0.1:18080/__platform_healthz"
@@ -221,7 +221,7 @@ expect_in "passthrough attempt warned" "${logs}" "no CADDY_CONF__ passthrough ch
 # Upstream owns CADDY_VERSION and sets it in the base image. Warning about it
 # would fire on every start, which is how an ignore list stops being read.
 expect_not_in "upstream name not warned" "${logs}" "CADDY_VERSION is set but"
-echo "decision 9: typos warn, upstream names do not"
+echo "S-0001/D-13: typos warn, upstream names do not"
 
 # --- 7. an emptied variable falls back to the image default ----------------
 
@@ -251,7 +251,7 @@ echo "hook: an unexported assignment still configures the server"
 # --- 8. the three copies of the defaults agree -----------------------------
 
 # entrypoint.sh needs its own copy to tell "you set this" from "the image did"
-# (RFC 0001 decision 13), the Dockerfile needs one for anything that bypasses
+# (`environ` cannot), the Dockerfile needs one for anything that bypasses
 # the entrypoint, and the README is what an operator reads. Nothing at runtime
 # can catch them drifting apart, so it is caught here.
 image_env="$("${ENGINE}" image inspect "${IMAGE}" --format '{{range .Config.Env}}{{println .}}{{end}}')"

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# RFC 0004 §6's build-mechanism tests: the ones that assert what the *build*
+# Build-mechanism tests: the ones that assert what the *build*
 # does with a PG_EXTENSIONS value, rather than what a built image does.
 #
 # smoke.sh cannot cover these. It receives one image reference and every shipped
-# variant contains `cron`, so the case §6 calls "the one test that must never be
-# skipped" -- an image whose preload line correctly omits pg_cron -- has no
+# variant contains `cron`, so the one test that must never be
+# skipped -- an image whose preload line correctly omits pg_cron -- has no
 # shipped tag to run against. These builds are throwaway: nothing is tagged for
 # publication and nothing is pushed.
 #
@@ -81,7 +81,7 @@ echo "ok: an unknown name fails the build and lists the valid names"
 
 # --- 2. a non-canonical order fails, naming the canonical one ----------------
 
-# Wave 1's A-2: the label is set from PG_EXTENSIONS as given, so accepting
+# The label is set from PG_EXTENSIONS as given, so accepting
 # "pgroonga cron" would publish two different labels for one extension set.
 echo "--- non-canonical order"
 set +e
@@ -95,9 +95,9 @@ case "${out}" in
 esac
 echo "ok: a non-canonical order fails the build and names the canonical one"
 
-# --- 3. the §3 trap: an image without cron ----------------------------------
+# --- 3. the preload trap: an image without cron -----------------------------
 
-# The regression this RFC exists to prevent is a preload line naming a library
+# The regression to prevent is a preload line naming a library
 # the build did not install -- a fatal startup error. The inverse case is the one
 # that must be proven: omitting cron omits pg_cron from the preload line, and the
 # server starts.
@@ -128,7 +128,7 @@ preload=$("${ENGINE}" exec "${CTR}" psql -U postgres -tAc "SHOW shared_preload_l
 	fail "preload line is '${preload}', expected 'pg_stat_statements' alone"
 echo "ok: the preload line omits pg_cron rather than naming an absent library"
 
-# §6's snippet coupling: no cron.* settings anywhere, in any file.
+# Snippet coupling: no cron.* settings anywhere, in any file.
 leaked=$("${ENGINE}" exec "${CTR}" sh -c \
 	'grep -rl "^[[:space:]]*cron\." /etc/postgresql/ /etc/postgresql.conf 2>/dev/null || true')
 [ -z "${leaked}" ] || fail "cron.* settings present without cron: ${leaked}"

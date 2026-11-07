@@ -25,8 +25,8 @@ bake *targets:
     docker buildx bake -f {{ _bake }} {{ targets }}
 
 # Refuses by default: both of its failure modes are silent. On the default
-# buildx driver it publishes no attestations and says nothing about it (RFC 0002
-# decision 2), and it skips the smoke gate decision 10 requires of every
+# buildx driver it publishes no attestations and says nothing about it
+# (S-0001/D-5), and it skips the smoke gate S-0001/D-6 requires of every
 # publishing run. The supported path is .github/workflows/publish.yaml, which
 # builds by digest, smoke-tests that digest, then promotes the tags.
 
