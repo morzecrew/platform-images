@@ -55,21 +55,68 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # One leg per platform, each on a native runner rather than one runner under
-  # QEMU: caddy compiles Go, uv-builder exists to compile wheels, and an
-  # emulated arm64 smoke test exercises the emulator as much as the image. Each
-  # leg runs the gate's first two passes for its platform; promote runs the
-  # third once both legs have passed.
+  # The target list the legs fan out over. Refused here, before anything
+  # builds, when a target has no smoke script: such an image is a publishing
+  # run that cannot honour decision 10, and discovering that after pushing a
+  # dozen digests wastes the run.
+  #
+  # Resolved from each target's context rather than from its name. An RFC 0004
+  # extension variant is its own target sharing the base image's directory, so
+  # `images/<target>/smoke.sh` does not exist for it and the old check refused
+  # every variant on sight.
+  plan:
+    runs-on: ubuntu-24.04
+    name: Plan
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: List the targets, each with its smoke test
+        id: targets
+        run: |
+          set -euo pipefail
+          plan="$(docker buildx bake --print)"
+          targets="$(printf '%s' "${plan}" \
+            | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')"
+          for t in ${targets}; do
+            script="$(printf '%s' "${plan}" | python3 -c \
+              "import json,sys,pathlib; print(pathlib.PurePath(json.load(sys.stdin)['target']['${t}']['context'], 'smoke.sh'))")"
+            [ -f "${script}" ] || {
+              echo "::error title=No smoke test::${t} has no ${script}; refusing to publish"
+              exit 1
+            }
+          done
+          echo "targets: ${targets}"
+          printf 'targets=%s\n' "$(printf '%s' "${plan}" \
+            | python3 -c 'import json,sys; print(json.dumps(sorted(json.load(sys.stdin)["target"])))')" \
+            >>"${GITHUB_OUTPUT}"
+
+  # One leg per target and platform, each on a native runner rather than one
+  # runner under QEMU: caddy compiles Go, uv-builder exists to compile wheels,
+  # and an emulated arm64 smoke test exercises the emulator as much as the
+  # image. Each leg runs the gate's first two passes for its target on its
+  # platform; promote runs the third once every leg has passed. The legs run
+  # side by side, so a run takes as long as its slowest image.
   build:
+    needs: plan
     strategy:
       matrix:
-        include:
+        target: ${{ fromJSON(needs.plan.outputs.targets) }}
+        platform:
           - arch: amd64
             runner: ubuntu-24.04
           - arch: arm64
             runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    name: Build and smoke (${{ matrix.arch }})
+    runs-on: ${{ matrix.platform.runner }}
+    name: ${{ matrix.target }} (${{ matrix.platform.arch }})
+    env:
+      TARGET: ${{ matrix.target }}
+      ARCH: ${{ matrix.platform.arch }}
 
     steps:
       - name: Checkout code
@@ -92,9 +139,9 @@ jobs:
           echo "${GH_TOKEN}" | docker login ghcr.io -u dummy --password-stdin
           echo "${GH_TOKEN}" | podman login ghcr.io -u dummy --password-stdin
 
-      # The gate, in three passes over the target list (RFC 0002 §5.4 and
-      # decision 10; EXECUTION-LOG D-008 measured that this shape preserves
-      # attestations end to end). This step is the first two, per platform:
+      # The gate, in three passes (RFC 0002 §5.4 and decision 10; EXECUTION-LOG
+      # D-008 measured that this shape preserves attestations end to end). This
+      # step is the first two, for one target on one platform:
       #
       #   1. build   -- push by digest with tags cleared, so nothing is
       #                 reachable by name until it has passed
@@ -107,7 +154,7 @@ jobs:
       - name: Build and smoke-gate
         env:
           GIT_REVISION: ${{ github.sha }}
-          PLATFORM: linux/${{ matrix.arch }}
+          EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
@@ -117,77 +164,44 @@ jobs:
           # a cached build cannot do (decision 3). Push-triggered runs stay
           # cached and fast.
           nocache=""
-          if [ "${{ github.event_name }}" = "schedule" ]; then
+          if [ "${EVENT}" = "schedule" ]; then
             nocache="--no-cache"
             echo "scheduled rebuild: building with --no-cache"
           fi
 
-          plan="$(docker buildx bake --print)"
-          targets=$(printf '%s' "${plan}" \
-            | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')
-          echo "targets: ${targets}"
+          plan="$(docker buildx bake --print "${TARGET}")"
+          script="$(printf '%s' "${plan}" | python3 -c \
+            "import json,sys,pathlib; print(pathlib.PurePath(json.load(sys.stdin)['target']['${TARGET}']['context'], 'smoke.sh'))")"
+          repo="$(printf '%s' "${plan}" | python3 -c \
+            "import json,sys; print(json.load(sys.stdin)['target']['${TARGET}']['tags'][0].rsplit(':', 1)[0])")"
 
-          # Refused up front rather than after a build: an image with no smoke
-          # script is a publishing run that cannot honour decision 10, and
-          # discovering that after pushing four digests wastes the run.
-          #
-          # Resolved from each target's context rather than from its name. An
-          # RFC 0004 extension variant is its own target sharing the base image's
-          # directory, so `images/<target>/smoke.sh` does not exist for it and the
-          # old check refused every variant on sight.
-          declare -A SMOKE
-          for t in ${targets}; do
-            script="$(printf '%s' "${plan}" | python3 -c \
-              "import json,sys,pathlib; print(pathlib.PurePath(json.load(sys.stdin)['target']['${t}']['context'], 'smoke.sh'))")"
-            [ -f "${script}" ] || {
-              echo "::error title=No smoke test::${t} has no ${script}; refusing to publish"
-              exit 1
-            }
-            SMOKE["${t}"]="${script}"
-          done
+          # Clearing tags is required as well as overriding output: without it
+          # bake refuses with "can't push tagged ref by digest".
+          echo "::group::build ${TARGET} (linux/${ARCH})"
+          docker buildx bake ${nocache} \
+            --set "${TARGET}.platform=linux/${ARCH}" \
+            --set "${TARGET}.tags=" \
+            --set "${TARGET}.output=type=registry,name=${repo},push-by-digest=true,name-canonical=true" \
+            --metadata-file /tmp/meta.json "${TARGET}"
+          echo "::endgroup::"
 
-          declare -A REPO DIGEST
+          digest="$(python3 -c \
+            "import json; print(json.load(open('/tmp/meta.json'))['${TARGET}']['containerimage.digest'])")"
+          ref="${repo}@${digest}"
+          echo "${TARGET}: ${ref}"
 
-          for t in ${targets}; do
-            echo "::group::build ${t} (${PLATFORM})"
-            repo="$(printf '%s' "${plan}" | python3 -c \
-              "import json,sys; print(json.load(sys.stdin)['target']['${t}']['tags'][0].rsplit(':', 1)[0])")"
+          podman pull "${ref}"
+          bash "${script}" "${ref}"
 
-            # Clearing tags is required as well as overriding output: without it
-            # bake refuses with "can't push tagged ref by digest".
-            docker buildx bake ${nocache} \
-              --set "${t}.platform=${PLATFORM}" \
-              --set "${t}.tags=" \
-              --set "${t}.output=type=registry,name=${repo},push-by-digest=true,name-canonical=true" \
-              --metadata-file "/tmp/meta-${t}.json" "${t}"
-
-            digest="$(python3 -c \
-              "import json; print(json.load(open('/tmp/meta-${t}.json'))['${t}']['containerimage.digest'])")"
-            REPO["${t}"]="${repo}"
-            DIGEST["${t}"]="${digest}"
-            echo "${t}: ${repo}@${digest}"
-            echo "::endgroup::"
-          done
-
-          for t in ${targets}; do
-            ref="${REPO[${t}]}@${DIGEST[${t}]}"
-            echo "::group::smoke ${t} (${ref})"
-            podman pull "${ref}"
-            bash "${SMOKE[${t}]}" "${ref}"
-            echo "::endgroup::"
-          done
-
-          # Written only after every smoke test passed, so promote never sees a
+          # Written only after the smoke test passed, so promote never sees a
           # digest from a leg that failed part-way.
-          mkdir -p /tmp/digests
-          for t in ${targets}; do
-            printf '%s' "${DIGEST[${t}]}" >"/tmp/digests/${t}"
-          done
+          mkdir -p "/tmp/digests/${ARCH}"
+          printf '%s' "${digest}" >"/tmp/digests/${ARCH}/${TARGET}"
 
-      - name: Hand the tested digests to promote
+      - name: Hand the tested digest to promote
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: digests-${{ matrix.arch }}
+          name: digest-${{ matrix.platform.arch }}-${{ matrix.target }}
           path: /tmp/digests/
           if-no-files-found: error
           retention-days: 1
@@ -218,8 +232,11 @@ jobs:
       - name: Collect the tested digests
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: digests-*
+          pattern: digest-*
           path: /tmp/digests
+          # Every leg's artifact holds <arch>/<target>, so merged they give one
+          # directory per platform.
+          merge-multiple: true
 
       # BUILD_STAMP must be unique per *build*, not per run (RFC 0002 rows 11
       # and 17). Neither run_id nor run_number changes when a run is re-run --
@@ -252,8 +269,8 @@ jobs:
             repo="$(printf '%s' "${plan}" | python3 -c \
               "import json,sys; print(json.load(sys.stdin)['target']['${t}']['tags'][0].rsplit(':', 1)[0])")"
             refs=()
-            for leg in /tmp/digests/digests-*; do
-              ref="${repo}@$(cat "${leg}/${t}")"
+            for leg in /tmp/digests/*/; do
+              ref="${repo}@$(cat "${leg}${t}")"
               refs+=("${ref}")
               docker buildx imagetools inspect "${ref}" \
                 --format '{"provenance": {{json .Provenance}}, "sbom": {{json .SBOM}}}' | python3 -c "
