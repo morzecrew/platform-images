@@ -65,9 +65,10 @@ decisions:
     grade: ASSUMED
     text: >-
       Every target inherits `_attested`, written in list form, `attest = ["type=provenance,mode=max",
-      "type=sbom"]`, never in the shorthand. The attestations are described everywhere
-      as unsigned evidence.
-    paths: [docker-bake.hcl, README.md]
+      "type=sbom"]`, never in the shorthand. Those attestations are described everywhere
+      as unsigned evidence. The signed statement is a separate GitHub artifact attestation
+      on each promoted index digest, bound to `publish.yaml` on `main` (RFC 0010).
+    paths: [docker-bake.hcl, README.md, .github/workflows/publish.yaml]
     consequence: >-
       every image carries max-mode provenance and an SBOM, and nobody reads them as
       a signature
@@ -75,6 +76,7 @@ decisions:
       RFC 0002 rows 2, 4 and 13 (LOCKED) and 15 (ASSUMED). Defended: row 13, where
       the shorthand was silently dropped; R-45, where promotion now asserts a mode=max
       `buildConfig` and an SPDX SBOM on each leg.
+    fingerprint: eae5eef2889a1412/fbfb0ffcac06f144
   - id: D-6
     grade: ASSUMED
     text: >-

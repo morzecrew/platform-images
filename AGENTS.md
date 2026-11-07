@@ -25,9 +25,9 @@ Two tags are published per image: `:<version>`, which moves, and `:<version>-<yy
 
 ### S-0001/D-5 — `ASSUMED` (Standing decisions)
 
-Every target inherits `_attested`, written in list form, `attest = ["type=provenance,mode=max", "type=sbom"]`, never in the shorthand. The attestations are described everywhere as unsigned evidence.
+Every target inherits `_attested`, written in list form, `attest = ["type=provenance,mode=max", "type=sbom"]`, never in the shorthand. Those attestations are described everywhere as unsigned evidence. The signed statement is a separate GitHub artifact attestation on each promoted index digest, bound to `publish.yaml` on `main` (RFC 0010).
 
-- Paths: `docker-bake.hcl` `README.md`
+- Paths: `docker-bake.hcl` `README.md` `.github/workflows/publish.yaml`
 - Consequence: every image carries max-mode provenance and an SBOM, and nobody reads them as a signature
 
 ### S-0001/D-7 — `ASSUMED` (Standing decisions)
