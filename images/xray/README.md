@@ -130,7 +130,7 @@ only text can produce, such as morzer's `hex` with length 128.
 - **Server.** `{"$vlessDecryption": "/run/secrets/vless_seed"}` resolves to
   `mlkem768x25519plus.native.600s.<seed, base64url>`. This is the server half
   `xray vlessenc` prints for its ML-KEM-768 pair. `native` and `600s` are fixed.
-- **Client.** `xray-entrypoint vless-encryption <seed file>` prints the
+- **Client.** `xray-entrypoint vless-encryption <absolute path>` prints the
   matching `mlkem768x25519plus.native.0rtt.<key>` line on stdout and nothing
   else. The key is the one `xray mlkem768 -i <seed>` prints as `Client:`. The
   seed is read from the file, so it never appears on a command line. The binary
@@ -142,6 +142,35 @@ docker run --rm -v ./secrets/vless_seed:/run/secrets/vless_seed:ro \
 ```
 
 A bad seed file exits 78 here too.
+
+## REALITY public key
+
+A REALITY server needs nothing from the image: its private key reaches Xray as
+`"privateKey": {"$file": "/run/secrets/reality_key"}`. The file holds the
+key as Xray's config takes it, 43 base64url characters.
+
+Its clients need the public key, which Xray's client config calls `password`
+(`publicKey` is the older alias) and share links carry as `pbk`.
+`xray-entrypoint reality-password <absolute path>` prints it on stdout,
+plus a newline and nothing else. It is the value `xray x25519 -i <key>` prints
+as `Password (PublicKey)`. Unlike that command, it reads the key from a file,
+so the key never shows in `/proc/<pid>/cmdline` or in the host's `ps`.
+
+```sh
+docker run --rm -v ./secrets/reality_key:/run/secrets/reality_key:ro \
+  ghcr.io/morzecrew/xray:26.10.31 reality-password /run/secrets/reality_key
+```
+
+The file is decoded with the call Xray makes for `privateKey`, so any file the
+server accepts gives the password its clients need. That decoding accepts 43
+random characters whose last one has spare bits set, as a password generator
+writes them, and skips line breaks. Anything else exits 78, naming the path:
+a file that fails the `$file` checks, padding, the standard alphabet's `+` or
+`/`, or a length other than 32 bytes, hex included.
+
+Both commands take only an absolute path. Neither a seed nor a key can start
+with `/`, so the secret pasted in place of its path, as `xray x25519 -i` takes
+it, exits 2 with a usage line, and the argument is not repeated.
 
 ## Healthcheck
 
@@ -205,8 +234,8 @@ A password in a URL is shown as `xxxxx`.
 
 ## Other commands
 
-Any first argument other than `run`, `healthcheck` or `vless-encryption` goes
-straight to `xray`, so upstream's tools work:
+Any first argument other than `run`, `healthcheck`, `vless-encryption` or
+`reality-password` goes straight to `xray`, so upstream's tools work:
 
 ```sh
 docker run --rm ghcr.io/morzecrew/xray:26.10.31 uuid
@@ -248,5 +277,6 @@ and tzdata current.
   key pair `xray vlessenc` printed on 26.10.31, which the derivation must
   reproduce.
 - `smoke.sh`: rootless Podman. Covers the references, the seeded key pair end
-  to end, the healthcheck, the refusals an operator is most likely to meet,
+  to end, both client-side commands against upstream's own derivation, the
+  healthcheck, the refusals an operator is most likely to meet,
   and the absence of every secret from the output.
