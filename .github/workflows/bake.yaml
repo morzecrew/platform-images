@@ -25,33 +25,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Both published platforms, each on a native runner, so an image that builds
-  # or starts on amd64 only fails here rather than in the publish run.
-  bake:
-    strategy:
-      # One platform failing says nothing about the other; cancelling it would
-      # hide whether a fix is needed once or twice.
-      fail-fast: false
-      matrix:
-        runner: [ubuntu-24.04, ubuntu-24.04-arm]
-    runs-on: ${{ matrix.runner }}
-    name: Bake and smoke (${{ matrix.runner }})
+  # The checks that need no image, and the target list the legs fan out over.
+  # These are seconds, they fail for reasons that are legible on their own, and
+  # a broken helper would otherwise surface as a container that will not start.
+  # None of them depends on the platform, so they run once.
+  plan:
+    runs-on: ubuntu-24.04
+    name: Plan and check
+    outputs:
+      targets: ${{ steps.targets.outputs.targets }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          # This job builds and runs code from the PR head. A checkout-managed
-          # token left in .git/config would be readable by all of it, and
-          # nothing here pushes.
+          # This job runs code from the PR head. A checkout-managed token left
+          # in .git/config would be readable by all of it, and nothing here
+          # pushes.
           persist-credentials: false
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-
-      # Before the builds, not after: these are seconds, they fail for reasons
-      # that are legible on their own, and a broken helper would otherwise
-      # surface as a container that will not start several minutes later.
       - name: Test the shared env-config helper
         run: sh shared/test/run.sh -v
 
@@ -65,25 +57,71 @@ jobs:
       - name: Check bake argument defaults
         run: bash .github/scripts/arg-defaults.sh
 
-      # RFC 0004 §6's build-mechanism tests. They cannot live in smoke.sh, which
-      # gets one built image: two assert that a bad PG_EXTENSIONS *fails the
-      # build*, and the third needs an image without cron, which no shipped
-      # variant is. §6 calls that one the test that must never be skipped, and
-      # until this step it had never run.
-      #
-      # Two of the three cost nothing -- the validation they exercise happens in
-      # the first RUN layer, so they build with type=cacheonly and no exporter.
-      # The third is a full build.
-      - name: Test the extension mechanism
-        run: bash images/postgres/test-extensions.sh
+      # Driven by targets, not by directories. Iterating images/*/smoke.sh tests
+      # one image per directory, which silently skips any target sharing a
+      # directory with another -- every RFC 0004 extension variant. A target's
+      # context *is* its image directory, and a variant inherits it, so
+      # `bake --print` already answers "which script tests this target" with no
+      # naming convention to get wrong. publish.yaml resolves it the same way.
+      - name: List the targets, each with its smoke test
+        id: targets
+        run: |
+          set -euo pipefail
+          plan="$(docker buildx bake --print)"
+          targets="$(printf '%s' "${plan}" \
+            | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')"
+          failed=0
+          for t in ${targets}; do
+            script="$(printf '%s' "${plan}" | python3 -c \
+              "import json,sys,pathlib; print(pathlib.PurePath(json.load(sys.stdin)['target']['${t}']['context'], 'smoke.sh'))")"
+            [ -f "${script}" ] || {
+              echo "::error title=No smoke test::${t} has no ${script}"
+              failed=1
+            }
+          done
+          [ "${failed}" -eq 0 ]
+          echo "targets: ${targets}"
+          printf 'targets=%s\n' "$(printf '%s' "${plan}" \
+            | python3 -c 'import json,sys; print(json.dumps(sorted(json.load(sys.stdin)["target"])))')" \
+            >>"${GITHUB_OUTPUT}"
 
-      # One job, one build. A separate smoke job would have to build again --
-      # images do not cross job boundaries without an artifact upload -- so the
-      # thing smoke-tested would not be the thing the build step verified, and
-      # CI would pay for every image twice.
+  # One leg per target and platform, each on a native runner, so an image that
+  # builds or starts on amd64 only fails here rather than in the publish run.
+  # The legs run side by side: a run takes as long as its slowest image rather
+  # than the sum of them all.
+  bake:
+    needs: plan
+    strategy:
+      # One leg failing says nothing about the others; cancelling them would
+      # hide whether a fix is needed once or several times.
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.plan.outputs.targets) }}
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    name: ${{ matrix.target }} (${{ matrix.runner }})
+    env:
+      TARGET: ${{ matrix.target }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # This job builds and runs code from the PR head. A checkout-managed
+          # token left in .git/config would be readable by all of it, and
+          # nothing here pushes.
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      # One build, smoke-tested in the same job. A separate smoke job would have
+      # to build again -- images do not cross job boundaries without an
+      # artifact upload -- so the thing smoke-tested would not be the thing the
+      # build step verified.
       #
-      # Per target rather than one invocation: `--set "*.output=...dest="`
-      # cannot give distinct destinations to several targets at once.
+      # uv-builder's leg also builds python-distroless: build-uv-app's test
+      # below runs this commit's builder output on this commit's runtime.
       #
       # `type=oci`, not `type=docker`: every target inherits `_attested`, and
       # attestations make the result a manifest list, which the docker exporter
@@ -102,34 +140,56 @@ jobs:
       # as a privileged filesystem write and refuses without an explicit grant.
       # Scoped to the one directory rather than BUILDX_BAKE_ENTITLEMENTS_FS=0,
       # which would switch the check off wholesale.
-      - name: Build and load images into Podman
+      - name: Build and load into Podman
         run: |
           set -euo pipefail
-          plan="$(docker buildx bake --print)"
-          targets=$(echo "${plan}" \
-            | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')
-          echo "targets: ${targets}"
-          for target in ${targets}; do
-            echo "::group::build ${target}"
-            tag="$(echo "${plan}" \
-              | python3 -c "import json,sys; print(json.load(sys.stdin)['target']['${target}']['tags'][0])")"
-            docker buildx bake --allow=fs.write=/tmp --set "${target}.tags=${tag}" \
-              --set "${target}.output=type=oci,dest=/tmp/img-${target}.tar" "${target}"
-            podman load -i "/tmp/img-${target}.tar"
-            rm -f "/tmp/img-${target}.tar"
-            echo "::endgroup::"
+          builds="${TARGET}"
+          if [ "${TARGET}" = uv-builder ]; then builds="${builds} python-distroless"; fi
+          for t in ${builds}; do
+            tag="$(docker buildx bake --print "${t}" \
+              | python3 -c "import json,sys; print(json.load(sys.stdin)['target']['${t}']['tags'][0])")"
+            docker buildx bake --allow=fs.write=/tmp --set "${t}.tags=${tag}" \
+              --set "${t}.output=type=oci,dest=/tmp/img-${t}.tar" "${t}"
+            podman load -i "/tmp/img-${t}.tar"
+            rm -f "/tmp/img-${t}.tar"
           done
           podman images
 
+      # Rootless rather than Docker: rootless is where UID mapping, volume
+      # ownership and sub-1024 port binds actually fail, and those are the
+      # assumptions Docker hides until a customer's air-gapped install finds
+      # them. Podman is present on both runner images without setup.
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          plan="$(docker buildx bake --print "${TARGET}")"
+          script="$(printf '%s' "${plan}" | python3 -c "import json,sys,pathlib; print(pathlib.PurePath(json.load(sys.stdin)['target']['${TARGET}']['context'], 'smoke.sh'))")"
+          ref="$(printf '%s' "${plan}" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin)['target']['${TARGET}']['tags'][0])")"
+          bash "${script}" "${ref}"
+
+      # RFC 0004 §6's build-mechanism tests. They cannot live in smoke.sh, which
+      # gets one built image: two assert that a bad PG_EXTENSIONS *fails the
+      # build*, and the third needs an image without cron, which no shipped
+      # variant is. §6 calls that one the test that must never be skipped.
+      #
+      # Two of the three cost nothing -- the validation they exercise happens in
+      # the first RUN layer, so they build with type=cacheonly and no exporter.
+      # The third is a full build, which the postgres build above has warmed.
+      - name: Test the extension mechanism
+        if: matrix.target == 'postgres'
+        run: bash images/postgres/test-extensions.sh
+
       # RFC 0009 §6's battery for build-js-app. Same reason it cannot live in
       # smoke.sh: it needs fixture projects, builds that must *fail*, and a
-      # second image to serve the result.
+      # second image to serve the result. The script builds its own npm-builder.
       #
-      # After the build, not before, so the handoff is served by the caddy this
-      # commit built rather than the published tag: that is the pair this
-      # change would ship, and a published tag can lack the runner's platform
-      # (caddy had no arm64 until the change adding it was published).
+      # In caddy's leg, so the handoff is served by the caddy this commit built
+      # rather than the published tag: that is the pair this change would ship,
+      # and a published tag can lack the runner's platform (caddy had no arm64
+      # until the change adding it was published).
       - name: Test build-js-app
+        if: matrix.target == 'caddy'
         run: |
           set -euo pipefail
           CADDY_REF="$(docker buildx bake --print caddy \
@@ -139,6 +199,7 @@ jobs:
       # build-uv-app's deps/app split needs two builds and a second image, the
       # python-distroless the result would ship on. Both are this commit's.
       - name: Test build-uv-app's two layers
+        if: matrix.target == 'uv-builder'
         run: |
           set -euo pipefail
           ref() {
@@ -148,58 +209,21 @@ jobs:
           UV_BUILDER_REF="$(ref uv-builder)" DISTROLESS_REF="$(ref python-distroless)" \
             bash images/uv-builder/test-build-uv-app.sh
 
-      # Rootless rather than Docker: rootless is where UID mapping, volume
-      # ownership and sub-1024 port binds actually fail, and those are the
-      # assumptions Docker hides until a customer's air-gapped install finds
-      # them. Podman is present on both runner images without setup.
-      #
-      # Driven by targets, not by directories. Iterating images/*/smoke.sh tests
-      # one image per directory, which silently skips any target sharing a
-      # directory with another -- every RFC 0004 extension variant. Those would be
-      # built by the step above and never smoke-tested here, then refused by
-      # publish.yaml for having no script of their own: built, untested, unpublished.
-      #
-      # A target's context *is* its image directory, and a variant inherits it, so
-      # `bake --print` already answers "which script tests this target" with no
-      # naming convention to get wrong. publish.yaml resolves it the same way.
-      - name: Smoke test each image
-        run: |
-          set -euo pipefail
-          failed=0
-          plan="$(docker buildx bake --print)"
-          targets=$(echo "${plan}" \
-            | python3 -c 'import json,sys; print(" ".join(sorted(json.load(sys.stdin)["target"])))')
-          for name in ${targets}; do
-            script="$(echo "${plan}" | python3 -c "import json,sys,pathlib; print(pathlib.PurePath(json.load(sys.stdin)['target']['${name}']['context'], 'smoke.sh'))")"
-            [ -f "${script}" ] || {
-              echo "::error title=No smoke test::${name} has no ${script}"
-              failed=1
-              continue
-            }
-            ref="$(echo "${plan}" \
-              | python3 -c "import json,sys; print(json.load(sys.stdin)['target']['${name}']['tags'][0])")"
-            echo "::group::smoke ${name} (${ref})"
-            if bash "${script}" "${ref}"; then
-              echo "ok: ${name}"
-            else
-              echo "::error title=Smoke failed::${name} (${ref})"
-              failed=1
-            fi
-            echo "::endgroup::"
-          done
-          exit "${failed}"
-
   # The check the main ruleset requires, by the name it requires. A matrix leg
-  # reports as "Bake and smoke (<runner>)", which no ruleset entry names, so
-  # this one job stands for all of them and keeps its name when the matrix
-  # changes. `always()` is load-bearing: a required check that is skipped
-  # counts as passed, so without it a failed leg would read as green here.
+  # reports as "<target> (<runner>)", which no ruleset entry names, so this one
+  # job stands for all of them and keeps its name when the matrix changes.
+  # `always()` is load-bearing: a required check that is skipped counts as
+  # passed, so without it a failed leg would read as green here. plan is named
+  # too: when it fails, the legs are skipped, and skipped is not success.
   required:
-    needs: bake
+    needs: [plan, bake]
     if: always()
     runs-on: ubuntu-latest
     name: Bake Images (build only)
 
     steps:
-      - name: Every platform passed
-        run: test "${{ needs.bake.result }}" = success
+      - name: Every leg passed
+        env:
+          PLAN: ${{ needs.plan.result }}
+          BAKE: ${{ needs.bake.result }}
+        run: test "${PLAN}" = success && test "${BAKE}" = success
