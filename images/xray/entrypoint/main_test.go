@@ -635,8 +635,6 @@ func TestProxy(t *testing.T) {
 		{"[::1]:8080", proxyServer{"::1", 8080, "", ""}, "no credentials"},
 		{"203.0.113.7:3128\n", proxyServer{"203.0.113.7", 3128, "", ""}, "no credentials"},
 		{"Proxy-1.example_net:01080", proxyServer{"Proxy-1.example_net", 1080, "", ""}, "no credentials"},
-		// "user:pass" that lost its "@host:port": the summary must not show it.
-		{"alice:1234", proxyServer{"alice", 1234, "", ""}, "no credentials"},
 		{"alice:pw@" + strings.Repeat("a", 63) + ".example:1080", proxyServer{strings.Repeat("a", 63) + ".example", 1080, "alice", "pw"}, strings.Repeat("a", 63) + ".example:1080"},
 	} {
 		file := write(t, filepath.Join(dir, "proxy"), tc.content, 0o600)
@@ -703,7 +701,9 @@ func TestProxyRefusals(t *testing.T) {
 		{"an empty password", user + ":@proxy.example:1080", "before the @ is not a user and a password"},
 		{"an empty user", ":" + pass + "@proxy.example:1080", "before the @ is not a user and a password"},
 		{"nothing before the @", "@proxy.example:1080", "before the @ is not a user and a password"},
-		{"no @, so the password reads as the port", user + ":" + pass, "the port is not a number from 1 to 65535"},
+		{"no @, so the user reads as a host", user + ":" + pass, "there is no @, and a host with no dot"},
+		{"no @, and a password that is a port", "alice:1234", "there is no @, and a host with no dot"},
+		{"a dotted user with no @", "alice.b:" + pass, "the port is not a number from 1 to 65535"},
 		{"no host or port", user + ":" + pass + "@", "does not end in a host, a colon and a port"},
 		{"no port", user + ":" + pass + "@proxy.example", "does not end in a host, a colon and a port"},
 		{"an empty port", user + ":" + pass + "@proxy.example:", "the port is missing"},
@@ -722,6 +722,10 @@ func TestProxyRefusals(t *testing.T) {
 		{"an empty label", user + ":" + pass + "@proxy..example:1080", "the host is not a DNS name"},
 		{"a trailing dot", user + ":" + pass + "@proxy.example.:1080", "the host is not a DNS name"},
 		{"a 254-byte name", user + ":" + pass + "@" + strings.Repeat("a.", 126) + "ab:1080", "the host is not a DNS name"},
+		{"an IPv4 address out of range", user + ":" + pass + "@999.999.999.999:1080", "the host is not a DNS name"},
+		{"five IPv4 octets", user + ":" + pass + "@1.2.3.4.5:1080", "the host is not a DNS name"},
+		{"a label ending in a hyphen", user + ":" + pass + "@proxy-.example:1080", "the host is not a DNS name"},
+		{"a label starting with a hyphen", user + ":" + pass + "@-proxy.example:1080", "the host is not a DNS name"},
 		{"empty", "", "does not end in a host, a colon and a port"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -731,7 +735,9 @@ func TestProxyRefusals(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "outbounds[0].settings: "+file+" ") || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v\nwant %q", err, tc.want)
 			}
-			for _, s := range []string{user, pass, "alice", "s3cret"} {
+			// Fragments too: a message that quoted part of the value would
+			// carry one of these.
+			for _, s := range []string{user, pass, "alice", "s3cret", "7f3a", "9c2e", "1234"} {
 				if strings.Contains(err.Error(), s) {
 					t.Errorf("error %q carries %q", err, s)
 				}

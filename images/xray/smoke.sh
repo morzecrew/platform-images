@@ -242,16 +242,18 @@ printf '%s\n' "${PROXY_PASS}" >"${WORK}/secrets/proxy_pass"
 printf '%s:%s@127.0.0.1:%s\n' "${PROXY_USER}" "${PROXY_PASS}" "${UP_SOCKS_PORT}" >"${WORK}/secrets/proxy_socks"
 printf '%s:%s@127.0.0.1:%s\n' "${PROXY_USER}" "${PROXY_PASS}" "${UP_HTTP_PORT}" >"${WORK}/secrets/proxy_http"
 # Proxy lines section 7 refuses. The last is the credentials alone, which an
-# error that quoted what it could not parse would print.
+# error that quoted what it could not parse would print; its password has no
+# "@", which would make its tail the host.
 printf 'socks5://%s:%s@127.0.0.1:%s\n' "${PROXY_USER}" "${PROXY_PASS}" "${UP_SOCKS_PORT}" >"${WORK}/secrets/proxy_scheme"
 printf '%s:%s@127.0.0.1\n' "${PROXY_USER}" "${PROXY_PASS}" >"${WORK}/secrets/proxy_no_port"
-printf '%s:%s\n' "${PROXY_USER}" "${PROXY_PASS}" >"${WORK}/secrets/proxy_no_host"
+PROXY_PASS_LONE="lone-$$-$(python3 -c 'import secrets; print(secrets.token_hex(8))')"
+printf '%s:%s\n' "${PROXY_USER}" "${PROXY_PASS_LONE}" >"${WORK}/secrets/proxy_no_host"
 chmod 0400 "${WORK}/secrets/"*
 mkdir "${WORK}/secrets/a_directory"
 touch "${WORK}/www/generate_204"
 printf '203.0.113.7\n' >"${WORK}/www/ip"
 SECRETS=("${uuid}" "${uuid^^}" "${ID_B}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}"
-	"${PROXY_USER}" "${PROXY_PASS}")
+	"${PROXY_USER}" "${PROXY_PASS}" "${PROXY_PASS_LONE}" "${PROXY_PASS##*@}")
 
 # client_value <command> <path>: one of the helper's client-side subcommands,
 # with the secrets mounted.
@@ -546,7 +548,7 @@ done
 # label:file:message, as above. Neither the user nor the password may be in any.
 for case in "a scheme:scheme:holds a URL. Write user:pass@host:port, without the scheme" \
 	"no port:no_port:does not hold [user:pass@]host:port: it does not end in a host, a colon and a port" \
-	"the credentials and no host:no_host:does not hold [user:pass@]host:port: it does not end in a host, a colon and a port"; do
+	"the credentials and no host:no_host:does not hold [user:pass@]host:port: there is no @, and a host with no dot"; do
 	label="${case%%:*}" rest="${case#*:}"
 	file="proxy_${rest%%:*}" needle="${rest#*:}"
 	config "${WORK}/${file}" "" "" "" "{\"\$proxy\": \"/run/secrets/${file}\"}"

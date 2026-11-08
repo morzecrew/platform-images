@@ -565,17 +565,26 @@ type proxyServer struct {
 	Pass    string `json:"pass,omitempty"`
 }
 
-// One label of a DNS name, or of an IPv4 address: DNS caps a label at 63
-// bytes and a name at 253, so a longer one resolves nowhere.
-var labelRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,63}$`)
+// One label of a DNS name: no hyphen at either end, and at most 63 bytes, as
+// DNS caps it, with the name at 253; a longer one resolves nowhere.
+var (
+	labelRE   = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?$`)
+	numericRE = regexp.MustCompile(`^[0-9.]+$`)
+)
 
-// A DNS name or an IPv4 address. An IPv6 address comes in brackets.
+// A DNS name or an IPv4 address. An IPv6 address comes in brackets. A host of
+// digits and dots alone is an IPv4 address or nothing, so 999.999.999.999 is
+// refused here rather than looked up.
 func validHost(host string) bool {
+	if numericRE.MatchString(host) {
+		ip := net.ParseIP(host)
+		return ip != nil && ip.To4() != nil
+	}
 	if len(host) > 253 {
 		return false
 	}
 	for label := range strings.SplitSeq(host, ".") {
-		if !labelRE.MatchString(label) {
+		if len(label) > 63 || !labelRE.MatchString(label) {
 			return false
 		}
 	}
@@ -642,6 +651,11 @@ func parseProxy(s string) (proxyServer, error) {
 		}
 	case !validHost(host):
 		return fail("the host is not a DNS name, an IPv4 address or an IPv6 address in brackets")
+	case p.User == "" && !strings.Contains(host, ".") && !strings.HasPrefix(hostport, "["):
+		// Most likely "user:pass" that lost its "@host:port", whose password
+		// would become a port that nothing redacts. A proxy that asks for no
+		// login is reached at a dotted name or an address.
+		return fail("there is no @, and a host with no dot reads as a user and a password that lost their @host:port")
 	}
 	if port == "" {
 		return fail("the port is missing")

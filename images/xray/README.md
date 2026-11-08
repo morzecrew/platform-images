@@ -219,7 +219,11 @@ the value or any part of it:
 - Whitespace anywhere, a second line or a CRLF included.
 - An `@` without both a user and a password before it.
 - An empty host, an IPv6 address without brackets, brackets around anything
-  else, or a host with a character no DNS name or IPv4 address has.
+  else, or a host that is not a DNS name or an IPv4 address.
+- No `@` and a host with no dot, such as `alice:1234`: most likely a user and
+  a password that lost their `@host:port`, whose password would otherwise
+  become a port that nothing redacts. A proxy that asks for no login is
+  written with a dotted name or an address.
 - A missing port, or one that is not a number from 1 to 65535.
 
 ## VLESS Encryption from one seed
