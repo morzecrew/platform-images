@@ -615,3 +615,137 @@ func TestVlessClientsRefusals(t *testing.T) {
 		t.Errorf("a 64-character name: %v", err)
 	}
 }
+
+// The format dotdash's gate reads its upstream from: the userinfo ends at the
+// last @, the user at its first colon, and nothing is decoded.
+func TestProxy(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		content string
+		want    proxyServer
+		note    string
+	}{
+		{"alice:s3cret@proxy.example:1080\n", proxyServer{"proxy.example", 1080, "alice", "s3cret"}, "proxy.example:1080"},
+		{"alice:pa:ss:wd@proxy.example:1080", proxyServer{"proxy.example", 1080, "alice", "pa:ss:wd"}, "proxy.example:1080"},
+		{"alice:p@ss@w0rd@203.0.113.7:3128", proxyServer{"203.0.113.7", 3128, "alice", "p@ss@w0rd"}, "203.0.113.7:3128"},
+		{"alice:@:@x@proxy.example:1", proxyServer{"proxy.example", 1, "alice", "@:@x"}, "proxy.example:1"},
+		{"al@ice:pw@proxy.example:65535", proxyServer{"proxy.example", 65535, "al@ice", "pw"}, "proxy.example:65535"},
+		{"alice:p%40ss@proxy.example:1080", proxyServer{"proxy.example", 1080, "alice", "p%40ss"}, "proxy.example:1080"},
+		{"alice:s3cret@[2001:db8::1]:1080", proxyServer{"2001:db8::1", 1080, "alice", "s3cret"}, "[2001:db8::1]:1080"},
+		{"[::1]:8080", proxyServer{"::1", 8080, "", ""}, "no credentials"},
+		{"203.0.113.7:3128\n", proxyServer{"203.0.113.7", 3128, "", ""}, "no credentials"},
+		{"Proxy-1.example_net:01080", proxyServer{"Proxy-1.example_net", 1080, "", ""}, "no credentials"},
+		{"alice:pw@" + strings.Repeat("a", 63) + ".example:1080", proxyServer{strings.Repeat("a", 63) + ".example", 1080, "alice", "pw"}, strings.Repeat("a", 63) + ".example:1080"},
+	} {
+		file := write(t, filepath.Join(dir, "proxy"), tc.content, 0o600)
+		r, err := proxy(file)
+		if err != nil || r.value != tc.want || r.note != tc.note {
+			t.Errorf("%q: %+v, %v\nwant %+v, note %q", tc.content, r, err, tc.want, tc.note)
+		}
+		var secrets []string
+		if tc.want.User != "" {
+			secrets = []string{tc.want.User, tc.want.Pass}
+		}
+		if !slices.Equal(r.secrets, secrets) {
+			t.Errorf("%q: secrets to redact = %q", tc.content, r.secrets)
+		}
+	}
+
+	// The whole settings of an outbound, the port a JSON number, and the
+	// credentials left out when the file has none.
+	withAuth := write(t, filepath.Join(dir, "with"), "alice:p:@ss@proxy.example:1080\n", 0o400)
+	without := write(t, filepath.Join(dir, "without"), "[2001:db8::1]:3128\n", 0o400)
+	src := write(t, filepath.Join(dir, "c.json"), `{"outbounds": [
+		{"protocol": "socks", "settings": {"$proxy": "`+withAuth+`"}},
+		{"protocol": "http", "settings": {"$proxy": "`+without+`"}}
+	]}`, 0o600)
+	c, err := resolveFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"outbounds":[{"protocol":"socks","settings":{"address":"proxy.example","port":1080,"user":"alice","pass":"p:@ss"}},{"protocol":"http","settings":{"address":"2001:db8::1","port":3128}}]}` + "\n"
+	if string(c.out) != want {
+		t.Errorf("resolved\n got %s\nwant %s", c.out, want)
+	}
+	wantRefs := []ref{
+		{"outbounds[0].settings", "$proxy", withAuth, "proxy.example:1080"},
+		{"outbounds[1].settings", "$proxy", without, "no credentials"},
+	}
+	if !slices.Equal(c.refs, wantRefs) {
+		t.Errorf("refs = %v, want %v", c.refs, wantRefs)
+	}
+	if !slices.Equal(c.values, []string{"alice", "p:@ss"}) {
+		t.Errorf("values to redact = %q", c.values)
+	}
+	var b bytes.Buffer
+	summary(&b, "Xray 26.10.31", []*config{c})
+	if line := "outbounds[0].settings <- $proxy " + withAuth + " proxy.example:1080   (" + src + ")"; !strings.Contains(b.String(), line) {
+		t.Errorf("summary lacks %q:\n%s", line, b.String())
+	}
+}
+
+// Each refusal names the file and what is wrong, and the value carries a user
+// and a password that must not appear in the error, nor any part of them.
+func TestProxyRefusals(t *testing.T) {
+	dir := t.TempDir()
+	const user, pass = "alice-7f3a", "s3cret-9c2e"
+	for _, tc := range []struct{ name, content, want string }{
+		{"a socks5 scheme", "socks5://" + user + ":" + pass + "@proxy.example:1080", "holds a URL. Write user:pass@host:port, without the scheme"},
+		{"an http scheme", "http://proxy.example:3128", "without the scheme"},
+		{"a space", user + ":" + pass + " @proxy.example:1080", "contains whitespace"},
+		{"a leading tab", "\t" + user + ":" + pass + "@proxy.example:1080", "contains whitespace"},
+		{"CRLF", user + ":" + pass + "@proxy.example:1080\r\n", "contains whitespace"},
+		{"a second line", user + ":" + pass + "@proxy.example:1080\n\n", "contains whitespace"},
+		{"a no-break space", user + ":" + pass + "\u00a0@proxy.example:1080", "contains whitespace"},
+		{"no password", user + "@proxy.example:1080", "before the @ is not a user and a password"},
+		{"an empty password", user + ":@proxy.example:1080", "before the @ is not a user and a password"},
+		{"an empty user", ":" + pass + "@proxy.example:1080", "before the @ is not a user and a password"},
+		{"nothing before the @", "@proxy.example:1080", "before the @ is not a user and a password"},
+		{"no @, so the user reads as a host", user + ":" + pass, "there is no @, and a host with no dot"},
+		{"no @, and a password that is a port", "alice:1234", "there is no @, and a host with no dot"},
+		{"a dotted user with no @", "alice.b:" + pass, "the port is not a number from 1 to 65535"},
+		{"no host or port", user + ":" + pass + "@", "does not end in a host, a colon and a port"},
+		{"no port", user + ":" + pass + "@proxy.example", "does not end in a host, a colon and a port"},
+		{"an empty port", user + ":" + pass + "@proxy.example:", "the port is missing"},
+		{"an empty host", user + ":" + pass + "@:1080", "the host is empty"},
+		{"empty brackets", user + ":" + pass + "@[]:1080", "the host is empty"},
+		{"port 0", user + ":" + pass + "@proxy.example:0", "the port is not a number from 1 to 65535"},
+		{"port 65536", user + ":" + pass + "@proxy.example:65536", "the port is not a number from 1 to 65535"},
+		{"a signed port", user + ":" + pass + "@proxy.example:+1080", "the port is not a number from 1 to 65535"},
+		{"a named port", user + ":" + pass + "@proxy.example:socks", "the port is not a number from 1 to 65535"},
+		{"IPv6 without brackets", user + ":" + pass + "@2001:db8::1:1080", "does not end in a host, a colon and a port"},
+		{"an unclosed bracket", user + ":" + pass + "@[2001:db8::1:1080", "does not end in a host, a colon and a port"},
+		{"a name in brackets", user + ":" + pass + "@[proxy.example]:1080", "the brackets hold something other than an IPv6 address"},
+		{"IPv4 in brackets", user + ":" + pass + "@[203.0.113.7]:1080", "the brackets hold something other than an IPv6 address"},
+		{"a path", user + ":" + pass + "@proxy.example/x:1080", "the host is not a DNS name"},
+		{"a 64-byte label", user + ":" + pass + "@" + strings.Repeat("a", 64) + ".example:1080", "the host is not a DNS name"},
+		{"an empty label", user + ":" + pass + "@proxy..example:1080", "the host is not a DNS name"},
+		{"a trailing dot", user + ":" + pass + "@proxy.example.:1080", "the host is not a DNS name"},
+		{"a 254-byte name", user + ":" + pass + "@" + strings.Repeat("a.", 126) + "ab:1080", "the host is not a DNS name"},
+		{"an IPv4 address out of range", user + ":" + pass + "@999.999.999.999:1080", "the host is not a DNS name"},
+		{"five IPv4 octets", user + ":" + pass + "@1.2.3.4.5:1080", "the host is not a DNS name"},
+		{"a label ending in a hyphen", user + ":" + pass + "@proxy-.example:1080", "the host is not a DNS name"},
+		{"a label starting with a hyphen", user + ":" + pass + "@-proxy.example:1080", "the host is not a DNS name"},
+		{"empty", "", "does not end in a host, a colon and a port"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := write(t, filepath.Join(dir, "proxy"), tc.content, 0o600)
+			src := write(t, filepath.Join(dir, "c.json"), `{"outbounds": [{"protocol": "socks", "settings": {"$proxy": "`+file+`"}}]}`, 0o600)
+			_, err := resolveFile(src)
+			if err == nil || !strings.Contains(err.Error(), "outbounds[0].settings: "+file+" ") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v\nwant %q", err, tc.want)
+			}
+			// Fragments too: a message that quoted part of the value would
+			// carry one of these.
+			for _, s := range []string{user, pass, "alice", "s3cret", "7f3a", "9c2e", "1234"} {
+				if strings.Contains(err.Error(), s) {
+					t.Errorf("error %q carries %q", err, s)
+				}
+			}
+		})
+	}
+	src := write(t, filepath.Join(dir, "c.json"), `{"settings": {"$proxy": "/run/secrets/upstream", "address": "x"}}`, 0o600)
+	if _, err := resolveFile(src); err == nil || !strings.Contains(err.Error(), `an object holding "$proxy" holds nothing else, and this one also holds address`) {
+		t.Errorf("beside another key: err = %v", err)
+	}
+}

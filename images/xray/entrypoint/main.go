@@ -12,7 +12,9 @@
 // exactly {"$vlessDecryption": "/absolute/path"} with the VLESS Encryption
 // server key derived from the seed in that file, or exactly
 // {"$vlessClients": "/absolute/path"} with the VLESS clients that file lists,
-// and changes nothing else. The contract is in images/xray/README.md.
+// or exactly {"$proxy": "/absolute/path"} with a socks or http outbound's
+// settings, split from the [user:pass@]host:port in that file, and changes
+// nothing else. The contract is in images/xray/README.md.
 package main
 
 import (
@@ -26,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -34,9 +37,11 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -229,6 +234,7 @@ var references = []struct {
 	{"$file", secret(readSecret)},
 	{"$vlessDecryption", secret(vlessDecryption)},
 	{"$vlessClients", vlessClients},
+	{"$proxy", proxy},
 }
 
 // A reference that resolves to one string, which is itself the secret.
@@ -548,6 +554,119 @@ func parseClients(s string) ([]vlessClient, error) {
 		return nil, errors.New("lists no client: every line is blank or a comment")
 	}
 	return clients, nil
+}
+
+// The whole "settings" of a socks or http outbound, in Xray's flat form, which
+// takes these four keys for both protocols.
+type proxyServer struct {
+	Address string `json:"address"`
+	Port    int    `json:"port"`
+	User    string `json:"user,omitempty"`
+	Pass    string `json:"pass,omitempty"`
+}
+
+// One label of a DNS name: no hyphen at either end, and at most 63 bytes, as
+// DNS caps it, with the name at 253; a longer one resolves nowhere.
+var (
+	labelRE   = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_-]*[A-Za-z0-9_])?$`)
+	numericRE = regexp.MustCompile(`^[0-9.]+$`)
+)
+
+// A DNS name or an IPv4 address. An IPv6 address comes in brackets. A host of
+// digits and dots alone is an IPv4 address or nothing, so 999.999.999.999 is
+// refused here rather than looked up.
+func validHost(host string) bool {
+	if numericRE.MatchString(host) {
+		ip := net.ParseIP(host)
+		return ip != nil && ip.To4() != nil
+	}
+	if len(host) > 253 {
+		return false
+	}
+	for label := range strings.SplitSeq(host, ".") {
+		if len(label) > 63 || !labelRE.MatchString(label) {
+			return false
+		}
+	}
+	return true
+}
+
+// An upstream proxy is one secret, "[user:pass@]host:port", so changing
+// provider is one edit and one restart. Kept as an address, a port and two
+// credentials, it took several, each restarting the service, which ran on a
+// mismatched set in between. The user and the password are redacted like any
+// secret. host:port is not secret, and the summary shows it, so the operator
+// sees where the traffic goes; but only after an @. A line that lost its
+// "@host:port" parses as a host and a port, and that port is the password.
+func proxy(name string) (resolution, error) {
+	s, err := readSecret(name)
+	if err != nil {
+		return resolution{}, err
+	}
+	p, err := parseProxy(s)
+	if err != nil {
+		return resolution{}, err
+	}
+	r := resolution{value: p, note: "no credentials"}
+	if p.User != "" {
+		r.secrets = []string{p.User, p.Pass}
+		r.note = net.JoinHostPort(p.Address, strconv.Itoa(p.Port))
+	}
+	return r, nil
+}
+
+// The userinfo ends at the last @ and the user at its first colon, so a
+// password may hold both. Nothing is percent-decoded: this is not a URL, and a
+// scheme is refused so that it is not written as one. The errors never quote
+// the value: without its @, "user:pass" parses as a host and a port, and the
+// port would be the password.
+func parseProxy(s string) (proxyServer, error) {
+	fail := func(what string) (proxyServer, error) {
+		return proxyServer{}, errors.New("does not hold [user:pass@]host:port: " + what)
+	}
+	if strings.Contains(s, "://") {
+		return proxyServer{}, errors.New("holds a URL. Write user:pass@host:port, without the scheme")
+	}
+	if strings.IndexFunc(s, unicode.IsSpace) >= 0 {
+		return fail("it contains whitespace, where one trailing newline is all a line may have")
+	}
+	var p proxyServer
+	hostport := s
+	if i := strings.LastIndexByte(s, '@'); i >= 0 {
+		hostport = s[i+1:]
+		if p.User, p.Pass, _ = strings.Cut(s[:i], ":"); p.User == "" || p.Pass == "" {
+			return fail("before the @ is not a user and a password, both non-empty, joined by a colon")
+		}
+	}
+	// net's error quotes its input, so it is not passed on.
+	host, port, err := net.SplitHostPort(hostport)
+	switch {
+	case err != nil:
+		return fail("it does not end in a host, a colon and a port, with an IPv6 address in brackets")
+	case host == "":
+		return fail("the host is empty")
+	case strings.HasPrefix(hostport, "["):
+		if net.ParseIP(host) == nil || !strings.Contains(host, ":") {
+			return fail("the brackets hold something other than an IPv6 address")
+		}
+	case !validHost(host):
+		return fail("the host is not a DNS name, an IPv4 address or an IPv6 address in brackets")
+	case p.User == "" && !strings.Contains(host, ".") && !strings.HasPrefix(hostport, "["):
+		// Most likely "user:pass" that lost its "@host:port", whose password
+		// would become a port that nothing redacts. A proxy that asks for no
+		// login is reached at a dotted name or an address.
+		return fail("there is no @, and a host with no dot reads as a user and a password that lost their @host:port")
+	}
+	if port == "" {
+		return fail("the port is missing")
+	}
+	// No sign, base 10, and 16 bits, which caps it at 65535.
+	n, err := strconv.ParseUint(port, 10, 16)
+	if err != nil || n == 0 {
+		return fail("the port is not a number from 1 to 65535")
+	}
+	p.Address, p.Port = host, int(n)
+	return p, nil
 }
 
 // The commands that print what a client config needs from a server secret.

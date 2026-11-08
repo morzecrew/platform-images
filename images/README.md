@@ -231,7 +231,8 @@ configured without `envsubst` is re-examined before it is accepted.
 value from a file or the environment. Its entrypoint replaces a JSON object
 that is exactly `{"$file": "<absolute path>"}` with that file's content,
 `{"$vlessDecryption": "<absolute path>"}` with the key derived from the seed
-in it, or `{"$vlessClients": "<absolute path>"}` with the clients it lists, and
+in it, `{"$vlessClients": "<absolute path>"}` with the clients it lists, or
+`{"$proxy": "<absolute path>"}` with the upstream proxy it names, and
 substitutes nothing else. The config is valid JSON before and after
 and has no second syntax. See [its README](xray/README.md#the-config-and-file-references).
 
