@@ -201,11 +201,15 @@ serves either protocol.
   A user cannot hold `:`.
 - Nothing is percent-decoded. `%40` stays `%40`.
 - The host is a DNS name, an IPv4 address, or an IPv6 address in brackets,
-  `[2001:db8::1]:1080`. The brackets are not part of `address`.
+  `[2001:db8::1]:1080`. The brackets are not part of `address`. A name's
+  labels are 1 to 63 bytes, and the name at most 253, as DNS takes them.
 - The port is decimal, 1 to 65535, and becomes a JSON number.
 - The summary shows `host:port`, which is not secret, so the log says where
-  the outbound dials. The user and password are redacted from `xray run -test`
-  output like every other resolved value.
+  the outbound dials; for a line without credentials it shows `no
+  credentials` instead, since `user:pass` that lost its `@host:port` reads as
+  a host and a port, and the port would be the password. The user and
+  password are redacted from `xray run -test` output like every other
+  resolved value.
 
 Each of these exits 78. The message names the file and what is wrong, never
 the value or any part of it:

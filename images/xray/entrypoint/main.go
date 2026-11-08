@@ -565,15 +565,30 @@ type proxyServer struct {
 	Pass    string `json:"pass,omitempty"`
 }
 
+// One label of a DNS name, or of an IPv4 address: DNS caps a label at 63
+// bytes and a name at 253, so a longer one resolves nowhere.
+var labelRE = regexp.MustCompile(`^[A-Za-z0-9_-]{1,63}$`)
+
 // A DNS name or an IPv4 address. An IPv6 address comes in brackets.
-var hostRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+func validHost(host string) bool {
+	if len(host) > 253 {
+		return false
+	}
+	for label := range strings.SplitSeq(host, ".") {
+		if !labelRE.MatchString(label) {
+			return false
+		}
+	}
+	return true
+}
 
 // An upstream proxy is one secret, "[user:pass@]host:port", so changing
 // provider is one edit and one restart. Kept as an address, a port and two
 // credentials, it took several, each restarting the service, which ran on a
 // mismatched set in between. The user and the password are redacted like any
 // secret. host:port is not secret, and the summary shows it, so the operator
-// sees where the traffic goes.
+// sees where the traffic goes; but only after an @. A line that lost its
+// "@host:port" parses as a host and a port, and that port is the password.
 func proxy(name string) (resolution, error) {
 	s, err := readSecret(name)
 	if err != nil {
@@ -583,9 +598,10 @@ func proxy(name string) (resolution, error) {
 	if err != nil {
 		return resolution{}, err
 	}
-	r := resolution{value: p, note: net.JoinHostPort(p.Address, strconv.Itoa(p.Port))}
+	r := resolution{value: p, note: "no credentials"}
 	if p.User != "" {
 		r.secrets = []string{p.User, p.Pass}
+		r.note = net.JoinHostPort(p.Address, strconv.Itoa(p.Port))
 	}
 	return r, nil
 }
@@ -624,7 +640,7 @@ func parseProxy(s string) (proxyServer, error) {
 		if net.ParseIP(host) == nil || !strings.Contains(host, ":") {
 			return fail("the brackets hold something other than an IPv6 address")
 		}
-	case !hostRE.MatchString(host):
+	case !validHost(host):
 		return fail("the host is not a DNS name, an IPv4 address or an IPv6 address in brackets")
 	}
 	if port == "" {

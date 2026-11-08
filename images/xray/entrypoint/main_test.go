@@ -632,9 +632,12 @@ func TestProxy(t *testing.T) {
 		{"al@ice:pw@proxy.example:65535", proxyServer{"proxy.example", 65535, "al@ice", "pw"}, "proxy.example:65535"},
 		{"alice:p%40ss@proxy.example:1080", proxyServer{"proxy.example", 1080, "alice", "p%40ss"}, "proxy.example:1080"},
 		{"alice:s3cret@[2001:db8::1]:1080", proxyServer{"2001:db8::1", 1080, "alice", "s3cret"}, "[2001:db8::1]:1080"},
-		{"[::1]:8080", proxyServer{"::1", 8080, "", ""}, "[::1]:8080"},
-		{"203.0.113.7:3128\n", proxyServer{"203.0.113.7", 3128, "", ""}, "203.0.113.7:3128"},
-		{"Proxy-1.example_net:01080", proxyServer{"Proxy-1.example_net", 1080, "", ""}, "Proxy-1.example_net:1080"},
+		{"[::1]:8080", proxyServer{"::1", 8080, "", ""}, "no credentials"},
+		{"203.0.113.7:3128\n", proxyServer{"203.0.113.7", 3128, "", ""}, "no credentials"},
+		{"Proxy-1.example_net:01080", proxyServer{"Proxy-1.example_net", 1080, "", ""}, "no credentials"},
+		// "user:pass" that lost its "@host:port": the summary must not show it.
+		{"alice:1234", proxyServer{"alice", 1234, "", ""}, "no credentials"},
+		{"alice:pw@" + strings.Repeat("a", 63) + ".example:1080", proxyServer{strings.Repeat("a", 63) + ".example", 1080, "alice", "pw"}, strings.Repeat("a", 63) + ".example:1080"},
 	} {
 		file := write(t, filepath.Join(dir, "proxy"), tc.content, 0o600)
 		r, err := proxy(file)
@@ -668,7 +671,7 @@ func TestProxy(t *testing.T) {
 	}
 	wantRefs := []ref{
 		{"outbounds[0].settings", "$proxy", withAuth, "proxy.example:1080"},
-		{"outbounds[1].settings", "$proxy", without, "[2001:db8::1]:3128"},
+		{"outbounds[1].settings", "$proxy", without, "no credentials"},
 	}
 	if !slices.Equal(c.refs, wantRefs) {
 		t.Errorf("refs = %v, want %v", c.refs, wantRefs)
@@ -715,6 +718,10 @@ func TestProxyRefusals(t *testing.T) {
 		{"a name in brackets", user + ":" + pass + "@[proxy.example]:1080", "the brackets hold something other than an IPv6 address"},
 		{"IPv4 in brackets", user + ":" + pass + "@[203.0.113.7]:1080", "the brackets hold something other than an IPv6 address"},
 		{"a path", user + ":" + pass + "@proxy.example/x:1080", "the host is not a DNS name"},
+		{"a 64-byte label", user + ":" + pass + "@" + strings.Repeat("a", 64) + ".example:1080", "the host is not a DNS name"},
+		{"an empty label", user + ":" + pass + "@proxy..example:1080", "the host is not a DNS name"},
+		{"a trailing dot", user + ":" + pass + "@proxy.example.:1080", "the host is not a DNS name"},
+		{"a 254-byte name", user + ":" + pass + "@" + strings.Repeat("a.", 126) + "ab:1080", "the host is not a DNS name"},
 		{"empty", "", "does not end in a host, a colon and a port"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
