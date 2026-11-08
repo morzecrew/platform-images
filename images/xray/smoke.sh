@@ -22,6 +22,10 @@ CLIENTS_PORT=$((BASE + 4))
 PROBE_A_PORT=$((BASE + 5))
 PROBE_B_PORT=$((BASE + 6))
 TLS_PORT=$((BASE + 7))
+UP_SOCKS_PORT=$((BASE + 8))
+UP_HTTP_PORT=$((BASE + 9))
+PROBE_SOCKS_PORT=$((BASE + 10))
+PROBE_HTTP_PORT=$((BASE + 11))
 HTTPD_PID=""
 TLSD_PID=""
 ALL_OUTPUT=""
@@ -78,18 +82,24 @@ RUN_ARGS=(--network host --userns keep-id:uid=65532,gid=65532)
 #   inbounds connect to it through Vision, one as each client, so a 2xx from
 #   either proves that client and the flow Xray gave it. Its REALITY target is
 #   a TLS server this script runs on loopback;
+# - a socks and an http inbound that ask for a user and a password, each the
+#   upstream of an outbound of the same kind whose settings are a $proxy
+#   reference, and a probe inbound routed to each outbound, so a 2xx from
+#   either proves the address, the port and the credentials split from one file;
 # - a direct outbound, allowed to reach loopback, where the probe's target is.
 #   Xray's default blocks private addresses for a proxied user;
 # - geoip and geosite rules, so -test fails if Xray cannot find and load the
 #   copied geodata where it looks by default.
 #
-#   config <dir> [id-json] [seeded-decryption-json] [clients-json]
+#   config <dir> [id-json] [seeded-decryption-json] [clients-json] [socks-settings-json]
 config() {
-	local id="${2:-}" seeded="${3:-}" clients="${4:-}"
+	local id="${2:-}" seeded="${3:-}" clients="${4:-}" upstream="${5:-}"
 	[ -n "${id}" ] || id='{"$file": "/run/secrets/vless_uuid"}'
 	[ -n "${seeded}" ] || seeded='{"$vlessDecryption": "/run/secrets/vless_seed"}'
 	[ -n "${clients}" ] || clients='{"$vlessClients": "/run/secrets/vless_clients"}'
+	[ -n "${upstream}" ] || upstream='{"$proxy": "/run/secrets/proxy_socks"}'
 	local reality_client='{"serverName": "reality.test", "password": {"$file": "/run/secrets/reality_password"}, "shortId": "", "fingerprint": "chrome"}'
+	local account='{"user": {"$file": "/run/secrets/proxy_user"}, "pass": {"$file": "/run/secrets/proxy_pass"}}'
 	mkdir -p "$1"
 	cat >"$1/10-xray.json" <<-EOF
 		{
@@ -109,7 +119,13 @@ config() {
 		                        "realitySettings": {"target": "127.0.0.1:${TLS_PORT}", "serverNames": ["reality.test"],
 		                                            "privateKey": {"\$file": "/run/secrets/reality_key"}, "shortIds": [""]}}},
 		    {"tag": "probe-a", "listen": "127.0.0.1", "port": ${PROBE_A_PORT}, "protocol": "http"},
-		    {"tag": "probe-b", "listen": "127.0.0.1", "port": ${PROBE_B_PORT}, "protocol": "http"}
+		    {"tag": "probe-b", "listen": "127.0.0.1", "port": ${PROBE_B_PORT}, "protocol": "http"},
+		    {"tag": "upstream-socks", "listen": "127.0.0.1", "port": ${UP_SOCKS_PORT}, "protocol": "socks",
+		     "settings": {"auth": "password", "accounts": [${account}]}},
+		    {"tag": "upstream-http", "listen": "127.0.0.1", "port": ${UP_HTTP_PORT}, "protocol": "http",
+		     "settings": {"accounts": [${account}]}},
+		    {"tag": "probe-socks", "listen": "127.0.0.1", "port": ${PROBE_SOCKS_PORT}, "protocol": "http"},
+		    {"tag": "probe-http", "listen": "127.0.0.1", "port": ${PROBE_HTTP_PORT}, "protocol": "http"}
 		  ],
 		  "outbounds": [
 		    {"tag": "direct", "protocol": "freedom", "settings": {"finalRules": [{"action": "allow"}]}},
@@ -124,12 +140,16 @@ config() {
 		    {"tag": "to-b", "protocol": "vless",
 		     "settings": {"vnext": [{"address": "127.0.0.1", "port": ${CLIENTS_PORT},
 		                             "users": [{"id": {"\$file": "/run/secrets/vless_uuid_b"}, "encryption": "none", "flow": "xtls-rprx-vision"}]}]},
-		     "streamSettings": {"network": "raw", "security": "reality", "realitySettings": ${reality_client}}}
+		     "streamSettings": {"network": "raw", "security": "reality", "realitySettings": ${reality_client}}},
+		    {"tag": "to-socks", "protocol": "socks", "settings": ${upstream}},
+		    {"tag": "to-http", "protocol": "http", "settings": {"\$proxy": "/run/secrets/proxy_http"}}
 		  ],
 		  "routing": {"rules": [
 		    {"inboundTag": ["probe"], "outboundTag": "to-seeded"},
 		    {"inboundTag": ["probe-a"], "outboundTag": "to-a"},
 		    {"inboundTag": ["probe-b"], "outboundTag": "to-b"},
+		    {"inboundTag": ["probe-socks"], "outboundTag": "to-socks"},
+		    {"inboundTag": ["probe-http"], "outboundTag": "to-http"},
 		    {"ip": ["geoip:private"], "outboundTag": "direct"},
 		    {"domain": ["geosite:private"], "outboundTag": "direct"}
 		  ]}
@@ -205,18 +225,33 @@ printf '%s\n' "${ID_B}" >"${WORK}/secrets/vless_uuid_b"
 # Two devices as an operator keeps them: a comment, a blank line, a tab, and a
 # name on the second.
 printf '# <uuid> [name]\n\n%s\n\t%s\tphone\n' "${uuid}" "${ID_B}" >"${WORK}/secrets/vless_clients"
-# Client lists section 6 refuses, each naming the line at fault.
+# Client lists section 7 refuses, each naming the line at fault.
 printf '# devices\n%s phone spare\n' "${uuid}" >"${WORK}/secrets/clients_three_fields"
 printf '%s\n%s\n' "${uuid}" "${ID_B:0:35}g" >"${WORK}/secrets/clients_not_uuid"
 printf '%s ph/one\n' "${uuid}" >"${WORK}/secrets/clients_bad_name"
 printf '%s\n\n%s phone\n' "${uuid}" "${uuid^^}" >"${WORK}/secrets/clients_same_id"
 printf '%s phone\n%s Phone\n' "${uuid}" "${ID_B}" >"${WORK}/secrets/clients_same_name"
 printf '# nobody yet\n\n' >"${WORK}/secrets/clients_none"
+# An upstream's user and password, which its inbounds read as two files and
+# its outbounds as one line each. The password holds ":" and "@", which only
+# a split at the last @ and the first colon before it gets right.
+PROXY_USER="smoke-proxy-$$"
+PROXY_PASS="p:ss@w0rd-$$-$(python3 -c 'import secrets; print(secrets.token_hex(8))')"
+printf '%s\n' "${PROXY_USER}" >"${WORK}/secrets/proxy_user"
+printf '%s\n' "${PROXY_PASS}" >"${WORK}/secrets/proxy_pass"
+printf '%s:%s@127.0.0.1:%s\n' "${PROXY_USER}" "${PROXY_PASS}" "${UP_SOCKS_PORT}" >"${WORK}/secrets/proxy_socks"
+printf '%s:%s@127.0.0.1:%s\n' "${PROXY_USER}" "${PROXY_PASS}" "${UP_HTTP_PORT}" >"${WORK}/secrets/proxy_http"
+# Proxy lines section 7 refuses. The last is the credentials alone, which an
+# error that quoted what it could not parse would print.
+printf 'socks5://%s:%s@127.0.0.1:%s\n' "${PROXY_USER}" "${PROXY_PASS}" "${UP_SOCKS_PORT}" >"${WORK}/secrets/proxy_scheme"
+printf '%s:%s@127.0.0.1\n' "${PROXY_USER}" "${PROXY_PASS}" >"${WORK}/secrets/proxy_no_port"
+printf '%s:%s\n' "${PROXY_USER}" "${PROXY_PASS}" >"${WORK}/secrets/proxy_no_host"
 chmod 0400 "${WORK}/secrets/"*
 mkdir "${WORK}/secrets/a_directory"
 touch "${WORK}/www/generate_204"
 printf '203.0.113.7\n' >"${WORK}/www/ip"
-SECRETS=("${uuid}" "${uuid^^}" "${ID_B}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}")
+SECRETS=("${uuid}" "${uuid^^}" "${ID_B}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}"
+	"${PROXY_USER}" "${PROXY_PASS}")
 
 # client_value <command> <path>: one of the helper's client-side subcommands,
 # with the secrets mounted.
@@ -343,6 +378,10 @@ expect_in "an unknown XRAY_* name warns" "${logs}" "WARN: XRAY_SMOKE_TYPO is set
 expect_not_in "Xray's own names do not warn" "${logs}" "XRAY_LOCATION_CERT"
 expect_in "summary counts the client list" "${logs}" \
 	"inbounds[3].settings.clients <- \$vlessClients /run/secrets/vless_clients (2 clients)   (/etc/xray/10-xray.json)"
+expect_in "summary shows where the socks upstream is" "${logs}" \
+	"outbounds[4].settings <- \$proxy /run/secrets/proxy_socks 127.0.0.1:${UP_SOCKS_PORT}   (/etc/xray/10-xray.json)"
+expect_in "summary shows where the http upstream is" "${logs}" \
+	"outbounds[5].settings <- \$proxy /run/secrets/proxy_http 127.0.0.1:${UP_HTTP_PORT}   (/etc/xray/10-xray.json)"
 
 # --- 4. one client per device -------------------------------------------------
 
@@ -374,7 +413,25 @@ echo "ok: the revoked client is refused (${code})"
 [ "$(via "${PROBE_A_PORT}")" = 200 ] || fail "the client left in the list no longer connects"
 echo "ok: the client left in the list still connects"
 
-# --- 5. the healthcheck -------------------------------------------------------
+# --- 5. an upstream proxy from one secret -------------------------------------
+
+[ "$(via "${PROBE_SOCKS_PORT}")" = 200 ] || fail "the socks outbound did not get through its upstream"
+[ "$(via "${PROBE_HTTP_PORT}")" = 200 ] || fail "the http outbound did not get through its upstream"
+echo "ok: a socks and an http outbound reach their upstreams with the credentials split from one line"
+# The upstreams refuse a client without the credentials, so the 2xx above
+# proves the outbounds sent them.
+code="$(curl --noproxy '' -s -o /dev/null -w '%{http_code}' --max-time 10 \
+	-x "http://127.0.0.1:${UP_HTTP_PORT}" "http://127.0.0.1:${TARGET_PORT}/generate_204" || true)"
+[ "${code}" = 407 ] || fail "the http upstream answered ${code} to a client without credentials, not 407"
+if curl --noproxy '' -s -o /dev/null --max-time 10 \
+	-x "socks5://127.0.0.1:${UP_SOCKS_PORT}" "http://127.0.0.1:${TARGET_PORT}/generate_204"; then
+	fail "the socks upstream let a client without credentials through"
+fi
+echo "ok: both upstreams refuse a client without the credentials"
+logs="$("${ENGINE}" logs "${CTR}" 2>&1)"
+ALL_OUTPUT+="${logs}"
+
+# --- 6. the healthcheck -------------------------------------------------------
 
 hc() { "${ENGINE}" exec "$@" "${CTR}" /usr/local/bin/xray-entrypoint healthcheck 2>&1; }
 
@@ -413,7 +470,7 @@ expect_in "without a proxy it checks liveness and says egress was not probed" \
 
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
-# --- 6. refusals --------------------------------------------------------------
+# --- 7. refusals --------------------------------------------------------------
 
 # refuse <label> <needle> <conf-dir> [run args...]: exit 78, needle in output.
 # Bounded, so a case that starts Xray instead fails rather than hangs.
@@ -486,6 +543,17 @@ for case in "three fields:three_fields:line 2: 3 fields" \
 		"inbounds[3].settings.clients: /run/secrets/${file} ${needle}" "${WORK}/${file}"
 done
 
+# label:file:message, as above. Neither the user nor the password may be in any.
+for case in "a scheme:scheme:holds a URL. Write user:pass@host:port, without the scheme" \
+	"no port:no_port:does not hold [user:pass@]host:port: it does not end in a host, a colon and a port" \
+	"the credentials and no host:no_host:does not hold [user:pass@]host:port: it does not end in a host, a colon and a port"; do
+	label="${case%%:*}" rest="${case#*:}"
+	file="proxy_${rest%%:*}" needle="${rest#*:}"
+	config "${WORK}/${file}" "" "" "" "{\"\$proxy\": \"/run/secrets/${file}\"}"
+	refuse "a proxy line with ${label}" \
+		"outbounds[4].settings: /run/secrets/${file} ${needle}" "${WORK}/${file}"
+done
+
 # RE2 has no lookahead. Found at deployment, not as an unhealthy container.
 refuse "a healthcheck expression that does not compile" \
 	"XRAY_HEALTHCHECK_EXPECT is not a regular expression in Go's RE2 syntax" \
@@ -496,7 +564,7 @@ refuse "a healthcheck expression that does not compile" \
 refuse "a read-only root without a tmpfs" "XRAY_RUNTIME_DIR is /run/xray, which is not writable by uid 65532" \
 	"${WORK}/conf" --read-only --read-only-tmpfs=false
 
-# --- 7. no secret anywhere ----------------------------------------------------
+# --- 8. no secret anywhere ----------------------------------------------------
 
 for s in "${SECRETS[@]}"; do
 	case "${ALL_OUTPUT}" in

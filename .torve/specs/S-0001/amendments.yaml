@@ -200,10 +200,46 @@ amendments:
     md: >-
       This document read its rows from rfcs/ and kept that directory as the record
       of how each design was reached. Two places for a design invited the wrong one:
-      #134's signing design was written as RFC 0010 and moved to S-0005. rfcs/ is deleted, and torve
-      documents are the only design record. Code and docs cite rows as S-NNNN/D-n.
-      The RFC citations in this document's rationales stay as written, as history
-      readable at 9c0d6f7. D-26 governed rfcs/*.md, so it retires with the directory.
+      #134's signing design was written as RFC 0010 and moved to S-0005. rfcs/ is
+      deleted, and torve documents are the only design record. Code and docs cite
+      rows as S-NNNN/D-n. The RFC citations in this document's rationales stay as
+      written, as history readable at 9c0d6f7. D-26 governed rfcs/*.md, so it retires
+      with the directory.
+  - id: A-8
+    at: '2026-11-08T17:18:08Z'
+    title: >-
+      xray resolves an upstream proxy from one secret file
+    changes:
+      - subject: D-18
+        field: text
+        before: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's server has none, so its entrypoint
+          replaces a JSON object that is exactly `{"$file": "<absolute path>"}`, `{"$vlessDecryption":
+          "<absolute path>"}` or `{"$vlessClients": "<absolute path>"}` with the value
+          that file yields, and substitutes nothing else.
+        after: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's server has none, so its entrypoint
+          replaces a JSON object that is exactly `{"$file": "<absolute path>"}`, `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}` or `{"$proxy":
+          "<absolute path>"}` with the value that file yields, and substitutes nothing
+          else.
+      - subject: D-18
+        field: fingerprint
+        before: 8a6d866ce3179170/f206374b70c16778
+        after: bd0d814b06b384cf/f206374b70c16778
+    md: >-
+      dotdash's gate dials an upstream SOCKS or HTTP proxy whose address and port
+      were bundle parameters and whose user and password were two secrets. Changing
+      provider took several operations, each restarting the gate, which ran on a mismatched
+      set in between. One secret holding `user:pass@host:port` makes it one, and since
+      a bundle template sees only a secret's path, the image splits it. The new form
+      keeps the row's line: it replaces one whole value, an outbound's `settings`,
+      with the object Xray's flat socks and http form takes, and adds no expression
+      or second syntax. The line is not a URL: a scheme is refused and nothing is
+      percent-decoded, so a password may hold `:` and `@` as written. An error never
+      quotes the value, and the user and password are redacted from Xray's output.
 editorial:
   - subject: D-5
     field: text

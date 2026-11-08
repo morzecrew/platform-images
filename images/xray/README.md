@@ -73,6 +73,7 @@ of these. Everything else in the config stays as written.
 | `{"$file": "/abs/path"}` | the file's content as a JSON string, minus one trailing newline |
 | `{"$vlessDecryption": "/abs/path"}` | the VLESS Encryption server key derived from the seed in the file (see below) |
 | `{"$vlessClients": "/abs/path"}` | a VLESS inbound's `clients` array, one client per line of the file (see below) |
+| `{"$proxy": "/abs/path"}` | a socks or http outbound's `settings`, split from the `[user:pass@]host:port` in the file (see below) |
 
 ```json
 "settings": {
@@ -105,11 +106,12 @@ file, the JSON path and the referenced path, never a value.
   file (a directory counts: Compose leaves one where a secret's source file is
   missing), over 64 KiB, not UTF-8, or holding a NUL byte. These are the
   checks the shared `_FILE` contract makes.
-- An object holding `$file`, `$vlessDecryption` or `$vlessClients` and any
-  other key, or a path that is not an absolute path in a string. A near miss
-  would otherwise reach Xray as a literal.
+- An object holding `$file`, `$vlessDecryption`, `$vlessClients` or `$proxy`
+  and any other key, or a path that is not an absolute path in a string. A near
+  miss would otherwise reach Xray as a literal.
 - A seed file that is not exactly 128 hex characters.
 - A client list with a line it refuses (see below).
+- A proxy file that is not one `[user:pass@]host:port` (see below).
 - Any file in `XRAY_SOURCE_DIR` that is not a `.json` file, such as `.yaml`,
   `.toml` or `.jsonc`. Xray's `-confdir` would read those too, and nothing
   would have resolved them.
@@ -169,6 +171,52 @@ Each of these exits 78. The message names the line, never what is on it:
 
 The summary shows the count, not the ids, and the ids are redacted from
 `xray run -test` output like every other resolved value.
+
+## An upstream proxy from one secret
+
+`{"$proxy": "/run/secrets/upstream"}` resolves to the whole `settings` of a
+`socks` or `http` outbound, so an upstream proxy is one secret file and
+changing provider is one edit and one restart. The file holds one line:
+
+```text
+alice:s3cret@proxy.example:1080
+```
+
+```json
+{"tag": "upstream", "protocol": "socks", "settings": {"$proxy": "/run/secrets/upstream"}}
+```
+
+```json
+{"tag": "upstream", "protocol": "socks", "settings": {"address": "proxy.example", "port": 1080, "user": "alice", "pass": "s3cret"}}
+```
+
+Xray's flat form takes the same four keys for `socks` and `http`, so one file
+serves either protocol.
+
+- The line is `[user:pass@]host:port`. Without `user:pass@`, the object has
+  only `address` and `port`.
+- The user and password end at the **last** `@`, and the user at the first `:`
+  before it, so a password may hold `:` and `@` as written:
+  `alice:p@ss:w0rd@proxy.example:1080` is user `alice`, password `p@ss:w0rd`.
+  A user cannot hold `:`.
+- Nothing is percent-decoded. `%40` stays `%40`.
+- The host is a DNS name, an IPv4 address, or an IPv6 address in brackets,
+  `[2001:db8::1]:1080`. The brackets are not part of `address`.
+- The port is decimal, 1 to 65535, and becomes a JSON number.
+- The summary shows `host:port`, which is not secret, so the log says where
+  the outbound dials. The user and password are redacted from `xray run -test`
+  output like every other resolved value.
+
+Each of these exits 78. The message names the file and what is wrong, never
+the value or any part of it:
+
+- A scheme, such as `socks5://` or `http://`. Write `user:pass@host:port`
+  without it.
+- Whitespace anywhere, a second line or a CRLF included.
+- An `@` without both a user and a password before it.
+- An empty host, an IPv6 address without brackets, brackets around anything
+  else, or a host with a character no DNS name or IPv4 address has.
+- A missing port, or one that is not a number from 1 to 65535.
 
 ## VLESS Encryption from one seed
 
@@ -293,6 +341,7 @@ never the value:
 [envconf]   source=file           inbounds[0].settings.clients[0].id <- /run/secrets/vless_uuid   (/etc/xray/10-xray.json)
 [envconf]   source=file           inbounds[0].settings.decryption <- $vlessDecryption /run/secrets/vless_seed   (/etc/xray/10-xray.json)
 [envconf]   source=file           inbounds[1].settings.clients <- $vlessClients /run/secrets/vless_clients (2 clients)   (/etc/xray/10-xray.json)
+[envconf]   source=file           outbounds[1].settings <- $proxy /run/secrets/upstream proxy.example:1080   (/etc/xray/10-xray.json)
 [envconf] precedence: image default < environment
 ```
 
@@ -339,10 +388,11 @@ and tzdata current.
 - `Dockerfile`: the upstream stage pinned by digest, the entrypoint build
   (its tests run there), and the distroless runtime.
 - `entrypoint/`: `xray-entrypoint`, standard library only, and its tests,
-  which cover every file and seed refusal above. `testdata/vlessenc.txt` is a
-  key pair `xray vlessenc` printed on 26.10.31, which the derivation must
-  reproduce.
+  which cover every file, seed, client list and proxy refusal above.
+  `testdata/vlessenc.txt` is a key pair `xray vlessenc` printed on 26.10.31,
+  which the derivation must reproduce.
 - `smoke.sh`: rootless Podman. Covers the references, the seeded key pair end
-  to end, both client-side commands against upstream's own derivation, the
-  healthcheck, the refusals an operator is most likely to meet,
-  and the absence of every secret from the output.
+  to end, both client-side commands against upstream's own derivation, a socks
+  and an http upstream with a password holding `:` and `@`, the healthcheck,
+  the refusals an operator is most likely to meet, and the absence of every
+  secret from the output.
