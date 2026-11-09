@@ -4,7 +4,7 @@
 # version form, as image tags too, so the version comes from GitHub releases,
 # where they are marked.
 # renovate: datasource=github-releases depName=XTLS/Xray-core extractVersion=^v(?<version>.+)$
-ARG XRAY_VERSION=26.10.31
+ARG XRAY_VERSION=26.11.9
 # The image index digest of ghcr.io/xtls/xray-core:${XRAY_VERSION}. Upstream
 # rebuilds a tag when a prerelease is promoted and on a manual dispatch, and
 # each build fetches its geodata from `latest`; the digest is what makes a

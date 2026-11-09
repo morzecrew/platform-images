@@ -452,7 +452,7 @@ target "pgbouncer" {
 # which is which.
 # renovate: datasource=github-releases depName=XTLS/Xray-core extractVersion=^v(?<version>.+)$
 variable "XRAY_VERSION" {
-  default = "26.10.31"
+  default = "26.11.9"
 }
 
 # Upstream's binary and geodata, pinned by the index digest of
