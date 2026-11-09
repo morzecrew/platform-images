@@ -18,12 +18,15 @@ FROM ghcr.io/xtls/xray-core:${XRAY_VERSION}@${XRAY_IMAGE_DIGEST} AS upstream
 
 # The entrypoint is Go, standard library only, because the runtime has no
 # shell: resolving the config's file references in sh would need jq as well.
-# Its tests run here, so an image whose helper fails them is not built.
+# Its generic half is shared/go, laid out where go.mod's replace expects it.
+# Both halves' tests run here, so an image whose helper fails them is not
+# built.
 FROM golang:${GO_VERSION}-alpine AS entrypoint
 
-WORKDIR /src
+WORKDIR /src/images/xray/entrypoint
+COPY --from=shared go/ /src/shared/go/
 COPY entrypoint/ ./
-RUN CGO_ENABLED=0 go test ./... \
+RUN CGO_ENABLED=0 go test ./... github.com/morzecrew/platform-images/shared/go/... \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" -o /out/xray-entrypoint . \
     && mkdir -p /out/run/xray
 

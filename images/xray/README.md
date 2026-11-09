@@ -396,7 +396,10 @@ and tzdata current.
 - `Dockerfile`: the upstream stage pinned by digest, the entrypoint build
   (its tests run there), and the distroless runtime.
 - `entrypoint/`: `xray-entrypoint`, standard library only, and its tests,
-  which cover every file, seed, client list and proxy refusal above.
+  which cover every seed, client list and proxy refusal above. The resolver
+  and its file checks, the summary and the healthcheck live in
+  [`shared/go/envconf`](../../shared/go/envconf), with their tests, which
+  mihomo uses too.
   `testdata/vlessenc.txt` is a key pair `xray vlessenc` printed on 26.10.31,
   which the derivation must reproduce.
 - `smoke.sh`: rootless Podman. Covers the references, the seeded key pair end

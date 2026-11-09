@@ -75,14 +75,20 @@ contract. It is normative: image READMEs link here rather than restating it.
 > - **`flyway`** resolves `FLYWAY_URL_FILE`, `FLYWAY_USER_FILE` and
 >   `FLYWAY_PASSWORD_FILE` through the shared helper, then hands every argument
 >   to upstream's `flyway`. Nothing else here applies to it: it is a CLI.
-> - **`xray`** has five curated names, warns about unknown `XRAY_*` names
+> - **`xray`** has six curated names, warns about unknown `XRAY_*` names
 >   without touching Xray's own, reports `XRAY_CONF__*` rather than applying
 >   it. One delta: an `XRAY_*_FILE` name warns too, because the image reads no
 >   `_FILE` variable and a secret reaches Xray only through its config. It
 >   prints the summary with caddy's header and footer. It does not use
 >   the shared helper, because its runtime has no shell: its entrypoint is a Go
->   binary. Its secrets are files its JSON config references, checked as a
->   `_FILE` is and refused with exit 78. See [No templating](#no-templating).
+>   binary, built on the Go side of the same contract,
+>   [`shared/go/envconf`](../shared/go/envconf). Its secrets are files its JSON
+>   config references, checked as a `_FILE` is and refused with exit 78. See
+>   [No templating](#no-templating).
+> - **`mihomo`** does what `xray` does, through the same Go package, with six
+>   curated names and `$file` as its one reference. mihomo's own names are
+>   `CLASH_*` and `SAFE_PATHS`, outside the prefix, and pass through, except
+>   the three that would replace the image's config, which are refused.
 >
 > Where an image's behaviour and this section disagree, this section is the
 > target and the image is the gap. Each image's own README states what it
@@ -227,7 +233,7 @@ Each uses its own native expansion — Caddy's `{$VAR}`, a generated conf file, 
 the upstream server's own env support. A candidate image that cannot be
 configured without `envsubst` is re-examined before it is accepted.
 
-`xray` is the one image whose server has no expansion at all: Xray reads no
+`xray` was the first image whose server has no expansion at all: Xray reads no
 value from a file or the environment. Its entrypoint replaces a JSON object
 that is exactly `{"$file": "<absolute path>"}` with that file's content,
 `{"$vlessDecryption": "<absolute path>"}` with the key derived from the seed
@@ -235,6 +241,12 @@ in it, `{"$vlessClients": "<absolute path>"}` with the clients it lists, or
 `{"$proxy": "<absolute path>"}` with the upstream proxy it names, and
 substitutes nothing else. The config is valid JSON before and after
 and has no second syntax. See [its README](xray/README.md#the-config-and-file-references).
+
+`mihomo` is the second such image: inside its config, mihomo too reads no
+value from a file or the environment. It takes one JSON file, which mihomo
+reads as YAML, and replaces only `{"$file": "<absolute path>"}`, with the
+resolver xray uses. See
+[its README](mihomo/README.md#the-config-and-file-references).
 
 The decisions behind this section are S-0001/D-12 to S-0001/D-18.
 
@@ -293,6 +305,7 @@ author to remember.
 | ClickHouse | — | Two compose services, but the deployed instances are managed (Yandex MDB), so the image would be curating config for something we do not run. | 2026-08-12, **refused** |
 | `rustfs` | 2 (drift) | Two backends run `rustfs/rustfs:1.0.1` and have already fallen out of step: one probes a health path the other does not, and one has moved the server's log off stdout, so the same upstream reference is configured two ways for the same job. The fallback is closed rather than merely unadopted — MinIO no longer publishes an image, so there is no shared upstream reference to land on. See S-0002/D-4. | 2026-10-21, **admitted** |
 | `xray` | neither | One project, the dotdash bundle, needs Xray-core, so neither route is met. Admitted on the owner's call, because the fallback was a render job in that bundle, which would carry the same file resolution without a reviewed image. See [#125](https://github.com/morzecrew/platform-images/issues/125). | 2026-11-07, **admitted** (owner's call) |
+| `mihomo` | neither | One project, dotdash, needs mihomo: its planned client bundle, and its CI's compatibility smoke test, whose `images` check refuses a `ghcr.io/morzecrew/*` digest without provenance. Pulling `docker.io/metacubex/mihomo` there would also meet Docker Hub's rate limit. Filed by the owner as a maintainer's call, like `xray`. See [#140](https://github.com/morzecrew/platform-images/issues/140). | 2026-11-09, **admitted** (owner's call) |
 
 A refusal is recorded rather than left implicit, because the next person to want
 one of these will otherwise re-derive the case from scratch — and because the

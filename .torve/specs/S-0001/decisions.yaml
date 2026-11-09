@@ -255,32 +255,38 @@ decisions:
     text: >-
       `shared/` holds only files two or more images use. They reach an image through
       the bake's named context `contexts = { shared = "./shared" }`, never by copy.
-      The helper is POSIX sh and runs under busybox, dash and bash.
+      The helper is POSIX sh and runs under busybox, dash and bash. The Go module
+      `shared/go` is standard library only, and an entrypoint module reaches it through
+      a `replace` to the relative path its Dockerfile copies the context to.
     paths: [shared/**, docker-bake.hcl]
     consequence: >-
       a fix to the shared helper reaches every image that uses it at its next build
     rationale: >-
       RFC 0001 rows 6 and 7 (ASSUMED); shared/README.md. Held consistently: caddy,
       flyway, postgres and valkey each declare the context.
+    fingerprint: ecb50348d7da2e50/f218f9a22976a2d0
   - id: D-18
     grade: ASSUMED
     text: >-
       No entrypoint renders configuration through a templating engine; each image
-      uses its server's native expansion. xray's server has none, so its entrypoint
-      replaces a JSON object that is exactly `{"$file": "<absolute path>"}`, `{"$vlessDecryption":
+      uses its server's native expansion. xray's and mihomo's servers have none, so
+      their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
+      path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
       "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}` or `{"$proxy": "<absolute
-      path>"}` with the value that file yields, and substitutes nothing else.
+      path>"}`, and substitute nothing else.
     paths:
       - images/*/rootfs/entrypoint.sh
       - images/caddy/rootfs/Caddyfile
       - images/caddy/Dockerfile
       - images/xray/entrypoint/main.go
+      - images/mihomo/entrypoint/main.go
+      - shared/go/envconf/resolve.go
     consequence: >-
       configuration is read by the server that owns it, with no second syntax in between
     rationale: >-
       RFC 0001 row 5 (LOCKED). Held consistently, never defended. caddy's Dockerfile
       installs `gettext` (envsubst) "for hooks", which is in tension with it.
-    fingerprint: bd0d814b06b384cf/f206374b70c16778
+    fingerprint: f576b12bfb3e19d5/9e62c124a404b61d
   - id: D-19
     grade: ASSUMED
     text: >-
@@ -379,10 +385,11 @@ decisions:
     text: >-
       An image is admitted by route 1, hand-rolled in two or more projects, or route
       2, the same upstream run and diverged in two or more; a pair counts once. `xray`
-      is the one image admitted on neither, by its owner's call on #125, and its row
-      says so. Refusals are recorded under "Admissions on record". An image unused
-      for a year is deleted, its package frozen by default and kept in `PACKAGES`.
-      The annual workflow opens the review issue on 8 January with a consumer scan.
+      and `mihomo` are the images admitted on neither, by their owner's calls on #125
+      and #140, and their rows say so. Refusals are recorded under "Admissions on
+      record". An image unused for a year is deleted, its package frozen by default
+      and kept in `PACKAGES`. The annual workflow opens the review issue on 8 January
+      with a consumer scan.
     paths:
       - images/README.md
       - .github/workflows/annual-image-review.yaml
@@ -393,5 +400,5 @@ decisions:
       RFC 0003 rows 1, 2, 3, 6, 9 and 10 (LOCKED) and 4, 5, 11 and 12 (ASSUMED). Defended:
       A38 (a missing row), R-35 and A48 (the scan searched names that never existed),
       A47.
-    fingerprint: 9254330abe9927c9/482c6c960e0d6250
+    fingerprint: c13706ce444da31a/482c6c960e0d6250
 retired: [D-26]

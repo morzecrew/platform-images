@@ -5,14 +5,19 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/morzecrew/platform-images/shared/go/envconf"
 )
+
+// The generic parts, $file among them, are tested in shared/go/envconf.
+func resolveFile(p string) (*envconf.Config, error) {
+	return envconf.ResolveFile(p, references)
+}
 
 func write(t *testing.T, path, content string, mode os.FileMode) string {
 	t.Helper()
@@ -20,95 +25,6 @@ func write(t *testing.T, path, content string, mode os.FileMode) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-func TestResolveReplacesReferencesAndNothingElse(t *testing.T) {
-	dir := t.TempDir()
-	uuid := write(t, filepath.Join(dir, "uuid"), "6b0c7f3e-3c3a-4f43-9a63-1f0b3d1c2e77\n", 0o400)
-	key := write(t, filepath.Join(dir, "key"), "line1\nline2\n\n", 0o400)
-	src := write(t, filepath.Join(dir, "in.json"), `{
-		"n": 12345678901234567890,
-		"s": "<&>",
-		"literal": {"file": "/not/a/reference"},
-		"inbounds": [{"settings": {"clients": [{"id": {"$file": "`+uuid+`"}}], "decryption": {"$file": "`+key+`"}}}]
-	}`, 0o600)
-
-	c, err := resolveFile(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := `{"inbounds":[{"settings":{"clients":[{"id":"6b0c7f3e-3c3a-4f43-9a63-1f0b3d1c2e77"}],"decryption":"line1\nline2\n"}}],"literal":{"file":"/not/a/reference"},"n":12345678901234567890,"s":"<&>"}` + "\n"
-	if string(c.out) != want {
-		t.Errorf("resolved\n got %s\nwant %s", c.out, want)
-	}
-	wantRefs := []ref{
-		{"inbounds[0].settings.clients[0].id", "$file", uuid, ""},
-		{"inbounds[0].settings.decryption", "$file", key, ""},
-	}
-	if len(c.refs) != 2 || c.refs[0] != wantRefs[0] || c.refs[1] != wantRefs[1] {
-		t.Errorf("refs = %v, want %v", c.refs, wantRefs)
-	}
-}
-
-func TestResolveRefusals(t *testing.T) {
-	dir := t.TempDir()
-	const secret = "s3cret-value"
-	ok := write(t, filepath.Join(dir, "ok"), secret, 0o400)
-	big := write(t, filepath.Join(dir, "big"), strings.Repeat("a", maxSecret+1), 0o400)
-	exact := write(t, filepath.Join(dir, "exact"), strings.Repeat("a", maxSecret), 0o400)
-	nul := write(t, filepath.Join(dir, "nul"), secret+"\x00", 0o400)
-	latin1 := write(t, filepath.Join(dir, "latin1"), secret+"\xe9", 0o400)
-	subdir := filepath.Join(dir, "subdir")
-	if err := os.Mkdir(subdir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, tc := range []struct {
-		name, doc, want string
-	}{
-		{"missing", `{"a": {"$file": "` + dir + `/missing"}}`, "a: " + dir + "/missing does not exist"},
-		{"directory", `{"a": [{"$file": "` + subdir + `"}]}`, "a[0]: " + subdir + " is a directory"},
-		{"relative", `{"a": {"$file": "rel/path"}}`, `a: "$file" must be an absolute path`},
-		{"not a string", `{"a": {"$file": 1}}`, `a: "$file" must be an absolute path`},
-		{"other keys", `{"a": {"$file": "` + ok + `", "other": 1, "b": 2}}`, `a: an object holding "$file" holds nothing else, and this one also holds b, other`},
-		{"top level", `{"$file": "` + ok + `", "x": 1}`, "the top level: an object"},
-		{"too big", `{"a": {"$file": "` + big + `"}}`, "is larger than 65536 bytes"},
-		{"NUL", `{"a": {"$file": "` + nul + `"}}`, "contains a NUL byte"},
-		{"not UTF-8", `{"a": {"$file": "` + latin1 + `"}}`, "is not valid UTF-8"},
-		{"comment", "{\"a\": 1 // no\n}", "is not valid JSON"},
-		{"two values", `{"a": 1} {"b": 2}`, "something follows its value"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			src := write(t, filepath.Join(dir, "c.json"), tc.doc, 0o600)
-			_, err := resolveFile(src)
-			if err == nil {
-				t.Fatal("resolved; want a refusal")
-			}
-			if !strings.Contains(err.Error(), tc.want) || !strings.HasPrefix(err.Error(), src) {
-				t.Errorf("error %q\nwant it to start with %s and contain %q", err, src, tc.want)
-			}
-			if strings.Contains(err.Error(), secret) {
-				t.Errorf("error %q carries the secret", err)
-			}
-		})
-	}
-
-	src := write(t, filepath.Join(dir, "c.json"), `{"a": {"$file": "`+exact+`"}}`, 0o600)
-	if _, err := resolveFile(src); err != nil {
-		t.Errorf("a file of exactly %d bytes: %v", maxSecret, err)
-	}
-}
-
-func TestUnreadableReference(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root reads a 000 file")
-	}
-	dir := t.TempDir()
-	locked := write(t, filepath.Join(dir, "locked"), "x", 0o000)
-	src := write(t, filepath.Join(dir, "c.json"), `{"a": {"$file": "`+locked+`"}}`, 0o600)
-	if _, err := resolveFile(src); err == nil || !strings.Contains(err.Error(), locked+" is not readable by uid") {
-		t.Errorf("err = %v", err)
-	}
 }
 
 func TestResolveDir(t *testing.T) {
@@ -125,7 +41,7 @@ func TestResolveDir(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(configs) != 2 || filepath.Base(configs[0].src) != "10-in.json" {
+	if len(configs) != 2 || filepath.Base(configs[0].Src) != "10-in.json" {
 		t.Errorf("configs not in name order: %v", configs)
 	}
 	for _, other := range []string{"30-routing.yaml", "40-x.jsonc"} {
@@ -149,7 +65,7 @@ func TestWriteRuntimeReplacesWhatWasThere(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(t, filepath.Join(run, "stale.json"), "{}", 0o600)
-	err := writeRuntime(run, []*config{{src: "/etc/xray/10-in.json", out: []byte("{}\n")}})
+	err := writeRuntime(run, []*envconf.Config{{Src: "/etc/xray/10-in.json", Out: []byte("{}\n")}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,153 +80,6 @@ func TestWriteRuntimeReplacesWhatWasThere(t *testing.T) {
 	info, _ = os.Stat(run)
 	if info.Mode().Perm() != 0o700 {
 		t.Errorf("dir mode %v", info.Mode().Perm())
-	}
-}
-
-func TestRedact(t *testing.T) {
-	got := redact("invalid UUID: abc-123, then abc", []string{"abc", "abc-123", ""})
-	if got != "invalid UUID: <redacted>, then <redacted>" {
-		t.Errorf("redact = %q", got)
-	}
-}
-
-func TestSummaryNamesPathsNotValues(t *testing.T) {
-	t.Setenv("XRAY_HEALTHCHECK_PROXY", "http://probe:pw@127.0.0.1:10809")
-	c := &config{src: "/etc/xray/10.json", refs: []ref{{"inbounds[0].settings.clients[0].id", "$file", "/run/secrets/id", ""}, {"inbounds[0].settings.decryption", "$vlessDecryption", "/run/secrets/seed", ""}, {"inbounds[1].settings.clients", "$vlessClients", "/run/secrets/clients", "(2 clients)"}}, values: []string{"the-id"}}
-	var b bytes.Buffer
-	summary(&b, "Xray 26.10.31", []*config{c})
-	out := b.String()
-	for _, want := range []string{
-		"[envconf] xray: effective configuration",
-		"xray = Xray 26.10.31",
-		"inbounds[0].settings.clients[0].id <- /run/secrets/id   (/etc/xray/10.json)",
-		"inbounds[0].settings.decryption <- $vlessDecryption /run/secrets/seed   (/etc/xray/10.json)",
-		"inbounds[1].settings.clients <- $vlessClients /run/secrets/clients (2 clients)   (/etc/xray/10.json)",
-		"XRAY_HEALTHCHECK_PROXY = http://probe:xxxxx@127.0.0.1:10809",
-		"[envconf] precedence: image default < environment",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("summary lacks %q:\n%s", want, out)
-		}
-	}
-	if strings.Contains(out, "the-id") || strings.Contains(out, ":pw@") {
-		t.Errorf("summary carries a value:\n%s", out)
-	}
-}
-
-func TestHealthSettings(t *testing.T) {
-	for _, tc := range []struct{ name, value, want string }{
-		{"XRAY_HEALTHCHECK_URL", "ftp://example.com/", "XRAY_HEALTHCHECK_URL must be"},
-		{"XRAY_HEALTHCHECK_URL", "/generate_204", "XRAY_HEALTHCHECK_URL must be"},
-		{"XRAY_HEALTHCHECK_TIMEOUT", "10", "not a duration"},
-		{"XRAY_HEALTHCHECK_TIMEOUT", "-1s", "not a duration"},
-		{"XRAY_HEALTHCHECK_PROXY", "127.0.0.1:10809", "XRAY_HEALTHCHECK_PROXY must be"},
-		{"XRAY_HEALTHCHECK_PROXY", "vless://127.0.0.1:443", "XRAY_HEALTHCHECK_PROXY must be"},
-		{"XRAY_HEALTHCHECK_EXPECT", `^203\.0\.113\.(7\s*$`, "XRAY_HEALTHCHECK_EXPECT is not a regular expression"},
-		// RE2 has no lookahead, which a PCRE habit reaches for.
-		{"XRAY_HEALTHCHECK_EXPECT", `^(?!10\.)`, "XRAY_HEALTHCHECK_EXPECT is not a regular expression"},
-	} {
-		t.Run(tc.name+"="+tc.value, func(t *testing.T) {
-			t.Setenv(tc.name, tc.value)
-			if _, err := healthSettings(); err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("err = %v, want %q", err, tc.want)
-			}
-		})
-	}
-}
-
-// The probe goes through the proxy, takes a 2xx as healthy, and stops at a
-// redirect instead of following it.
-func TestHealthcheckThroughProxy(t *testing.T) {
-	var seen []string
-	status := http.StatusNoContent
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.URL.String())
-		if status == http.StatusFound {
-			w.Header().Set("Location", "http://portal.example/")
-		}
-		w.WriteHeader(status)
-	}))
-	defer proxy.Close()
-	t.Setenv("XRAY_HEALTHCHECK_URL", "http://egress.example/generate_204")
-	t.Setenv("XRAY_HEALTHCHECK_PROXY", proxy.URL)
-	t.Setenv("XRAY_HEALTHCHECK_TIMEOUT", "5s")
-
-	if rc := healthcheck(); rc != 0 {
-		t.Errorf("204: rc = %d", rc)
-	}
-	if len(seen) != 1 || seen[0] != "http://egress.example/generate_204" {
-		t.Errorf("the proxy saw %v", seen)
-	}
-	status = http.StatusFound
-	if rc := healthcheck(); rc != 1 {
-		t.Errorf("302: rc = %d", rc)
-	}
-	if len(seen) != 2 {
-		t.Errorf("the redirect was followed: %v", seen)
-	}
-	proxy.Close()
-	if rc := healthcheck(); rc != 1 {
-		t.Errorf("proxy down: rc = %d", rc)
-	}
-}
-
-// #133: with XRAY_HEALTHCHECK_EXPECT set, a 2xx passes only when the first
-// 64 KiB of the body match it, and a mismatch shows the start of the body.
-func TestHealthcheckExpect(t *testing.T) {
-	status, body := http.StatusOK, ""
-	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(status)
-		io.WriteString(w, body)
-	}))
-	defer proxy.Close()
-	t.Setenv("XRAY_HEALTHCHECK_URL", "http://ip.example/")
-	t.Setenv("XRAY_HEALTHCHECK_PROXY", proxy.URL)
-	t.Setenv("XRAY_HEALTHCHECK_TIMEOUT", "5s")
-	const anchored, bare = `^203\.0\.113\.7\s*$`, `203\.0\.113\.7`
-	pad := func(n int) string { return strings.Repeat(" ", n) }
-
-	for _, tc := range []struct {
-		name, expect string
-		status       int
-		body         string
-		rc           int
-		want         string
-	}{
-		{"match", anchored, 200, "203.0.113.7\n", 0, "matches XRAY_HEALTHCHECK_EXPECT"},
-		{"anchored", anchored, 200, "203.0.113.71", 1, `does not match XRAY_HEALTHCHECK_EXPECT: "203.0.113.71"`},
-		{"control characters escaped", anchored, 200, "198.51.100.9\r\n\x1b[2J", 1, `"198.51.100.9\r\n\x1b[2J"`},
-		{"excerpt of 128 bytes", anchored, 200, strings.Repeat("x", 127) + "yz", 1, `"` + strings.Repeat("x", 127) + `y"`},
-		{"match ending at 64 KiB", bare, 200, pad(maxBody-11) + "203.0.113.7", 0, "matches"},
-		{"match crossing 64 KiB", bare, 200, pad(maxBody-10) + "203.0.113.7", 1, "does not match"},
-		{"non-2xx with a matching body", anchored, 503, "203.0.113.7", 1, "503 Service Unavailable"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("XRAY_HEALTHCHECK_EXPECT", tc.expect)
-			status, body = tc.status, tc.body
-			var rc int
-			out := stderr(t, func() { rc = healthcheck() })
-			if rc != tc.rc || !strings.Contains(out, tc.want) {
-				t.Errorf("rc = %d, want %d; stderr %q, want %q", rc, tc.rc, out, tc.want)
-			}
-			if tc.status != 200 && strings.Contains(out, "XRAY_HEALTHCHECK_EXPECT") {
-				t.Errorf("the body was checked after a %d: %q", tc.status, out)
-			}
-		})
-	}
-}
-
-// Without a proxy the probe fetches nothing, so an expression would be a
-// check that silently never runs.
-func TestExpectWithoutProxyIsReported(t *testing.T) {
-	t.Setenv("XRAY_HEALTHCHECK_EXPECT", `^203\.0\.113\.7$`)
-	t.Setenv("XRAY_HEALTHCHECK_PROXY", "")
-	if out := stderr(t, warnUnknown); !strings.Contains(out, "WARN: XRAY_HEALTHCHECK_EXPECT is set, but XRAY_HEALTHCHECK_PROXY is unset") {
-		t.Errorf("stderr %q", out)
-	}
-	t.Setenv("XRAY_HEALTHCHECK_PROXY", "http://127.0.0.1:10809")
-	if out := stderr(t, warnUnknown); strings.Contains(out, "XRAY_HEALTHCHECK_EXPECT") {
-		t.Errorf("warned with a proxy set: %q", out)
 	}
 }
 
@@ -348,11 +117,11 @@ func TestVlessKeysMatchUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := `{"decryption":"` + lines[0] + `"}` + "\n"; string(c.out) != want {
-		t.Errorf("resolved %s", c.out)
+	if want := `{"decryption":"` + lines[0] + `"}` + "\n"; string(c.Out) != want {
+		t.Errorf("resolved %s", c.Out)
 	}
-	if c.refs[0] != (ref{"decryption", "$vlessDecryption", file, ""}) || c.values[0] != lines[0] {
-		t.Errorf("refs %v", c.refs)
+	if c.Refs[0] != (envconf.Ref{Path: "decryption", Kind: "$vlessDecryption", File: file, Note: ""}) || c.Values[0] != lines[0] {
+		t.Errorf("refs %v", c.Refs)
 	}
 }
 
@@ -395,49 +164,8 @@ func TestSeedRefusals(t *testing.T) {
 	if rc := printClientValue("vless-encryption", vlessEncryptionFile, nil); rc != 2 {
 		t.Errorf("no argument: rc = %d", rc)
 	}
-	if rc := printClientValue("vless-encryption", vlessEncryptionFile, []string{subdir}); rc != exConfig {
+	if rc := printClientValue("vless-encryption", vlessEncryptionFile, []string{subdir}); rc != envconf.ExConfig {
 		t.Errorf("directory: rc = %d", rc)
-	}
-}
-
-func TestRuntimeMustNotOverlapSource(t *testing.T) {
-	root := t.TempDir()
-	src := filepath.Join(root, "etc", "xray")
-	if err := os.MkdirAll(src, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(src, filepath.Join(root, "alias")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(root, "etc"), filepath.Join(root, "etc-link")); err != nil {
-		t.Fatal(err)
-	}
-	for _, tc := range []struct {
-		name, run string
-		refused   bool
-	}{
-		{"the same directory", src + "/", true},
-		{"a symlink alias", filepath.Join(root, "alias"), true},
-		{"its parent", filepath.Join(root, "etc"), true},
-		{"the root", "/", true},
-		{"inside it", filepath.Join(src, "run"), true},
-		{"inside it, through a symlink, not yet created", filepath.Join(root, "alias", "run", "xray"), true},
-		{"its parent, through a symlink", filepath.Join(root, "etc-link"), true},
-		{"a sibling", filepath.Join(root, "run", "xray"), false},
-		{"a sibling sharing a prefix", src + "-run", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := overlap(src, tc.run)
-			if tc.refused && (err == nil || !strings.Contains(err.Error(), "overlap")) {
-				t.Errorf("XRAY_RUNTIME_DIR=%s: err = %v, want a refusal", tc.run, err)
-			}
-			if !tc.refused && err != nil {
-				t.Errorf("XRAY_RUNTIME_DIR=%s: %v", tc.run, err)
-			}
-		})
-	}
-	if _, err := os.Stat(filepath.Join(src, "run")); err == nil {
-		t.Error("the check created a directory")
 	}
 }
 
@@ -494,7 +222,7 @@ func TestRealityPasswordRefusals(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "does not hold a REALITY private key") {
 				t.Errorf("err = %v", err)
 			}
-			if rc := printClientValue("reality-password", realityPassword, []string{file}); rc != exConfig {
+			if rc := printClientValue("reality-password", realityPassword, []string{file}); rc != envconf.ExConfig {
 				t.Errorf("rc = %d", rc)
 			}
 		})
@@ -560,20 +288,20 @@ func TestVlessClients(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"inbounds":[{"settings":{"clients":[{"id":"` + clientA + `"},{"id":"` + clientB + `","email":"phone"}],"flow":"xtls-rprx-vision"}}]}` + "\n"
-	if string(c.out) != want {
-		t.Errorf("resolved\n got %s\nwant %s", c.out, want)
+	if string(c.Out) != want {
+		t.Errorf("resolved\n got %s\nwant %s", c.Out, want)
 	}
-	if len(c.refs) != 1 || c.refs[0] != (ref{"inbounds[0].settings.clients", "$vlessClients", list, "(2 clients)"}) {
-		t.Errorf("refs = %v", c.refs)
+	if len(c.Refs) != 1 || c.Refs[0] != (envconf.Ref{Path: "inbounds[0].settings.clients", Kind: "$vlessClients", File: list, Note: "(2 clients)"}) {
+		t.Errorf("refs = %v", c.Refs)
 	}
-	if !slices.Equal(c.values, []string{clientA, clientB}) {
-		t.Errorf("values to redact = %v", c.values)
+	if !slices.Equal(c.Values, []string{clientA, clientB}) {
+		t.Errorf("values to redact = %v", c.Values)
 	}
 
 	// What morzer's uuid generator writes at init.
 	bare := write(t, filepath.Join(dir, "bare"), clientA+"\n", 0o400)
 	r, err := vlessClients(bare)
-	if err != nil || r.note != "(1 client)" || !slices.Equal(r.value.([]vlessClient), []vlessClient{{ID: clientA}}) {
+	if err != nil || r.Note != "(1 client)" || !slices.Equal(r.Value.([]vlessClient), []vlessClient{{ID: clientA}}) {
 		t.Errorf("a bare UUID: %+v, %v", r, err)
 	}
 }
@@ -639,15 +367,15 @@ func TestProxy(t *testing.T) {
 	} {
 		file := write(t, filepath.Join(dir, "proxy"), tc.content, 0o600)
 		r, err := proxy(file)
-		if err != nil || r.value != tc.want || r.note != tc.note {
+		if err != nil || r.Value != tc.want || r.Note != tc.note {
 			t.Errorf("%q: %+v, %v\nwant %+v, note %q", tc.content, r, err, tc.want, tc.note)
 		}
 		var secrets []string
 		if tc.want.User != "" {
 			secrets = []string{tc.want.User, tc.want.Pass}
 		}
-		if !slices.Equal(r.secrets, secrets) {
-			t.Errorf("%q: secrets to redact = %q", tc.content, r.secrets)
+		if !slices.Equal(r.Secrets, secrets) {
+			t.Errorf("%q: secrets to redact = %q", tc.content, r.Secrets)
 		}
 	}
 
@@ -664,21 +392,21 @@ func TestProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `{"outbounds":[{"protocol":"socks","settings":{"address":"proxy.example","port":1080,"user":"alice","pass":"p:@ss"}},{"protocol":"http","settings":{"address":"2001:db8::1","port":3128}}]}` + "\n"
-	if string(c.out) != want {
-		t.Errorf("resolved\n got %s\nwant %s", c.out, want)
+	if string(c.Out) != want {
+		t.Errorf("resolved\n got %s\nwant %s", c.Out, want)
 	}
-	wantRefs := []ref{
-		{"outbounds[0].settings", "$proxy", withAuth, "proxy.example:1080"},
-		{"outbounds[1].settings", "$proxy", without, "no credentials"},
+	wantRefs := []envconf.Ref{
+		{Path: "outbounds[0].settings", Kind: "$proxy", File: withAuth, Note: "proxy.example:1080"},
+		{Path: "outbounds[1].settings", Kind: "$proxy", File: without, Note: "no credentials"},
 	}
-	if !slices.Equal(c.refs, wantRefs) {
-		t.Errorf("refs = %v, want %v", c.refs, wantRefs)
+	if !slices.Equal(c.Refs, wantRefs) {
+		t.Errorf("refs = %v, want %v", c.Refs, wantRefs)
 	}
-	if !slices.Equal(c.values, []string{"alice", "p:@ss"}) {
-		t.Errorf("values to redact = %q", c.values)
+	if !slices.Equal(c.Values, []string{"alice", "p:@ss"}) {
+		t.Errorf("values to redact = %q", c.Values)
 	}
 	var b bytes.Buffer
-	summary(&b, "Xray 26.10.31", []*config{c})
+	img.Summary(&b, "Xray 26.10.31", []*envconf.Config{c})
 	if line := "outbounds[0].settings <- $proxy " + withAuth + " proxy.example:1080   (" + src + ")"; !strings.Contains(b.String(), line) {
 		t.Errorf("summary lacks %q:\n%s", line, b.String())
 	}

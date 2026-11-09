@@ -27,12 +27,25 @@ first time it is inconvenient.
 | Path | Consumed by | What it is |
 |---|---|---|
 | [`rootfs/lib/envconf.sh`](rootfs/lib/envconf.sh) | `valkey`, `postgres`, `caddy`, `flyway` | The env-config contract: allowlist, denylist, secrets, startup summary. See [Environment configuration](../images/README.md#environment-configuration) and S-0001/D-12 to D-16. `flyway` uses only `envconf_secret`. |
+| [`go/envconf`](go/envconf) | `xray`, `mihomo` | The same contract in Go, for entrypoints whose runtime has no shell: curated settings, the unknown-name warning, `{"$file": ...}` references in a JSON config with the `_FILE` checks, the startup summary, and the healthcheck that probes egress. A module of its own, standard library only. |
 
 ## Rules
 
 **POSIX `sh`.** It has to run on Alpine without adding `bash`, so no
 associative arrays and no `${var,,}`. `local` is used, which is not POSIX but is
 implemented by every shell in scope (busybox ash, dash, bash).
+
+**Go, standard library only,** in `go/`. An image's entrypoint module requires
+`github.com/morzecrew/platform-images/shared/go` and replaces it with
+`../../../shared/go`, and its Dockerfile copies the named context to that
+place, so one `go.mod` works in the build and in a checkout:
+
+```dockerfile
+WORKDIR /src/images/<name>/entrypoint
+COPY --from=shared go/ /src/shared/go/
+COPY entrypoint/ ./
+RUN go test ./... github.com/morzecrew/platform-images/shared/go/...
+```
 
 **Changing a file here changes every image that embeds it.** They embed it at
 build time, so a change reaches a published image only when that image is
@@ -43,7 +56,11 @@ revisions of this file in the meantime.
 
 ```bash
 sh shared/test/run.sh        # -v to list each case
+(cd shared/go && go test ./...)
 ```
+
+The Go tests also run in the build of every image that uses the module, so an
+image is not built on a helper that fails them.
 
 Runs in CI on every PR. These exercise the helper's functions directly, with no
 container and no server, because the properties most worth pinning are startup
