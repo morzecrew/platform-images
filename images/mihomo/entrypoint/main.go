@@ -52,7 +52,7 @@ var (
 func main() {
 	args := os.Args[1:]
 	if len(args) > 0 && args[0] == "healthcheck" {
-		os.Exit(img.Healthcheck(filepath.Join(img.Get("MIHOMO_HOME"), configName)))
+		os.Exit(img.Healthcheck(img.Get("MIHOMO_HOME"), configName))
 	}
 	if len(args) > 0 && args[0] != "run" {
 		img.Exec(args...) // -v, -t, generate, convert-ruleset, ...

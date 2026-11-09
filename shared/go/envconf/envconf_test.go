@@ -252,21 +252,21 @@ func TestHealthcheckThroughProxy(t *testing.T) {
 	t.Setenv("DEMO_HEALTHCHECK_PROXY", proxy.URL)
 	t.Setenv("DEMO_HEALTHCHECK_TIMEOUT", "5s")
 
-	if rc := demo.Healthcheck("/nonexistent"); rc != 0 {
+	if rc := demo.Healthcheck("/nonexistent", "*.json"); rc != 0 {
 		t.Errorf("204: rc = %d", rc)
 	}
 	if len(seen) != 1 || seen[0] != "http://egress.example/generate_204" {
 		t.Errorf("the proxy saw %v", seen)
 	}
 	status = http.StatusFound
-	if rc := demo.Healthcheck("/nonexistent"); rc != 1 {
+	if rc := demo.Healthcheck("/nonexistent", "*.json"); rc != 1 {
 		t.Errorf("302: rc = %d", rc)
 	}
 	if len(seen) != 2 {
 		t.Errorf("the redirect was followed: %v", seen)
 	}
 	proxy.Close()
-	if rc := demo.Healthcheck("/nonexistent"); rc != 1 {
+	if rc := demo.Healthcheck("/nonexistent", "*.json"); rc != 1 {
 		t.Errorf("proxy down: rc = %d", rc)
 	}
 }
@@ -305,7 +305,7 @@ func TestHealthcheckExpect(t *testing.T) {
 			t.Setenv("DEMO_HEALTHCHECK_EXPECT", tc.expect)
 			status, body = tc.status, tc.body
 			var rc int
-			out := stderr(t, func() { rc = demo.Healthcheck("/nonexistent") })
+			out := stderr(t, func() { rc = demo.Healthcheck("/nonexistent", "*.json") })
 			if rc != tc.rc || !strings.Contains(out, tc.want) {
 				t.Errorf("rc = %d, want %d; stderr %q, want %q", rc, tc.rc, out, tc.want)
 			}
@@ -334,7 +334,7 @@ func TestExpectWithoutProxyIsReported(t *testing.T) {
 func TestLivenessWithoutProxy(t *testing.T) {
 	t.Setenv("DEMO_HEALTHCHECK_PROXY", "")
 	var rc int
-	out := stderr(t, func() { rc = demo.Healthcheck("/nonexistent") })
+	out := stderr(t, func() { rc = demo.Healthcheck("/nonexistent", "*.json") })
 	if rc != 1 || !strings.Contains(out, "healthcheck: PID 1 is not Demo") {
 		t.Errorf("rc = %d, stderr %q", rc, out)
 	}
@@ -374,5 +374,24 @@ func TestOverlap(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(src, "run")); err == nil {
 		t.Error("the check created a directory")
+	}
+}
+
+func TestHasConfig(t *testing.T) {
+	for _, dir := range []string{"plain", "with [brackets]", "a*star", "q?mark"} {
+		d := filepath.Join(t.TempDir(), dir)
+		if err := os.Mkdir(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if hasConfig(d, "*.json") {
+			t.Errorf("%s: found a config in an empty directory", dir)
+		}
+		write(t, filepath.Join(d, "10-in.json"), "{}", 0o600)
+		if !hasConfig(d, "*.json") || !hasConfig(d, "10-in.json") {
+			t.Errorf("%s: did not find 10-in.json", dir)
+		}
+		if hasConfig(d, "config.json") {
+			t.Errorf("%s: found config.json, which is not there", dir)
+		}
 	}
 }

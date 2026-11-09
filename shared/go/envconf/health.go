@@ -55,15 +55,15 @@ func (im *Image) HealthSettings() (h Health, err error) {
 // Healthcheck sends one GET through the proxy and returns the exit code: 0
 // for a 2xx whose body matches the expression, if one is set, and 1 for
 // anything else. With no proxy set it checks only that the server is PID 1
-// and that config, a glob, matches a file.
-func (im *Image) Healthcheck(config string) int {
+// and that dir holds a file whose name matches pattern.
+func (im *Image) Healthcheck(dir, pattern string) int {
 	h, err := im.HealthSettings()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "healthcheck:", err)
 		return 1
 	}
 	if h.Proxy == nil {
-		return im.liveness(config)
+		return im.liveness(dir, pattern)
 	}
 	client := &http.Client{
 		// Covers reading the body as well as the request.
@@ -103,16 +103,28 @@ func (im *Image) Healthcheck(config string) int {
 
 // Without a proxy there is no egress to probe, and saying so is the point:
 // a green check that tested nothing would read as one that did.
-func (im *Image) liveness(config string) int {
+func (im *Image) liveness(dir, pattern string) int {
 	cmdline, err := os.ReadFile("/proc/1/cmdline")
 	if err != nil || !bytes.HasPrefix(cmdline, []byte(im.Bin+"\x00")) {
 		fmt.Fprintf(os.Stderr, "healthcheck: PID 1 is not %s\n", im.Title)
 		return 1
 	}
-	if found, _ := filepath.Glob(config); len(found) == 0 {
-		fmt.Fprintf(os.Stderr, "healthcheck: there is no config at %s\n", config)
+	if !hasConfig(dir, pattern) {
+		fmt.Fprintf(os.Stderr, "healthcheck: %s holds no %s\n", dir, pattern)
 		return 1
 	}
 	fmt.Fprintf(os.Stderr, "healthcheck: %s is running. %sHEALTHCHECK_PROXY is unset, so egress was not probed\n", im.Title, im.Prefix)
 	return 0
+}
+
+// Only the name is a pattern: a glob of the whole path would read a [ or a *
+// in the directory as one, and find nothing.
+func hasConfig(dir, pattern string) bool {
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if ok, _ := filepath.Match(pattern, e.Name()); ok && e.Type().IsRegular() {
+			return true
+		}
+	}
+	return false
 }

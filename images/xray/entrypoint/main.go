@@ -63,7 +63,7 @@ var img = &envconf.Image{
 func main() {
 	args := os.Args[1:]
 	if len(args) > 0 && args[0] == "healthcheck" {
-		os.Exit(img.Healthcheck(filepath.Join(img.Get("XRAY_RUNTIME_DIR"), "*.json")))
+		os.Exit(img.Healthcheck(img.Get("XRAY_RUNTIME_DIR"), "*.json"))
 	}
 	if len(args) > 0 {
 		if derive, ok := clientValues[args[0]]; ok {
