@@ -60,7 +60,8 @@ secrets:
   named volume starts as a copy of the image's `/var/lib/mihomo`, which uid
   65532 owns. A bind mount must be writable by 65532. With a read-only root
   and nothing mounted there, the entrypoint refuses to start, because nothing
-  can be written.
+  can be written. One home serves one container: two would share `cache.db` and the
+  provider caches.
 - **Ports.** mihomo runs as uid 65532 with no capabilities, so an inbound
   cannot listen below 1024.
 - **Secret files** must be readable by uid 65532: owned by it, or group- or

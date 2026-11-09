@@ -12,6 +12,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -193,12 +194,7 @@ func writeHome(home string, config []byte) error {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return hint(err)
 	}
-	cfg := filepath.Join(home, configName)
-	// WriteFile keeps the mode of a file that is already there.
-	if err := os.WriteFile(cfg, config, 0o600); err != nil {
-		return hint(err)
-	}
-	if err := os.Chmod(cfg, 0o600); err != nil {
+	if err := replace(filepath.Join(home, configName), bytes.NewReader(config), 0o600); err != nil {
 		return hint(err)
 	}
 	// Absent files only: geo-auto-update, if the operator turns it on,
@@ -208,34 +204,41 @@ func writeHome(home string, config []byte) error {
 		if _, err := os.Lstat(dst); !errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		if err := copyFile(filepath.Join(geodataDir, name), dst); err != nil {
+		in, err := os.Open(filepath.Join(geodataDir, name))
+		if err != nil {
+			return hint(err)
+		}
+		err = replace(dst, in, 0o644)
+		in.Close()
+		if err != nil {
 			return hint(err)
 		}
 	}
 	return nil
 }
 
-// Through a temporary name, so a start interrupted halfway leaves no
-// truncated file that the next start would keep.
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+// replace writes dst through a new file, created 0600 by CreateTemp, renamed
+// over it once whole. A secret is then never written into a file that is
+// already there at a looser mode, and an interrupted or concurrent start
+// never leaves or reads a truncated one.
+func replace(dst string, r io.Reader, mode os.FileMode) error {
+	f, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".*")
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-	tmp := dst + ".tmp"
-	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
-	if err != nil {
+	defer os.Remove(f.Name()) // fails harmlessly once renamed
+	if _, err := io.Copy(f, r); err != nil {
+		f.Close()
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+	if err := f.Chmod(mode); err != nil {
+		f.Close()
 		return err
 	}
-	if err := out.Close(); err != nil {
+	if err := f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp, dst)
+	return os.Rename(f.Name(), dst)
 }
 
 // Runs `mihomo -t` on the resolved config and returns mihomo's version line.

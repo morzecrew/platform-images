@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,16 +132,45 @@ func TestWriteHome(t *testing.T) {
 	if info, _ := os.Stat(filepath.Join(home, "config.json")); info.Mode().Perm() != 0o600 {
 		t.Errorf("config.json mode %v", info.Mode().Perm())
 	}
+	if info, _ := os.Stat(filepath.Join(home, "geoip.dat")); info.Mode().Perm() != 0o644 {
+		t.Errorf("geoip.dat mode %v", info.Mode().Perm())
+	}
 	for name, want := range map[string]string{"geoip.metadb": "pinned geoip.metadb", "geoip.dat": "pinned geoip.dat", "geosite.dat": "updated"} {
 		if b, _ := os.ReadFile(filepath.Join(home, name)); string(b) != want {
 			t.Errorf("%s holds %q, want %q", name, b, want)
 		}
 	}
-	if found, _ := filepath.Glob(filepath.Join(home, "*.tmp")); len(found) != 0 {
+	if found, _ := filepath.Glob(filepath.Join(home, "*.*.*")); len(found) != 0 {
 		t.Errorf("left %v", found)
 	}
 
 	if err := writeHome(filepath.Join(home, "config.json", "below-a-file"), []byte("{}")); err == nil || !strings.Contains(err.Error(), "Mount a volume there") {
 		t.Errorf("unwritable: err = %v", err)
+	}
+}
+
+// The resolved secrets go into a new file, created 0600, which then replaces
+// the old one: never into a file that is already there at a looser mode, and
+// never as a half-written config.json that a start racing this one could read.
+func TestWriteHomeReplacesConfig(t *testing.T) {
+	geodataDir = t.TempDir()
+	for _, name := range geodata {
+		write(t, filepath.Join(geodataDir, name), name, 0o444)
+	}
+	home := t.TempDir()
+	old := write(t, filepath.Join(home, "config.json"), "old", 0o644)
+	f, err := os.Open(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := writeHome(home, []byte("{\"secret\": 1}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := io.ReadAll(f); string(b) != "old" {
+		t.Errorf("the secrets were written into the file that was there, at 0644: it now holds %q", b)
+	}
+	if found, _ := filepath.Glob(filepath.Join(home, "config.json?*")); len(found) != 0 {
+		t.Errorf("left %v", found)
 	}
 }
