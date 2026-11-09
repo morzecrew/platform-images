@@ -43,6 +43,7 @@ variable "DESCRIPTIONS" {
     "rustfs"            = "RustFS S3-compatible object storage: console off by default, both credentials required, env-configured."
     "pgbouncer"         = "PgBouncer with an entrypoint-generated config, file-first credentials, and allowlist-based overrides via env."
     "xray"              = "Xray-core, non-root on distroless: secrets as files referenced from its JSON config, and a healthcheck that probes egress."
+    "mihomo"            = "mihomo, a client proxy, non-root on distroless: secrets as files referenced from its JSON config, pinned geodata, and a healthcheck that probes egress."
   }
 }
 
@@ -465,6 +466,7 @@ variable "XRAY_VERSION" {
 target "xray" {
   inherits   = ["_attested"]
   context    = "./images/xray"
+  contexts   = { shared = "./shared" }
   dockerfile = "Dockerfile"
   tags       = tag("xray", XRAY_VERSION)
   labels     = label("xray", XRAY_VERSION)
@@ -478,10 +480,42 @@ target "xray" {
 
 # ....................... #
 
+# From GitHub releases, as for xray. Upstream's one prerelease,
+# Prerelease-Alpha, is marked as one there, and its tag is not a version.
+# renovate: datasource=github-releases depName=MetaCubeX/mihomo extractVersion=^v(?<version>.+)$
+variable "MIHOMO_VERSION" {
+  default = "1.19.33"
+}
+
+# Upstream's binary and geodata, pinned by the index digest of
+# docker.io/metacubex/mihomo:v${MIHOMO_VERSION}, which is not on ghcr.io.
+# Renovate moves the version and not the digest, so its pull request fails
+# images/mihomo/smoke.sh, where the binary's version is compared with the
+# label, until the digest is moved too:
+#
+#   docker buildx imagetools inspect docker.io/metacubex/mihomo:v<version> \
+#     --format '{{json .Manifest.Digest}}'
+target "mihomo" {
+  inherits   = ["_attested"]
+  context    = "./images/mihomo"
+  contexts   = { shared = "./shared" }
+  dockerfile = "Dockerfile"
+  tags       = tag("mihomo", MIHOMO_VERSION)
+  labels     = label("mihomo", MIHOMO_VERSION)
+  args = {
+    MIHOMO_VERSION      = MIHOMO_VERSION
+    MIHOMO_IMAGE_DIGEST = "sha256:9211361a3ed85305383288d38c05e85862d6d5a590c10007c37fc059cca82e9c"
+    # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
+    GO_VERSION          = "1.27.3"
+  }
+}
+
+# ....................... #
+
 group "default" {
   targets = [
     "flyway", "caddy", "postgres", "postgres-pgvector", "postgres-cron",
     "uv-builder", "npm-builder", "python-distroless", "valkey", "rustfs", "pgbouncer",
-    "xray",
+    "xray", "mihomo",
   ]
 }

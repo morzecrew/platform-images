@@ -60,9 +60,9 @@ Precedence is baked, then mounted, then environment. A startup summary goes to s
 
 ### S-0001/D-18 — `ASSUMED` (Standing decisions)
 
-No entrypoint renders configuration through a templating engine; each image uses its server's native expansion. xray's server has none, so its entrypoint replaces a JSON object that is exactly `{"$file": "<absolute path>"}`, `{"$vlessDecryption": "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}` or `{"$proxy": "<absolute path>"}` with the value that file yields, and substitutes nothing else.
+No entrypoint renders configuration through a templating engine; each image uses its server's native expansion. xray's and mihomo's servers have none, so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute path>"}` with the value that file yields, xray's also `{"$vlessDecryption": "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}` or `{"$proxy": "<absolute path>"}`, and substitute nothing else.
 
-- Paths: `images/*/rootfs/entrypoint.sh` `images/caddy/rootfs/Caddyfile` `images/caddy/Dockerfile` `images/xray/entrypoint/main.go`
+- Paths: `images/*/rootfs/entrypoint.sh` `images/caddy/rootfs/Caddyfile` `images/caddy/Dockerfile` `images/xray/entrypoint/main.go` `images/mihomo/entrypoint/main.go` `shared/go/envconf/resolve.go`
 - Consequence: configuration is read by the server that owns it, with no second syntax in between
 
 ### S-0001/D-23 — `ASSUMED` (Standing decisions)
@@ -74,7 +74,7 @@ Versions are tracked only through `# renovate:` annotations directly above a `va
 
 ### S-0001/D-25 — `ASSUMED` (Standing decisions)
 
-An image is admitted by route 1, hand-rolled in two or more projects, or route 2, the same upstream run and diverged in two or more; a pair counts once. `xray` is the one image admitted on neither, by its owner's call on #125, and its row says so. Refusals are recorded under "Admissions on record". An image unused for a year is deleted, its package frozen by default and kept in `PACKAGES`. The annual workflow opens the review issue on 8 January with a consumer scan.
+An image is admitted by route 1, hand-rolled in two or more projects, or route 2, the same upstream run and diverged in two or more; a pair counts once. `xray` and `mihomo` are the images admitted on neither, by their owner's calls on #125 and #140, and their rows say so. Refusals are recorded under "Admissions on record". An image unused for a year is deleted, its package frozen by default and kept in `PACKAGES`. The annual workflow opens the review issue on 8 January with a consumer scan.
 
 - Paths: `images/README.md` `.github/workflows/annual-image-review.yaml` `.github/workflows/cleanup-images.yaml`
 - Consequence: an image enters and leaves by a rule, not by whoever needs it first

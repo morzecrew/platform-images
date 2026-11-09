@@ -11,9 +11,9 @@ A curated and a passthrough setting for one key, or two spellings of one name, a
 
 ### S-0001/D-18 — `ASSUMED` (Standing decisions)
 
-No entrypoint renders configuration through a templating engine; each image uses its server's native expansion. xray's server has none, so its entrypoint replaces a JSON object that is exactly `{"$file": "<absolute path>"}`, `{"$vlessDecryption": "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}` or `{"$proxy": "<absolute path>"}` with the value that file yields, and substitutes nothing else.
+No entrypoint renders configuration through a templating engine; each image uses its server's native expansion. xray's and mihomo's servers have none, so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute path>"}` with the value that file yields, xray's also `{"$vlessDecryption": "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}` or `{"$proxy": "<absolute path>"}`, and substitute nothing else.
 
-- Paths: `images/*/rootfs/entrypoint.sh` `images/caddy/rootfs/Caddyfile` `images/caddy/Dockerfile` `images/xray/entrypoint/main.go`
+- Paths: `images/*/rootfs/entrypoint.sh` `images/caddy/rootfs/Caddyfile` `images/caddy/Dockerfile` `images/xray/entrypoint/main.go` `images/mihomo/entrypoint/main.go` `shared/go/envconf/resolve.go`
 - Consequence: configuration is read by the server that owns it, with no second syntax in between
 
 ### S-0001/D-24 — `ASSUMED` (Standing decisions)

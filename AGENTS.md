@@ -46,7 +46,7 @@ Every target is built, smoked and published for linux/amd64 and linux/arm64, eac
 
 ### S-0001/D-17 — `ASSUMED` (Standing decisions)
 
-`shared/` holds only files two or more images use. They reach an image through the bake's named context `contexts = { shared = "./shared" }`, never by copy. The helper is POSIX sh and runs under busybox, dash and bash.
+`shared/` holds only files two or more images use. They reach an image through the bake's named context `contexts = { shared = "./shared" }`, never by copy. The helper is POSIX sh and runs under busybox, dash and bash. The Go module `shared/go` is standard library only, and an entrypoint module reaches it through a `replace` to the relative path its Dockerfile copies the context to.
 
 - Paths: `shared/**` `docker-bake.hcl`
 - Consequence: a fix to the shared helper reaches every image that uses it at its next build
@@ -94,6 +94,7 @@ and invariants that govern it. `torve spec show S-NNNN/D-n`, `torve spec paths`
 - `images/caddy/rootfs/` — 3 decision(s)
 - `images/flyway/` — 0 decision(s)
 - `images/flyway/rootfs/` — 1 decision(s)
+- `images/mihomo/entrypoint/` — 1 decision(s)
 - `images/npm-builder/` — 1 decision(s)
 - `images/pgbouncer/` — 5 decision(s)
 - `images/pgbouncer/rootfs/` — 2 decision(s)
@@ -110,6 +111,7 @@ and invariants that govern it. `torve spec show S-NNNN/D-n`, `torve spec paths`
 - `images/valkey/rootfs/` — 2 decision(s)
 - `images/xray/entrypoint/` — 1 decision(s)
 - `shared/` — 1 decision(s)
+- `shared/go/envconf/` — 1 decision(s)
 - `shared/rootfs/lib/` — 6 decision(s)
 - `shared/test/` — 1 decision(s)
 

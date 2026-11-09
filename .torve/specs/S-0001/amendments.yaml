@@ -240,6 +240,117 @@ amendments:
       or second syntax. The line is not a URL: a scheme is refused and nothing is
       percent-decoded, so a password may hold `:` and `@` as written. An error never
       quotes the value, and the user and password are redacted from Xray's output.
+  - id: A-9
+    at: '2026-11-09T13:38:04Z'
+    title: >-
+      mihomo resolves $file through the Go module xray now shares
+    changes:
+      - subject: D-18
+        field: paths
+        before:
+          - images/*/rootfs/entrypoint.sh
+          - images/caddy/rootfs/Caddyfile
+          - images/caddy/Dockerfile
+          - images/xray/entrypoint/main.go
+        after:
+          - images/*/rootfs/entrypoint.sh
+          - images/caddy/rootfs/Caddyfile
+          - images/caddy/Dockerfile
+          - images/xray/entrypoint/main.go
+          - images/mihomo/entrypoint/main.go
+          - shared/go/envconf/resolve.go
+      - subject: D-18
+        field: text
+        before: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's server has none, so its entrypoint
+          replaces a JSON object that is exactly `{"$file": "<absolute path>"}`, `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}` or `{"$proxy":
+          "<absolute path>"}` with the value that file yields, and substitutes nothing
+          else.
+        after: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's and mihomo's servers have none,
+          so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
+          path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}` or `{"$proxy":
+          "<absolute path>"}`, and substitute nothing else.
+      - subject: D-18
+        field: fingerprint
+        before: bd0d814b06b384cf/f206374b70c16778
+        after: f576b12bfb3e19d5/9e62c124a404b61d
+    md: >-
+      #140 adds mihomo, a client proxy, for dotdash's client bundle. Like Xray,
+      mihomo reads no value from a file or the environment inside its config, so it
+      gets the same structural reference, `$file` alone. Its source is one JSON
+      file, which mihomo reads as YAML, so the resolver stays standard-library Go.
+      That resolver, its file checks, the summary and the healthcheck moved from
+      xray's entrypoint into shared/go/envconf, which both entrypoints use (D-17).
+      xray's behaviour is unchanged, and its tests and smoke test pass on the shared
+      code. The row's paths follow the resolver.
+  - id: A-10
+    at: '2026-11-09T13:38:15Z'
+    title: >-
+      mihomo is the second image admitted on the owner's call
+    changes:
+      - subject: D-25
+        field: text
+        before: >-
+          An image is admitted by route 1, hand-rolled in two or more projects, or
+          route 2, the same upstream run and diverged in two or more; a pair counts
+          once. `xray` is the one image admitted on neither, by its owner's call on
+          #125, and its row says so. Refusals are recorded under "Admissions on record".
+          An image unused for a year is deleted, its package frozen by default and
+          kept in `PACKAGES`. The annual workflow opens the review issue on 8 January
+          with a consumer scan.
+        after: >-
+          An image is admitted by route 1, hand-rolled in two or more projects, or
+          route 2, the same upstream run and diverged in two or more; a pair counts
+          once. `xray` and `mihomo` are the images admitted on neither, by their owner's
+          calls on #125 and #140, and their rows say so. Refusals are recorded under
+          "Admissions on record". An image unused for a year is deleted, its package
+          frozen by default and kept in `PACKAGES`. The annual workflow opens the
+          review issue on 8 January with a consumer scan.
+      - subject: D-25
+        field: fingerprint
+        before: 9254330abe9927c9/482c6c960e0d6250
+        after: c13706ce444da31a/482c6c960e0d6250
+    md: >-
+      mihomo has one consumer, dotdash: its planned client bundle and its CI's
+      compatibility smoke test, whose image check refuses a ghcr.io/morzecrew digest
+      without provenance. That meets neither route. The owner filed #140 as a
+      maintainer's call, as with xray on #125, and images/README.md records it under
+      "Admissions on record". The row named xray as "the one image" admitted that
+      way, which is no longer true.
+  - id: A-11
+    at: '2026-11-09T13:38:15Z'
+    title: >-
+      shared/ holds a Go module for entrypoints with no shell
+    changes:
+      - subject: D-17
+        field: text
+        before: >-
+          `shared/` holds only files two or more images use. They reach an image through
+          the bake's named context `contexts = { shared = "./shared" }`, never by
+          copy. The helper is POSIX sh and runs under busybox, dash and bash.
+        after: >-
+          `shared/` holds only files two or more images use. They reach an image through
+          the bake's named context `contexts = { shared = "./shared" }`, never by
+          copy. The helper is POSIX sh and runs under busybox, dash and bash. The
+          Go module `shared/go` is standard library only, and an entrypoint module
+          reaches it through a `replace` to the relative path its Dockerfile copies
+          the context to.
+      - subject: D-17
+        field: fingerprint
+        after: ecb50348d7da2e50/f218f9a22976a2d0
+    md: >-
+      The xray and mihomo entrypoints are Go binaries on distroless, with no shell
+      to run envconf.sh. They share a resolver, a summary and a healthcheck, and the
+      row's rule is that what two images use lives here and reaches them through the
+      named context. So shared/go is a module, standard library only. Each
+      entrypoint's go.mod replaces it with ../../../shared/go, and its Dockerfile
+      copies the context to that place. One go.mod then works in a checkout and in
+      the build, and the build runs the module's tests before the image is made.
 editorial:
   - subject: D-5
     field: text
