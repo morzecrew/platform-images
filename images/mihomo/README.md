@@ -252,6 +252,9 @@ never the value:
 [envconf] precedence: image default < environment
 ```
 
+A password in a URL, and every value in its query, is shown as `xxxxx`, here
+and in the healthcheck's output.
+
 ## Other commands
 
 Any first argument other than `run` or `healthcheck` goes straight to

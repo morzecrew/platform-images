@@ -395,3 +395,26 @@ func TestHasConfig(t *testing.T) {
 		}
 	}
 }
+
+// A token is as likely in the query as in the userinfo, as with an IP-echo
+// service that takes an API key, so its values are masked too. The keys stay,
+// so the summary still says which parameters the probe sends.
+func TestURLsAreShownWithoutCredentials(t *testing.T) {
+	t.Setenv("DEMO_HEALTHCHECK_URL", "https://ip.example/json?token=t0k3n&fields=ip")
+	t.Setenv("DEMO_HEALTHCHECK_PROXY", "http://probe:pw@127.0.0.1:1")
+	var b bytes.Buffer
+	demo.Summary(&b, "Demo 1.2.3", nil)
+	if want := "DEMO_HEALTHCHECK_URL = https://ip.example/json?fields=xxxxx&token=xxxxx"; !strings.Contains(b.String(), want) {
+		t.Errorf("summary lacks %q:\n%s", want, b.String())
+	}
+	t.Setenv("DEMO_HEALTHCHECK_TIMEOUT", "2s")
+	out := stderr(t, func() { demo.Healthcheck("/nonexistent", "*.json") })
+	for _, secret := range []string{"t0k3n", ":pw@"} {
+		if strings.Contains(b.String(), secret) || strings.Contains(out, secret) {
+			t.Errorf("%q is shown:\n%s\n%s", secret, b.String(), out)
+		}
+	}
+	if !strings.Contains(out, "GET https://ip.example/json?fields=xxxxx&token=xxxxx through http://probe:xxxxx@127.0.0.1:1") {
+		t.Errorf("stderr %q", out)
+	}
+}

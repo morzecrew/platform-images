@@ -98,7 +98,7 @@ func (im *Image) Summary(w io.Writer, version string, configs []*Config) {
 			v = "(unset: any 2xx passes)"
 		case strings.HasSuffix(s.Name, "_URL"), strings.HasSuffix(s.Name, "_PROXY"):
 			if u, err := url.Parse(v); err == nil {
-				v = u.Redacted()
+				v = shown(u)
 			}
 		}
 		fmt.Fprintf(w, "[envconf]   source=%-14s %s = %s\n", "env-or-default", s.Name, v)

@@ -353,7 +353,8 @@ never the value:
 [envconf] precedence: image default < environment
 ```
 
-A password in a URL is shown as `xxxxx`.
+A password in a URL, and every value in its query, is shown as `xxxxx`, here
+and in the healthcheck's output.
 
 ## Other commands
 

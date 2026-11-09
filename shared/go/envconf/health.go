@@ -75,11 +75,16 @@ func (im *Image) Healthcheck(dir, pattern string) int {
 	}
 	resp, err := client.Get(h.Target.String())
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "healthcheck: GET %s through %s: %v\n", h.Target.Redacted(), h.Proxy.Redacted(), err)
+		// A *url.Error repeats the whole URL; what lies beneath it does not.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		fmt.Fprintf(os.Stderr, "healthcheck: GET %s through %s: %v\n", shown(h.Target), shown(h.Proxy), err)
 		return 1
 	}
 	defer resp.Body.Close()
-	fmt.Fprintf(os.Stderr, "healthcheck: GET %s through %s: %s\n", h.Target.Redacted(), h.Proxy.Redacted(), resp.Status)
+	fmt.Fprintf(os.Stderr, "healthcheck: GET %s through %s: %s\n", shown(h.Target), shown(h.Proxy), resp.Status)
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return 1
 	}
@@ -127,4 +132,21 @@ func hasConfig(dir, pattern string) bool {
 		}
 	}
 	return false
+}
+
+// shown is u as the summary and the probe print it: the password and every
+// query value masked, as an API key in a query is as common as one in the
+// userinfo. The path is printed as is, being what the probe requests.
+func shown(u *url.URL) string {
+	c := *u
+	if c.RawQuery != "" {
+		q := c.Query()
+		for k := range q {
+			for i := range q[k] {
+				q[k][i] = "xxxxx"
+			}
+		}
+		c.RawQuery = q.Encode()
+	}
+	return c.Redacted()
 }
