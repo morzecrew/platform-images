@@ -82,6 +82,11 @@ func start() error {
 	if envconf.Overlap(src, home) {
 		return fmt.Errorf("MIHOMO_HOME (%s) and MIHOMO_SOURCE_DIR (%s) overlap, and the resolved config is written into MIHOMO_HOME. Point them at separate directories", home, src)
 	}
+	// The same holds for the file: a config.json that is a symlink into the
+	// home directory would be replaced along with the config written there.
+	if source := filepath.Join(src, configName); envconf.Overlap(source, home) {
+		return fmt.Errorf("%s lies inside MIHOMO_HOME (%s) once symlinks are resolved, and the resolved config is written into MIHOMO_HOME. Mount the source config from elsewhere", source, home)
+	}
 	if _, err := img.HealthSettings(); err != nil {
 		return err
 	}

@@ -151,8 +151,8 @@ path and the referenced path, never a value.
   would replace the image's config, and the image's `-d` and `-f` would
   silently override the other two.
 - A `MIHOMO_HOME` uid 65532 cannot write, or one that overlaps the source
-  directory once symlinks are resolved. Writing the resolved config there
-  would overwrite the source.
+  directory, or holds the source `config.json`, once symlinks are resolved.
+  Writing the resolved config there would overwrite the source.
 - A config that `mihomo -t` rejects. mihomo's message is printed with every
   resolved value replaced by `<redacted>`, because mihomo quotes what it
   rejects.

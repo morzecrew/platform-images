@@ -174,3 +174,32 @@ func TestWriteHomeReplacesConfig(t *testing.T) {
 		t.Errorf("left %v", found)
 	}
 }
+
+// A source config.json that is a symlink into MIHOMO_HOME, as a home that once
+// held the config by hand might be wired, would be replaced by the resolved
+// config, and its references lost to the next start.
+func TestSourceInsideHomeIsRefused(t *testing.T) {
+	root := t.TempDir()
+	secret := write(t, filepath.Join(root, "secret"), "s3cret", 0o400)
+	home, src := filepath.Join(root, "home"), filepath.Join(root, "src")
+	for _, d := range []string{home, src} {
+		if err := os.Mkdir(d, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const doc = `{"a": {"$file": "`
+	source := write(t, filepath.Join(home, "config.json"), doc+secret+`"}}`, 0o600)
+	if err := os.Symlink(source, filepath.Join(src, "config.json")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MIHOMO_SOURCE_DIR", src)
+	t.Setenv("MIHOMO_HOME", home)
+	geodataDir = t.TempDir()
+	err := start()
+	if err == nil || !strings.Contains(err.Error(), "lies inside MIHOMO_HOME") {
+		t.Errorf("err = %v", err)
+	}
+	if b, _ := os.ReadFile(source); !strings.HasPrefix(string(b), doc) {
+		t.Errorf("the source now holds %q", b)
+	}
+}
