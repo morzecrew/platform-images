@@ -203,3 +203,30 @@ func TestSourceInsideHomeIsRefused(t *testing.T) {
 		t.Errorf("the source now holds %q", b)
 	}
 }
+
+// A name that holds no readable file gets the pinned one: a symlink to
+// nothing is absent, and a directory, which mihomo would skip, is refused
+// rather than left for mihomo to download over.
+func TestSeedingNeedsAFile(t *testing.T) {
+	geodataDir = t.TempDir()
+	for _, name := range geodata {
+		write(t, filepath.Join(geodataDir, name), "pinned "+name, 0o444)
+	}
+	home := t.TempDir()
+	if err := os.Symlink(filepath.Join(home, "gone"), filepath.Join(home, "geoip.dat")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeHome(home, []byte("{}")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(home, "geoip.dat")); string(b) != "pinned geoip.dat" {
+		t.Errorf("a dangling symlink: geoip.dat holds %q", b)
+	}
+	os.Remove(filepath.Join(home, "geosite.dat"))
+	if err := os.Mkdir(filepath.Join(home, "geosite.dat"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeHome(home, []byte("{}")); err == nil || !strings.Contains(err.Error(), "geosite.dat is not a regular file") {
+		t.Errorf("a directory: err = %v", err)
+	}
+}

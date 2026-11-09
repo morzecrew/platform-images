@@ -206,8 +206,15 @@ func writeHome(home string, config []byte) error {
 	// replaces them in the home directory, and a newer file is kept.
 	for _, name := range geodata {
 		dst := filepath.Join(home, name)
-		if _, err := os.Lstat(dst); !errors.Is(err, fs.ErrNotExist) {
+		// Stat follows a symlink, so one that points nowhere reads as absent.
+		info, err := os.Stat(dst)
+		switch {
+		case err == nil && info.Mode().IsRegular():
 			continue
+		case err == nil:
+			return fmt.Errorf("%s is not a regular file, so the pinned %s cannot be put there, and mihomo would download one. Remove it", dst, name)
+		case !errors.Is(err, fs.ErrNotExist):
+			return hint(err)
 		}
 		in, err := os.Open(filepath.Join(geodataDir, name))
 		if err != nil {

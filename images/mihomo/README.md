@@ -153,6 +153,9 @@ path and the referenced path, never a value.
 - A `MIHOMO_HOME` uid 65532 cannot write, or one that overlaps the source
   directory, or holds the source `config.json`, once symlinks are resolved.
   Writing the resolved config there would overwrite the source.
+- A `geoip.metadb`, `geosite.dat` or `geoip.dat` in `MIHOMO_HOME` that is not
+  a regular file, such as a directory. A symlink to nothing counts as absent
+  and gets the pinned file.
 - A config that `mihomo -t` rejects. mihomo's message is printed with every
   resolved value replaced by `<redacted>`, because mihomo quotes what it
   rejects.
