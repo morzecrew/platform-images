@@ -41,10 +41,12 @@ services:
       test: ["CMD", "/usr/local/bin/openvpn-entrypoint", "healthcheck"]
       interval: 30s
   # Anything that should leave through the tunnel joins its namespace, such
-  # as a SOCKS server other services dial at vpn:1080.
+  # as a SOCKS server other services dial at vpn:1080, once it is healthy.
   socks:
     image: ghcr.io/morzecrew/xray:26.10.31
     network_mode: service:vpn
+    depends_on:
+      vpn: {condition: service_healthy}
 ```
 
 The config is a client config as a provider or a router exports it, with
@@ -61,15 +63,20 @@ password
 
 Before openvpn runs, the entrypoint:
 
-1. reads every `remote` line, those inside `<connection>` blocks included;
-2. resolves each host, IPv4 and IPv6, with the system resolver;
-3. for each address reached through a gateway, adds a host route via that
-   gateway (an address on a network the namespace is directly on needs
-   none);
-4. deletes every default route, IPv4 and IPv6.
+1. deletes every default route, IPv4 and IPv6, noting their gateways. This
+   comes first, before any check or lookup, so a container sharing the
+   namespace has no way out from the moment this one starts;
+2. gives a resolver beyond the namespace's networks, as a host's own can be,
+   a host route via the noted gateway. Docker's (127.0.0.11) and Podman's (on
+   the bridge) are directly reachable and need none;
+3. reads every `remote` line, those inside `<connection>` blocks included,
+   and resolves each host, IPv4 and IPv6;
+4. gives each server address a host route via the noted gateway of its
+   family, unless it is on a network the namespace is directly on.
 
-From then on, an address that is not a server, not on a directly connected
-network, and not routed into the tunnel by openvpn has no route at all.
+From then on, an address that is not a server, not such a resolver, not on a
+directly connected network, and not routed into the tunnel by openvpn has no
+route at all.
 While openvpn connects, reconnects or restarts, traffic for the outside
 finds nothing to take it.
 
@@ -91,6 +98,11 @@ has no route, since its default route is gone.
   the names again. Until then openvpn can't connect, and nothing leaks.
 - Directly connected networks stay reachable directly, as they must, for
   the server or a sidecar's peers to be reached at all.
+- The default route exists from the moment the runtime creates the
+  namespace until the entrypoint's first command deletes it. Start anything
+  that joins the namespace once this container is healthy (Compose:
+  `depends_on` with `condition: service_healthy`), and that window is
+  closed to it.
 - The healthcheck shows that traffic is routed into the tunnel. It can't tell
   a live server from a dead one, because `persist-tun` keeps the device and
   routes through a reconnect. Prove end-to-end egress through whatever
@@ -117,8 +129,9 @@ Without `NET_ADMIN`, the route changes fail and it exits 78 saying so.
 /usr/local/bin/openvpn-entrypoint healthcheck
 ```
 
-It exits 0 when the catch-all route, openvpn's `0.0.0.0/1` or a default route,
-leads to a tun device that is up, and 1 otherwise, with the reason.
+It exits 0 when the catch-all route leads to a tun device that is up: both
+halves of openvpn's `def1` pair, `0.0.0.0/1` and `128.0.0.0/1`, to the same
+device, or else a default route. Otherwise it exits 1, with the reason.
 
 ## Environment
 

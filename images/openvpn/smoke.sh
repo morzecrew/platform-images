@@ -57,9 +57,11 @@ fail() {
 chmod 0644 "${WORK}"/*.key
 
 # client.conf, the client's whole config with its key inline, as a provider's
-# export holds it. $1 replaces the remote line.
+# export holds it. $1 replaces the remote line. hand-window is the test's
+# own: a client that starts while the server is down retries its handshake
+# every 15 s instead of every 60.
 client_conf() {
-	printf 'client\ndev tun\nproto udp\n%s\nnobind\nremote-cert-tls server\nverb 3\n' "$1"
+	printf 'client\ndev tun\nproto udp\n%s\nnobind\nremote-cert-tls server\nhand-window 15\nverb 3\n' "$1"
 	printf '<ca>\n%s\n</ca>\n<cert>\n%s\n</cert>\n<key>\n%s\n</key>\n' \
 		"$(cat "${WORK}/ca.crt")" "$(cat "${WORK}/client.crt")" "$(cat "${WORK}/client.key")"
 }
@@ -102,7 +104,11 @@ smoke-pass
 
 # --- 3. the rig ---------------------------------------------------------------
 
-"${ENGINE}" network create --subnet 10.231.77.0/24 "${RIG}" >/dev/null
+# IPv6 too, so the client starts with an IPv6 default route for the kill
+# switch to remove.
+"${ENGINE}" network create --subnet 10.231.77.0/24 --ipv6 --subnet fd00:231:77::/64 "${RIG}" >/dev/null
+[ -n "$("${ENGINE}" run --rm --network "${RIG}" --entrypoint ip "${IMAGE}" -6 route show default)" ] ||
+	fail "the rig network has no IPv6 default route, so the IPv6 half of the kill switch would go untested"
 "${ENGINE}" network create --internal --subnet 10.231.78.0/24 "${FAR}" >/dev/null
 
 # The server: this image's openvpn in server mode, answering on SRV_VPN too,
@@ -132,9 +138,12 @@ in_client() { "${ENGINE}" exec "${CLI}" "$@"; }
 far() { in_client sh -c "nc -w 3 ${TGT_IP} 7000" 2>/dev/null || true; }
 no_way_out() { # <label>: no default route, and no route to an outside address but the tunnel
 	local r
-	[ -z "$(in_client ip -4 route show default)" ] || fail "$1: a default route is back"
+	[ -z "$(in_client ip -4 route show default)" ] || fail "$1: an IPv4 default route is back"
+	[ -z "$(in_client ip -6 route show default)" ] || fail "$1: an IPv6 default route is back"
 	r="$(in_client ip -4 -o route get 198.51.100.1 2>&1 || true)"
-	case "${r}" in *" dev eth0"*) fail "$1: an outside address is routed out eth0: ${r}" ;; esac
+	case "${r}" in *" dev eth0"*) fail "$1: an outside IPv4 address is routed out eth0: ${r}" ;; esac
+	r="$(in_client ip -6 -o route get 2001:db8::1 2>&1 || true)"
+	case "${r}" in *" dev eth0"*) fail "$1: an outside IPv6 address is routed out eth0: ${r}" ;; esac
 }
 
 # --- 4. a fresh start with the server down ------------------------------------
@@ -154,7 +163,7 @@ echo "ok: started with the server down, nothing gets out, and the healthcheck fa
 # --- 5. the server comes up ---------------------------------------------------
 
 "${ENGINE}" start "${SRV}" >/dev/null
-for _ in $(seq 1 60); do
+for _ in $(seq 1 150); do
 	"${ENGINE}" logs "${CLI}" 2>&1 | grep -q "Initialization Sequence Completed" && break
 	sleep 1
 done
@@ -163,15 +172,27 @@ done
 in_client /usr/local/bin/openvpn-entrypoint healthcheck >/dev/null || fail "unhealthy with the tunnel up"
 no_way_out "tunnel up"
 echo "ok: with the server up, the target only the tunnel reaches answers, and the healthcheck passes"
+# Half of def1 gone: the healthcheck wants both halves in the tunnel.
+in_client ip route del 128.0.0.0/1
+out="$(in_client /usr/local/bin/openvpn-entrypoint healthcheck 2>&1)" && fail "healthy with half of IPv4 outside the tunnel"
+case "${out}" in *"128.0.0.0/1 to nowhere"*) ;; *) fail "the healthcheck does not name the missing half: ${out}" ;; esac
+in_client ip route add 128.0.0.0/1 via 10.8.0.1 dev tun0
+in_client /usr/local/bin/openvpn-entrypoint healthcheck >/dev/null || fail "unhealthy once both halves are back"
+echo "ok: with half of def1 gone, the healthcheck fails and names it"
 
 # --- 6. the server goes away again --------------------------------------------
 
+# openvpn's restart markers, counted, so a new one after the stop is told
+# apart from those of the start, when the server was down.
+restarts() { "${ENGINE}" logs "${CLI}" 2>&1 | grep -cE "Inactivity timeout|process restarting" || true; }
+before="$(restarts)"
 "${ENGINE}" stop -t 1 "${SRV}" >/dev/null
-for _ in $(seq 1 40); do
-	"${ENGINE}" logs "${CLI}" 2>&1 | grep -q "process restarting" && break
+[ "$("${ENGINE}" inspect -f '{{.State.Running}}' "${SRV}")" = false ] || fail "the server did not stop"
+for _ in $(seq 1 60); do
+	[ "$(restarts)" -gt "${before}" ] && break
 	sleep 1
 done
-"${ENGINE}" logs "${CLI}" 2>&1 | grep -q "process restarting" || fail "the client never noticed the server was gone"
+[ "$(restarts)" -gt "${before}" ] || fail "the client never noticed the server was gone"
 sleep 2
 no_way_out "server gone, after openvpn restarted"
 [ -z "$(far)" ] || fail "the far target answered with the server gone"
