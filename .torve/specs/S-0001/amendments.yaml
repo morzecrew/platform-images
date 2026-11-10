@@ -351,6 +351,40 @@ amendments:
       entrypoint's go.mod replaces it with ../../../shared/go, and its Dockerfile
       copies the context to that place. One go.mod then works in a checkout and in
       the build, and the build runs the module's tests before the image is made.
+  - id: A-12
+    at: '2026-11-10T07:58:28Z'
+    title: >-
+      xray resolves a wg-quick file into a wireguard outbound ($wireguard)
+    changes:
+      - subject: D-18
+        field: text
+        before: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's and mihomo's servers have none,
+          so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
+          path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}` or `{"$proxy":
+          "<absolute path>"}`, and substitute nothing else.
+        after: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's and mihomo's servers have none,
+          so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
+          path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}`, `{"$proxy":
+          "<absolute path>"}` or `{"$wireguard": "<absolute path>"}`, and substitute
+          nothing else.
+      - subject: D-18
+        field: fingerprint
+        before: f576b12bfb3e19d5/9e62c124a404b61d
+        after: f2199db5ed32310a/9e62c124a404b61d
+    md: >-
+      dotdash's gate is to reach an operator's WireGuard exit, such as a home router
+      abroad, with no capability: Xray's own WireGuard runs over its built-in TCP/IP
+      stack. Operators hold a wg-quick file, as providers and routers export it, so
+      `$wireguard` turns that one secret file into the outbound's settings as `$proxy`
+      turns a proxy line into a socks or http outbound's. It parses wg-quick's keys,
+      leaves out those only wg-quick acts on (DNS, routes, scripts), refuses unknown
+      ones, and names a line and a key in its errors, never a value.
 editorial:
   - subject: D-5
     field: text

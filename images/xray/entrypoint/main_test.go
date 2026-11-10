@@ -477,3 +477,162 @@ func TestProxyRefusals(t *testing.T) {
 		t.Errorf("beside another key: err = %v", err)
 	}
 }
+
+// Throwaway keys, generated for these tests with `xray wg`.
+const (
+	wgPriv = "COVmSwOBxaVOO/HxsbcWScy7qC7TdkSHcIQ7att8CXY="
+	wgPub  = "KCy9XEHEkTC/weEDMlRHzJ2o5Oa3jXe8o3GKdMVJ2GI="
+	wgPSK  = "eBSs0NJMmt89WE32GaHruRx8XlkzYaENus8hH8nlYl4="
+)
+
+func TestWireGuard(t *testing.T) {
+	dir := t.TempDir()
+	// A provider's export: comments, DNS and scripts that only wg-quick runs,
+	// keys in any case, Address and AllowedIPs over two lines, a bare address.
+	conf := `# exported by a provider
+[Interface]
+PrivateKey = ` + wgPriv + `
+Address = 10.34.0.3/32, fd30:2::3/128
+DNS = 1.1.1.1
+PostUp = iptables -A FORWARD -i %i -j ACCEPT
+mtu=1280
+
+[Peer]  # the exit
+publickey = ` + wgPub + `
+PresharedKey = ` + wgPSK + `
+Endpoint = vpn.example:51820
+AllowedIPs = 0.0.0.0/0
+AllowedIPs = ::/0
+PersistentKeepalive = 25
+
+[Peer]
+PublicKey = ` + wgPub + `
+Endpoint = [2001:db8::7]:51821
+AllowedIPs = 10.9.0.0/16, 192.0.2.77
+
+[Peer]
+PublicKey = ` + wgPub + `
+Endpoint = vpn.example.:51822
+AllowedIPs = 192.0.2.0/24
+PersistentKeepalive = off
+`
+	file := write(t, filepath.Join(dir, "wg.conf"), conf, 0o600)
+	r, err := wireguard(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := wgSettings{
+		SecretKey: wgPriv,
+		Address:   []string{"10.34.0.3/32", "fd30:2::3/128"},
+		Peers: []wgPeer{
+			{PublicKey: wgPub, PreSharedKey: wgPSK, Endpoint: "vpn.example:51820", AllowedIPs: []string{"0.0.0.0/0", "::/0"}, KeepAlive: 25},
+			{PublicKey: wgPub, Endpoint: "[2001:db8::7]:51821", AllowedIPs: []string{"10.9.0.0/16", "192.0.2.77/32"}},
+			{PublicKey: wgPub, Endpoint: "vpn.example.:51822", AllowedIPs: []string{"192.0.2.0/24"}},
+		},
+		MTU: 1280, NoKernelTun: true,
+	}
+	got, _ := r.Value.(wgSettings)
+	if !wgEqual(got, want) {
+		t.Errorf("settings\n got %+v\nwant %+v", got, want)
+	}
+	if !slices.Equal(r.Secrets, []string{wgPriv, wgPSK}) {
+		t.Errorf("secrets to redact = %q", r.Secrets)
+	}
+	if r.Note != "vpn.example:51820, [2001:db8::7]:51821, vpn.example.:51822" {
+		t.Errorf("note = %q", r.Note)
+	}
+
+	// The whole settings of an outbound: the MTU wg-quick defaults to, host
+	// bits of an AllowedIPs network cleared, an Address's kept, no keepAlive
+	// or preSharedKey when the file has none.
+	minimal := write(t, filepath.Join(dir, "min.conf"), "[Interface]\nPrivateKey="+wgPriv+"\nAddress=10.0.0.2/24\n[Peer]\nPublicKey="+wgPub+"\nEndpoint=203.0.113.7:51820\nAllowedIPs=10.0.0.9/24\n", 0o400)
+	src := write(t, filepath.Join(dir, "c.json"), `{"outbounds": [{"protocol": "wireguard", "settings": {"$wireguard": "`+minimal+`"}}]}`, 0o600)
+	c, err := resolveFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOut := `{"outbounds":[{"protocol":"wireguard","settings":{"secretKey":"` + wgPriv + `","address":["10.0.0.2/24"],"peers":[{"publicKey":"` + wgPub + `","endpoint":"203.0.113.7:51820","allowedIPs":["10.0.0.0/24"]}],"mtu":1420,"noKernelTun":true}}]}` + "\n"
+	if string(c.Out) != wantOut {
+		t.Errorf("resolved\n got %s\nwant %s", c.Out, wantOut)
+	}
+	wantRefs := []envconf.Ref{{Path: "outbounds[0].settings", Kind: "$wireguard", File: minimal, Note: "203.0.113.7:51820"}}
+	if !slices.Equal(c.Refs, wantRefs) {
+		t.Errorf("refs = %v, want %v", c.Refs, wantRefs)
+	}
+	if !slices.Equal(c.Values, []string{wgPriv}) {
+		t.Errorf("values to redact = %q", c.Values)
+	}
+}
+
+func wgEqual(a, b wgSettings) bool {
+	if a.SecretKey != b.SecretKey || a.MTU != b.MTU || a.NoKernelTun != b.NoKernelTun ||
+		!slices.Equal(a.Address, b.Address) || len(a.Peers) != len(b.Peers) {
+		return false
+	}
+	for i := range a.Peers {
+		p, q := a.Peers[i], b.Peers[i]
+		if p.PublicKey != q.PublicKey || p.PreSharedKey != q.PreSharedKey || p.Endpoint != q.Endpoint ||
+			p.KeepAlive != q.KeepAlive || !slices.Equal(p.AllowedIPs, q.AllowedIPs) {
+			return false
+		}
+	}
+	return true
+}
+
+// Each refusal names the file, a line or a section, and what is wrong, and
+// never a key: the private key and the preshared key are the secrets.
+func TestWireGuardRefusals(t *testing.T) {
+	dir := t.TempDir()
+	iface := "[Interface]\nPrivateKey = " + wgPriv + "\nAddress = 10.34.0.3/32\n"
+	peer := "[Peer]\nPublicKey = " + wgPub + "\nPresharedKey = " + wgPSK + "\nEndpoint = vpn.example:51820\nAllowedIPs = 0.0.0.0/0\n"
+	for _, tc := range []struct{ name, content, want string }{
+		{"empty", "", "has no [Interface]"},
+		{"no peer", iface, "has no [Peer]"},
+		{"no interface", peer, "has no [Interface]"},
+		{"no private key", "[Interface]\nAddress = 10.34.0.3/32\n" + peer, "the [Interface] on line 1 has no PrivateKey"},
+		{"no address", "[Interface]\nPrivateKey = " + wgPriv + "\n" + peer, "the [Interface] on line 1 has no Address"},
+		{"no endpoint", iface + "[Peer]\nPublicKey = " + wgPub + "\nAllowedIPs = 0.0.0.0/0\n", "the [Peer] on line 4 has no Endpoint"},
+		{"no public key", iface + "[Peer]\nEndpoint = vpn.example:51820\nAllowedIPs = 0.0.0.0/0\n", "the [Peer] on line 4 has no PublicKey"},
+		{"no allowed IPs", iface + "[Peer]\nPublicKey = " + wgPub + "\nEndpoint = vpn.example:51820\n", "the [Peer] on line 4 has no AllowedIPs"},
+		{"a key before a section", "PrivateKey = " + wgPriv + "\n" + iface + peer, "line 1: PrivateKey before any [Interface] or [Peer]"},
+		{"an unknown section", iface + "[Peers]\n" + peer, "line 4: a section other than [Interface] and [Peer]"},
+		{"an unclosed section", iface + "[Peer\n", "line 4: a section header that does not end in ]"},
+		{"two interfaces", iface + iface + peer, "line 4: a second [Interface], after the one on line 1"},
+		{"a typo in a key", iface + "[Peer]\nPublicKey = " + wgPub + "\nEndpiont = vpn.example:51820\n", "line 6: Endpiont is not a key of [Peer] that wg-quick knows"},
+		{"an interface key in a peer", iface + peer + "DNS = 1.1.1.1\n", "line 9: DNS is not a key of [Peer] that wg-quick knows"},
+		{"a line with no =", iface + peer + "Endpoint vpn.example:51820\n", "line 9: neither a [section] nor a key = value"},
+		{"a key alone on a line", iface + peer + wgPSK + "\n", "line 9: a key is empty"},
+		{"a key pasted as a key name", iface + peer + wgPSK + " = x\n", "line 9: a key is not a key of [Peer]"},
+		{"a private key twice", "[Interface]\nPrivateKey = " + wgPriv + "\nPrivateKey = " + wgPSK + "\nAddress = 10.34.0.3/32\n" + peer, "line 3: PrivateKey again in this [Interface], first on line 2"},
+		{"a short private key", "[Interface]\nPrivateKey = " + wgPriv[:40] + "\nAddress = 10.34.0.3/32\n" + peer, "line 2: PrivateKey is not a WireGuard key, 32 bytes in base64"},
+		{"a hex private key", "[Interface]\nPrivateKey = " + strings.Repeat("ab", 32) + "\nAddress = 10.34.0.3/32\n" + peer, "line 2: PrivateKey is not a WireGuard key"},
+		{"a bad preshared key", iface + "[Peer]\nPublicKey = " + wgPub + "\nPresharedKey = " + wgPSK[1:] + "\n", "line 6: PresharedKey is not a WireGuard key"},
+		{"an empty value", iface + "[Peer]\nPublicKey =\n", "line 5: PublicKey is empty"},
+		{"a bad address", "[Interface]\nPrivateKey = " + wgPriv + "\nAddress = 10.34.0.300/32\n" + peer, "line 3: Address holds an entry that is not an IPv4 or IPv6 address"},
+		{"an address with a zone", "[Interface]\nPrivateKey = " + wgPriv + "\nAddress = fe80::1%eth0\n" + peer, "line 3: Address holds an entry"},
+		{"a bad allowed IP", iface + "[Peer]\nAllowedIPs = 0.0.0.0/33\n", "line 5: AllowedIPs holds an entry"},
+		{"a trailing comma", iface + "[Peer]\nAllowedIPs = 0.0.0.0/0,\n", "line 5: AllowedIPs holds an entry"},
+		{"an endpoint with no port", iface + "[Peer]\nEndpoint = vpn.example\n", "line 5: Endpoint is not a host, a colon and a port"},
+		{"an endpoint's port 0", iface + "[Peer]\nEndpoint = vpn.example:0\n", "line 5: Endpoint has a port that is not a number from 1 to 65535"},
+		{"IPv6 without brackets", iface + "[Peer]\nEndpoint = 2001:db8::7:51820\n", "line 5: Endpoint is not a host, a colon and a port"},
+		{"a name in brackets", iface + "[Peer]\nEndpoint = [vpn.example]:51820\n", "line 5: Endpoint has brackets holding something other than an IPv6 address"},
+		{"a name ending in two dots", iface + "[Peer]\nEndpoint = vpn.example..:51820\n", "line 5: Endpoint does not name a DNS name"},
+		{"a URL endpoint", iface + "[Peer]\nEndpoint = udp://vpn.example:51820\n", "line 5: Endpoint"},
+		{"an MTU too small", "[Interface]\nPrivateKey = " + wgPriv + "\nAddress = 10.34.0.3/32\nMTU = 576\n" + peer, "line 4: MTU is not a number from 1280 to 65535"},
+		{"a keepalive word", iface + "[Peer]\nPersistentKeepalive = always\n", "line 5: PersistentKeepalive is neither off nor a number"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			file := write(t, filepath.Join(dir, "wg.conf"), tc.content, 0o600)
+			src := write(t, filepath.Join(dir, "c.json"), `{"outbounds": [{"protocol": "wireguard", "settings": {"$wireguard": "`+file+`"}}]}`, 0o600)
+			_, err := resolveFile(src)
+			if err == nil || !strings.Contains(err.Error(), "outbounds[0].settings: "+file+" ") || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v\nwant %q", err, tc.want)
+			}
+			for _, k := range []string{wgPriv, wgPSK, wgPriv[:12], wgPSK[:12], wgPriv[20:32], wgPSK[1:13]} {
+				if strings.Contains(err.Error(), k) {
+					t.Errorf("error %q carries key material %q", err, k)
+				}
+			}
+		})
+	}
+}
