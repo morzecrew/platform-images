@@ -5,7 +5,7 @@
 # down, on the first start too, when openvpn has not yet routed anything into
 # it. See images/openvpn/README.md.
 #
-#   openvpn-entrypoint [run]          check, kill switch, then exec openvpn
+#   openvpn-entrypoint [run]          check, kill switch, then openvpn, started again whenever it exits
 #   openvpn-entrypoint healthcheck    pass only while traffic is routed into a tun device
 #   openvpn-entrypoint <args...>      exec openvpn with those arguments
 set -eu
@@ -161,4 +161,45 @@ set -- --config "${CONFIG}" --persist-tun --persist-key --redirect-gateway def1 
 if [ -z "${TMPDIR:-}" ] && ! directives | awk '$1 == "tmp-dir" || $1 == "chroot" { found = 1 } END { exit !found }'; then
 	set -- "$@" --tmp-dir /dev/shm
 fi
-exec openvpn "$@"
+
+# openvpn runs as this shell's child, started again whenever it exits,
+# rather than in this shell's place. A restarted container gets a new network
+# namespace, and a container sharing this one, such as a proxy that dials out
+# through the tunnel, would keep the old one, cut off from it. The kill switch
+# outlives openvpn: when openvpn exits, its tun device and the def1 routes go
+# with it, and nothing has a route out. A server that moved to a new address
+# still takes a restart of the container, which resolves the names again.
+#
+# TERM and INT stop openvpn, then this shell. HUP and USR1 go to openvpn,
+# for its own restarts.
+child=""
+stopping=""
+trap 'stopping=1; [ -z "${child}" ] || kill -TERM "${child}" 2>/dev/null || true' TERM INT
+trap '[ -z "${child}" ] || kill -HUP "${child}" 2>/dev/null || true' HUP
+trap '[ -z "${child}" ] || kill -USR1 "${child}" 2>/dev/null || true' USR1
+delay=1
+while :; do
+	started="$(date +%s)"
+	openvpn "$@" &
+	child=$!
+	rc=0
+	wait "${child}" || rc=$?
+	# A trapped signal ends wait early, with openvpn still running.
+	while kill -0 "${child}" 2>/dev/null; do
+		rc=0
+		wait "${child}" || rc=$?
+	done
+	child=""
+	[ -z "${stopping}" ] || exit 0
+
+	# Doubling up to a minute while it keeps failing at once, as a refused
+	# config would; back to a second after a run of a minute or more.
+	ran=$(($(date +%s) - started))
+	[ "${ran}" -lt 60 ] || delay=1
+	envconf_warn "openvpn exited with ${rc} after ${ran} s; starting it again in ${delay} s, in the same network namespace"
+	sleep "${delay}" &
+	wait $! || true
+	[ -z "${stopping}" ] || exit 0
+	delay=$((delay * 2))
+	[ "${delay}" -le 60 ] || delay=60
+done

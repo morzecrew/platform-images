@@ -41,12 +41,13 @@ services:
       test: ["CMD", "/usr/local/bin/openvpn-entrypoint", "healthcheck"]
       interval: 30s
   # Anything that should leave through the tunnel joins its namespace, such
-  # as a SOCKS server other services dial at vpn:1080, once it is healthy.
+  # as a SOCKS server other services dial at vpn:1080, once it is healthy,
+  # and again after each restart of vpn, which brings a new namespace.
   socks:
     image: ghcr.io/morzecrew/xray:26.10.31
     network_mode: service:vpn
     depends_on:
-      vpn: {condition: service_healthy}
+      vpn: {condition: service_healthy, restart: true}
 ```
 
 The config is a client config as a provider or a router exports it, with
@@ -92,11 +93,28 @@ openvpn is then started with these overrides after the config, so they win:
 IPv6 goes into the tunnel only if the server pushes IPv6 routes. Otherwise it
 has no route, since its default route is gone.
 
+### When openvpn exits
+
+openvpn runs as the entrypoint's child, not in its place, and the entrypoint
+starts it again whenever it exits. The wait between tries doubles up to a
+minute while openvpn keeps failing at once, and goes back to a second after
+a run of a minute or more. The container doesn't restart, so its network
+namespace stays the same. A restarted container would get a new namespace,
+and a container sharing it (Compose: `network_mode: service:<this>`) would
+keep the old one, cut off from the tunnel. The kill switch holds between
+tries: openvpn's tun device and routes go with it, and nothing else has a
+way out.
+
+`TERM` and `INT` stop openvpn and then the entrypoint, which exits 0. `HUP`
+and `USR1` go to openvpn, for its own restarts.
+
 ### Limits
 
 - The routes pin the addresses resolved at start. A provider that moves its
-  server to a new address is reached again after a restart, which resolves
-  the names again. Until then openvpn can't connect, and nothing leaks.
+  server to a new address is reached again after a restart of the container,
+  which resolves the names again. Until then openvpn can't connect, and
+  nothing leaks. A container sharing the namespace must restart after this
+  one (Compose: `depends_on` with `restart: true`), into the new namespace.
 - Directly connected networks stay reachable directly, as they must, for
   the server or a sidecar's peers to be reached at all.
 - The default route exists from the moment the runtime creates the
@@ -180,5 +198,5 @@ package that release ships.
 | Path | |
 |---|---|
 | `Dockerfile` | Alpine, openvpn and iproute2, the version check, the entrypoint |
-| `rootfs/entrypoint.sh` | the checks, the kill switch, the healthcheck |
-| `smoke.sh` | refusals, then the kill switch against a stand-in server: a fresh start with it down, the tunnel up, and it gone again |
+| `rootfs/entrypoint.sh` | the checks, the kill switch, openvpn started again when it exits, the healthcheck |
+| `smoke.sh` | refusals, then the kill switch against a stand-in server: a fresh start with it down, the tunnel up, openvpn killed and started again in place, the server gone again, and a stop |
