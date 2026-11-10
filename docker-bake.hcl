@@ -522,7 +522,7 @@ target "mihomo" {
 # versioning keeps it to a release such as 3.24, never a patch tag.
 # renovate: datasource=docker depName=alpine versioning=docker
 variable "ALPINE_VERSION" {
-  default = "3.22"
+  default = "3.24"
 }
 
 # renovate: datasource=repology depName=alpine_3_22/openvpn versioning=loose
