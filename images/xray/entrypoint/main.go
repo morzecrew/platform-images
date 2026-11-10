@@ -597,7 +597,9 @@ func (p *wgPeer) set(key, v string) error {
 			if net.ParseIP(host) == nil || !strings.Contains(host, ":") {
 				return errors.New("has brackets holding something other than an IPv6 address")
 			}
-		case !validHost(host):
+		// A name may end in the root's dot, as wg(8) and Xray take it; the
+		// value is passed on as written.
+		case !validHost(strings.TrimSuffix(host, ".")):
 			return errors.New("does not name a DNS name, an IPv4 address or an IPv6 address in brackets")
 		}
 		if n, err := strconv.ParseUint(port, 10, 16); err != nil || n == 0 {

@@ -271,8 +271,9 @@ PersistentKeepalive = 25
   single host (`/32`, `/128`). `AllowedIPs` networks lose their host bits as
   wg(8) clears them; an `Address` keeps its own.
 - The endpoint is a DNS name, an IPv4 address, or an IPv6 address in brackets,
-  with a port from 1 to 65535. Xray resolves a name itself, outside the
-  tunnel.
+  with a port from 1 to 65535. A name may end in the root's dot,
+  `vpn.example.:51820`, and is passed on as written. Xray resolves a name
+  itself, outside the tunnel.
 - Xray's userspace stack does not carry a loopback destination through the
   tunnel. A peer's `AllowedIPs` decides what the outbound sends at all.
 - The summary shows the peers' endpoints, which are not secret. The private

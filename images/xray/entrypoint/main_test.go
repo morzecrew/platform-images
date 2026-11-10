@@ -509,6 +509,11 @@ PersistentKeepalive = 25
 PublicKey = ` + wgPub + `
 Endpoint = [2001:db8::7]:51821
 AllowedIPs = 10.9.0.0/16, 192.0.2.77
+
+[Peer]
+PublicKey = ` + wgPub + `
+Endpoint = vpn.example.:51822
+AllowedIPs = 192.0.2.0/24
 PersistentKeepalive = off
 `
 	file := write(t, filepath.Join(dir, "wg.conf"), conf, 0o600)
@@ -522,6 +527,7 @@ PersistentKeepalive = off
 		Peers: []wgPeer{
 			{PublicKey: wgPub, PreSharedKey: wgPSK, Endpoint: "vpn.example:51820", AllowedIPs: []string{"0.0.0.0/0", "::/0"}, KeepAlive: 25},
 			{PublicKey: wgPub, Endpoint: "[2001:db8::7]:51821", AllowedIPs: []string{"10.9.0.0/16", "192.0.2.77/32"}},
+			{PublicKey: wgPub, Endpoint: "vpn.example.:51822", AllowedIPs: []string{"192.0.2.0/24"}},
 		},
 		MTU: 1280, NoKernelTun: true,
 	}
@@ -532,7 +538,7 @@ PersistentKeepalive = off
 	if !slices.Equal(r.Secrets, []string{wgPriv, wgPSK}) {
 		t.Errorf("secrets to redact = %q", r.Secrets)
 	}
-	if r.Note != "vpn.example:51820, [2001:db8::7]:51821" {
+	if r.Note != "vpn.example:51820, [2001:db8::7]:51821, vpn.example.:51822" {
 		t.Errorf("note = %q", r.Note)
 	}
 
@@ -610,6 +616,7 @@ func TestWireGuardRefusals(t *testing.T) {
 		{"an endpoint's port 0", iface + "[Peer]\nEndpoint = vpn.example:0\n", "line 5: Endpoint has a port that is not a number from 1 to 65535"},
 		{"IPv6 without brackets", iface + "[Peer]\nEndpoint = 2001:db8::7:51820\n", "line 5: Endpoint is not a host, a colon and a port"},
 		{"a name in brackets", iface + "[Peer]\nEndpoint = [vpn.example]:51820\n", "line 5: Endpoint has brackets holding something other than an IPv6 address"},
+		{"a name ending in two dots", iface + "[Peer]\nEndpoint = vpn.example..:51820\n", "line 5: Endpoint does not name a DNS name"},
 		{"a URL endpoint", iface + "[Peer]\nEndpoint = udp://vpn.example:51820\n", "line 5: Endpoint"},
 		{"an MTU too small", "[Interface]\nPrivateKey = " + wgPriv + "\nAddress = 10.34.0.3/32\nMTU = 576\n" + peer, "line 4: MTU is not a number from 1280 to 65535"},
 		{"a keepalive word", iface + "[Peer]\nPersistentKeepalive = always\n", "line 5: PersistentKeepalive is neither off nor a number"},
