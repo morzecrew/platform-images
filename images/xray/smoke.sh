@@ -26,6 +26,8 @@ UP_SOCKS_PORT=$((BASE + 8))
 UP_HTTP_PORT=$((BASE + 9))
 PROBE_SOCKS_PORT=$((BASE + 10))
 PROBE_HTTP_PORT=$((BASE + 11))
+WG_PORT=$((BASE + 12))
+PROBE_WG_PORT=$((BASE + 13))
 HTTPD_PID=""
 TLSD_PID=""
 ALL_OUTPUT=""
@@ -86,18 +88,25 @@ RUN_ARGS=(--network host --userns keep-id:uid=65532,gid=65532)
 #   upstream of an outbound of the same kind whose settings are a $proxy
 #   reference, and a probe inbound routed to each outbound, so a 2xx from
 #   either proves the address, the port and the credentials split from one file;
+# - a wireguard inbound standing in for a WireGuard server, and an outbound
+#   whose settings are a $wireguard reference to a wg-quick file that names it
+#   as the peer. A probe routed to that outbound asks for 192.0.2.1, which
+#   only the tunnel routes; the inbound hands it to a direct outbound that
+#   redirects it to the target, since Xray's userspace stack will not carry a
+#   loopback destination through the tunnel. A 2xx proves the pair;
 # - a direct outbound, allowed to reach loopback, where the probe's target is.
 #   Xray's default blocks private addresses for a proxied user;
 # - geoip and geosite rules, so -test fails if Xray cannot find and load the
 #   copied geodata where it looks by default.
 #
-#   config <dir> [id-json] [seeded-decryption-json] [clients-json] [socks-settings-json]
+#   config <dir> [id-json] [seeded-decryption-json] [clients-json] [socks-settings-json] [wireguard-settings-json]
 config() {
-	local id="${2:-}" seeded="${3:-}" clients="${4:-}" upstream="${5:-}"
+	local id="${2:-}" seeded="${3:-}" clients="${4:-}" upstream="${5:-}" wireguard="${6:-}"
 	[ -n "${id}" ] || id='{"$file": "/run/secrets/vless_uuid"}'
 	[ -n "${seeded}" ] || seeded='{"$vlessDecryption": "/run/secrets/vless_seed"}'
 	[ -n "${clients}" ] || clients='{"$vlessClients": "/run/secrets/vless_clients"}'
 	[ -n "${upstream}" ] || upstream='{"$proxy": "/run/secrets/proxy_socks"}'
+	[ -n "${wireguard}" ] || wireguard='{"$wireguard": "/run/secrets/wg_conf"}'
 	local reality_client='{"serverName": "reality.test", "password": {"$file": "/run/secrets/reality_password"}, "shortId": "", "fingerprint": "chrome"}'
 	local account='{"user": {"$file": "/run/secrets/proxy_user"}, "pass": {"$file": "/run/secrets/proxy_pass"}}'
 	mkdir -p "$1"
@@ -125,7 +134,11 @@ config() {
 		    {"tag": "upstream-http", "listen": "127.0.0.1", "port": ${UP_HTTP_PORT}, "protocol": "http",
 		     "settings": {"accounts": [${account}]}},
 		    {"tag": "probe-socks", "listen": "127.0.0.1", "port": ${PROBE_SOCKS_PORT}, "protocol": "http"},
-		    {"tag": "probe-http", "listen": "127.0.0.1", "port": ${PROBE_HTTP_PORT}, "protocol": "http"}
+		    {"tag": "probe-http", "listen": "127.0.0.1", "port": ${PROBE_HTTP_PORT}, "protocol": "http"},
+		    {"tag": "wg-peer", "listen": "127.0.0.1", "port": ${WG_PORT}, "protocol": "wireguard",
+		     "settings": {"secretKey": {"\$file": "/run/secrets/wg_peer_key"},
+		                  "peers": [{"publicKey": "${WG_CLIENT_PUB}", "allowedIPs": ["10.34.0.3/32"]}]}},
+		    {"tag": "probe-wg", "listen": "127.0.0.1", "port": ${PROBE_WG_PORT}, "protocol": "http"}
 		  ],
 		  "outbounds": [
 		    {"tag": "direct", "protocol": "freedom", "settings": {"finalRules": [{"action": "allow"}]}},
@@ -142,7 +155,10 @@ config() {
 		                             "users": [{"id": {"\$file": "/run/secrets/vless_uuid_b"}, "encryption": "none", "flow": "xtls-rprx-vision"}]}]},
 		     "streamSettings": {"network": "raw", "security": "reality", "realitySettings": ${reality_client}}},
 		    {"tag": "to-socks", "protocol": "socks", "settings": ${upstream}},
-		    {"tag": "to-http", "protocol": "http", "settings": {"\$proxy": "/run/secrets/proxy_http"}}
+		    {"tag": "to-http", "protocol": "http", "settings": {"\$proxy": "/run/secrets/proxy_http"}},
+		    {"tag": "to-target", "protocol": "freedom",
+		     "settings": {"redirect": "127.0.0.1:${TARGET_PORT}", "finalRules": [{"action": "allow"}]}},
+		    {"tag": "to-wg", "protocol": "wireguard", "settings": ${wireguard}}
 		  ],
 		  "routing": {"rules": [
 		    {"inboundTag": ["probe"], "outboundTag": "to-seeded"},
@@ -150,6 +166,8 @@ config() {
 		    {"inboundTag": ["probe-b"], "outboundTag": "to-b"},
 		    {"inboundTag": ["probe-socks"], "outboundTag": "to-socks"},
 		    {"inboundTag": ["probe-http"], "outboundTag": "to-http"},
+		    {"inboundTag": ["probe-wg"], "outboundTag": "to-wg"},
+		    {"inboundTag": ["wg-peer"], "outboundTag": "to-target"},
 		    {"ip": ["geoip:private"], "outboundTag": "direct"},
 		    {"domain": ["geosite:private"], "outboundTag": "direct"}
 		  ]}
@@ -248,12 +266,28 @@ printf 'socks5://%s:%s@127.0.0.1:%s\n' "${PROXY_USER}" "${PROXY_PASS}" "${UP_SOC
 printf '%s:%s@127.0.0.1\n' "${PROXY_USER}" "${PROXY_PASS}" >"${WORK}/secrets/proxy_no_port"
 PROXY_PASS_LONE="lone-$$-$(python3 -c 'import secrets; print(secrets.token_hex(8))')"
 printf '%s:%s\n' "${PROXY_USER}" "${PROXY_PASS_LONE}" >"${WORK}/secrets/proxy_no_host"
+# A WireGuard client and the server it dials, both throwaway pairs made for
+# this test with `xray wg`. The client's file is a provider's export: a DNS
+# line and a script that only wg-quick acts on, which the image leaves out.
+WG_CLIENT_KEY="oIpcMCCSlSlYsS8UPcsW+bi2w2wILV0or2aUaUQXqlw="
+WG_CLIENT_PUB="pCLEa9XB7e6OThnu46sfdcPzajL24OmQTNFc2bZellM="
+WG_PEER_KEY="yPTzGPLjKqW8iLpBIj8v2DdbYUXgAytIa6TJAGdWZUQ="
+WG_PEER_PUB="n9B5/K4lyBiSMOPwJLFU1FwOCO8G5b2svYz0pQAbEEA="
+printf '%s\n' "${WG_PEER_KEY}" >"${WORK}/secrets/wg_peer_key"
+wg_conf() { # <endpoint-line>
+	printf '[Interface]\nPrivateKey = %s\nAddress = 10.34.0.3/32\nDNS = 1.1.1.1\nPostUp = true\n\n[Peer]\nPublicKey = %s\n%sAllowedIPs = 192.0.2.0/24\n' \
+		"${WG_CLIENT_KEY}" "${WG_PEER_PUB}" "$1"
+}
+wg_conf "Endpoint = 127.0.0.1:${WG_PORT}
+" >"${WORK}/secrets/wg_conf"
+# Section 7 refuses this one: a client with nowhere to dial.
+wg_conf "" >"${WORK}/secrets/wg_no_endpoint"
 chmod 0400 "${WORK}/secrets/"*
 mkdir "${WORK}/secrets/a_directory"
 touch "${WORK}/www/generate_204"
 printf '203.0.113.7\n' >"${WORK}/www/ip"
 SECRETS=("${uuid}" "${uuid^^}" "${ID_B}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}"
-	"${PROXY_USER}" "${PROXY_PASS}" "${PROXY_PASS_LONE}" "${PROXY_PASS##*@}")
+	"${PROXY_USER}" "${PROXY_PASS}" "${PROXY_PASS_LONE}" "${PROXY_PASS##*@}" "${WG_CLIENT_KEY}" "${WG_PEER_KEY}")
 
 # client_value <command> <path>: one of the helper's client-side subcommands,
 # with the secrets mounted.
@@ -384,6 +418,8 @@ expect_in "summary shows where the socks upstream is" "${logs}" \
 	"outbounds[4].settings <- \$proxy /run/secrets/proxy_socks 127.0.0.1:${UP_SOCKS_PORT}   (/etc/xray/10-xray.json)"
 expect_in "summary shows where the http upstream is" "${logs}" \
 	"outbounds[5].settings <- \$proxy /run/secrets/proxy_http 127.0.0.1:${UP_HTTP_PORT}   (/etc/xray/10-xray.json)"
+expect_in "summary shows the WireGuard peer's endpoint" "${logs}" \
+	"outbounds[7].settings <- \$wireguard /run/secrets/wg_conf 127.0.0.1:${WG_PORT}   (/etc/xray/10-xray.json)"
 
 # --- 4. one client per device -------------------------------------------------
 
@@ -430,6 +466,10 @@ if curl --noproxy '' -s -o /dev/null --max-time 10 \
 	fail "the socks upstream let a client without credentials through"
 fi
 echo "ok: both upstreams refuse a client without the credentials"
+code="$(curl --noproxy '' -s -o /dev/null -w '%{http_code}' --max-time 10 \
+	-x "http://127.0.0.1:${PROBE_WG_PORT}" "http://192.0.2.1/generate_204" || true)"
+[ "${code}" = 200 ] || fail "the wireguard outbound did not get through its peer (${code})"
+echo "ok: a wireguard outbound from one wg-quick file reaches its peer and through it the target"
 logs="$("${ENGINE}" logs "${CTR}" 2>&1)"
 ALL_OUTPUT+="${logs}"
 
@@ -555,6 +595,10 @@ for case in "a scheme:scheme:holds a URL. Write user:pass@host:port, without the
 	refuse "a proxy line with ${label}" \
 		"outbounds[4].settings: /run/secrets/${file} ${needle}" "${WORK}/${file}"
 done
+
+config "${WORK}/wg_no_endpoint" "" "" "" "" '{"$wireguard": "/run/secrets/wg_no_endpoint"}'
+refuse "a wg-quick file whose peer has no Endpoint" \
+	"outbounds[7].settings: /run/secrets/wg_no_endpoint the [Peer] on line 7 has no Endpoint" "${WORK}/wg_no_endpoint"
 
 # RE2 has no lookahead. Found at deployment, not as an unhealthy container.
 refuse "a healthcheck expression that does not compile" \

@@ -237,9 +237,10 @@ configured without `envsubst` is re-examined before it is accepted.
 value from a file or the environment. Its entrypoint replaces a JSON object
 that is exactly `{"$file": "<absolute path>"}` with that file's content,
 `{"$vlessDecryption": "<absolute path>"}` with the key derived from the seed
-in it, `{"$vlessClients": "<absolute path>"}` with the clients it lists, or
-`{"$proxy": "<absolute path>"}` with the upstream proxy it names, and
-substitutes nothing else. The config is valid JSON before and after
+in it, `{"$vlessClients": "<absolute path>"}` with the clients it lists,
+`{"$proxy": "<absolute path>"}` with the upstream proxy it names, or
+`{"$wireguard": "<absolute path>"}` with the WireGuard peer its wg-quick file
+describes, and substitutes nothing else. The config is valid JSON before and after
 and has no second syntax. See [its README](xray/README.md#the-config-and-file-references).
 
 `mihomo` is the second such image: inside its config, mihomo too reads no

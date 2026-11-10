@@ -13,8 +13,9 @@
 // server key derived from the seed in that file, or exactly
 // {"$vlessClients": "/absolute/path"} with the VLESS clients that file lists,
 // or exactly {"$proxy": "/absolute/path"} with a socks or http outbound's
-// settings, split from the [user:pass@]host:port in that file, and changes
-// nothing else. The contract is in images/xray/README.md.
+// settings, split from the [user:pass@]host:port in that file, or exactly
+// {"$wireguard": "/absolute/path"} with a wireguard outbound's settings, from
+// the wg-quick client config in that file, and changes nothing else. The contract is in images/xray/README.md.
 package main
 
 import (
@@ -25,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -118,6 +120,7 @@ var references = []envconf.Reference{
 	{Key: "$vlessDecryption", Resolve: envconf.Secret(vlessDecryption)},
 	{Key: "$vlessClients", Resolve: vlessClients},
 	{Key: "$proxy", Resolve: proxy},
+	{Key: "$wireguard", Resolve: wireguard},
 }
 
 func resolveDir(dir string) ([]*envconf.Config, error) {
@@ -404,6 +407,269 @@ func parseProxy(s string) (proxyServer, error) {
 	p.Address, p.Port = host, int(n)
 	return p, nil
 }
+
+// A wireguard outbound's settings, from a wg-quick client config, for Xray's
+// own WireGuard over its built-in TCP/IP stack (noKernelTun), which needs no
+// capability. Keys that only wg-quick or the kernel act on are accepted and
+// left out: DNS, routing tables, marks and scripts are the host's business,
+// and this container has none of them.
+type wgPeer struct {
+	PublicKey    string   `json:"publicKey"`
+	PreSharedKey string   `json:"preSharedKey,omitempty"`
+	Endpoint     string   `json:"endpoint"`
+	AllowedIPs   []string `json:"allowedIPs"`
+	KeepAlive    int      `json:"keepAlive,omitempty"`
+}
+
+type wgSettings struct {
+	SecretKey   string   `json:"secretKey"`
+	Address     []string `json:"address"`
+	Peers       []wgPeer `json:"peers"`
+	MTU         int      `json:"mtu"`
+	NoKernelTun bool     `json:"noKernelTun"`
+}
+
+// wg-quick's default MTU when the file names none, which leaves room for
+// WireGuard's overhead on an Ethernet path.
+const wgDefaultMTU = 1420
+
+var wgIgnored = map[string]bool{
+	"dns": true, "listenport": true, "table": true, "fwmark": true, "saveconfig": true,
+	"preup": true, "postup": true, "predown": true, "postdown": true,
+}
+
+func wireguard(name string) (envconf.Resolution, error) {
+	s, err := envconf.ReadSecret(name)
+	if err != nil {
+		return envconf.Resolution{}, err
+	}
+	w, err := parseWireGuard(s)
+	if err != nil {
+		return envconf.Resolution{}, err
+	}
+	r := envconf.Resolution{Value: w, Secrets: []string{w.SecretKey}}
+	endpoints := make([]string, len(w.Peers))
+	for i, p := range w.Peers {
+		endpoints[i] = p.Endpoint
+		if p.PreSharedKey != "" {
+			r.Secrets = append(r.Secrets, p.PreSharedKey)
+		}
+	}
+	r.Note = strings.Join(endpoints, ", ")
+	return r, nil
+}
+
+// The errors name a line and a key, never a value: a key's base64 is the
+// secret itself. Keys are matched ignoring case, as wg(8) matches them.
+func parseWireGuard(s string) (wgSettings, error) {
+	w := wgSettings{MTU: wgDefaultMTU, NoKernelTun: true}
+	var section string
+	ifaceLine, peerLines := 0, []int(nil)
+	seen := map[string]int{}
+	for i, line := range strings.Split(s, "\n") {
+		n := i + 1
+		if j := strings.IndexByte(line, '#'); j >= 0 {
+			line = line[:j]
+		}
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			if !strings.HasSuffix(line, "]") {
+				return w, fmt.Errorf("line %d: a section header that does not end in ]", n)
+			}
+			switch strings.ToLower(strings.TrimSpace(line[1 : len(line)-1])) {
+			case "interface":
+				if ifaceLine != 0 {
+					return w, fmt.Errorf("line %d: a second [Interface], after the one on line %d", n, ifaceLine)
+				}
+				section, ifaceLine = "Interface", n
+			case "peer":
+				section, peerLines = "Peer", append(peerLines, n)
+				w.Peers = append(w.Peers, wgPeer{})
+			default:
+				return w, fmt.Errorf("line %d: a section other than [Interface] and [Peer]", n)
+			}
+			clear(seen)
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			return w, fmt.Errorf("line %d: neither a [section] nor a key = value", n)
+		}
+		key, v := strings.TrimSpace(k), strings.TrimSpace(v)
+		lower := strings.ToLower(key)
+		if section == "" {
+			return w, fmt.Errorf("line %d: %s before any [Interface] or [Peer]", n, safeKey(key))
+		}
+		if wgIgnored[lower] && section == "Interface" {
+			continue
+		}
+		// Address and AllowedIPs may repeat, adding to the list; any other
+		// key twice in one section would leave one of them unread.
+		if lower != "address" && lower != "allowedips" {
+			if first, dup := seen[lower]; dup {
+				return w, fmt.Errorf("line %d: %s again in this [%s], first on line %d", n, safeKey(key), section, first)
+			}
+			seen[lower] = n
+		}
+		if v == "" {
+			return w, fmt.Errorf("line %d: %s is empty", n, safeKey(key))
+		}
+		var err error
+		if section == "Interface" {
+			err = w.setInterface(lower, v)
+		} else {
+			err = w.Peers[len(w.Peers)-1].set(lower, v)
+		}
+		if err != nil {
+			return w, fmt.Errorf("line %d: %s %v", n, safeKey(key), err)
+		}
+	}
+	switch {
+	case ifaceLine == 0:
+		return w, errors.New("has no [Interface]")
+	case w.SecretKey == "":
+		return w, fmt.Errorf("the [Interface] on line %d has no PrivateKey", ifaceLine)
+	case len(w.Address) == 0:
+		return w, fmt.Errorf("the [Interface] on line %d has no Address", ifaceLine)
+	case len(w.Peers) == 0:
+		return w, errors.New("has no [Peer]")
+	}
+	for i, p := range w.Peers {
+		// An outbound dials out, so each peer needs somewhere to dial.
+		for _, missing := range []struct {
+			key   string
+			empty bool
+		}{{"PublicKey", p.PublicKey == ""}, {"Endpoint", p.Endpoint == ""}, {"AllowedIPs", len(p.AllowedIPs) == 0}} {
+			if missing.empty {
+				return w, fmt.Errorf("the [Peer] on line %d has no %s", peerLines[i], missing.key)
+			}
+		}
+	}
+	return w, nil
+}
+
+func (w *wgSettings) setInterface(key, v string) error {
+	switch key {
+	case "privatekey":
+		if !wgKey(v) {
+			return errors.New("is not a WireGuard key, 32 bytes in base64")
+		}
+		w.SecretKey = v
+	case "address":
+		addrs, err := wgPrefixes(v, false)
+		if err != nil {
+			return err
+		}
+		w.Address = append(w.Address, addrs...)
+	case "mtu":
+		// IPv6 needs 1280; nothing on a real path is larger than 65535.
+		n, err := strconv.ParseUint(v, 10, 16)
+		if err != nil || n < 1280 {
+			return errors.New("is not a number from 1280 to 65535")
+		}
+		w.MTU = int(n)
+	default:
+		return errors.New("is not a key of [Interface] that wg-quick knows")
+	}
+	return nil
+}
+
+func (p *wgPeer) set(key, v string) error {
+	switch key {
+	case "publickey":
+		if !wgKey(v) {
+			return errors.New("is not a WireGuard key, 32 bytes in base64")
+		}
+		p.PublicKey = v
+	case "presharedkey":
+		if !wgKey(v) {
+			return errors.New("is not a WireGuard key, 32 bytes in base64")
+		}
+		p.PreSharedKey = v
+	case "endpoint":
+		host, port, err := net.SplitHostPort(v)
+		switch {
+		case err != nil:
+			return errors.New("is not a host, a colon and a port, with an IPv6 address in brackets")
+		case strings.HasPrefix(v, "["):
+			if net.ParseIP(host) == nil || !strings.Contains(host, ":") {
+				return errors.New("has brackets holding something other than an IPv6 address")
+			}
+		case !validHost(host):
+			return errors.New("does not name a DNS name, an IPv4 address or an IPv6 address in brackets")
+		}
+		if n, err := strconv.ParseUint(port, 10, 16); err != nil || n == 0 {
+			return errors.New("has a port that is not a number from 1 to 65535")
+		}
+		p.Endpoint = v
+	case "allowedips":
+		ips, err := wgPrefixes(v, true)
+		if err != nil {
+			return err
+		}
+		p.AllowedIPs = append(p.AllowedIPs, ips...)
+	case "persistentkeepalive":
+		if strings.EqualFold(v, "off") {
+			p.KeepAlive = 0
+			return nil
+		}
+		n, err := strconv.ParseUint(v, 10, 16)
+		if err != nil {
+			return errors.New("is neither off nor a number of seconds from 0 to 65535")
+		}
+		p.KeepAlive = int(n)
+	default:
+		return errors.New("is not a key of [Peer] that wg-quick knows")
+	}
+	return nil
+}
+
+func wgKey(v string) bool {
+	b, err := base64.StdEncoding.Strict().DecodeString(v)
+	return err == nil && len(b) == 32
+}
+
+// A comma-separated list of addresses with or without a prefix length; a bare
+// address is a single host, /32 or /128. AllowedIPs are networks, so their host
+// bits are cleared as wg(8) clears them; an Address keeps its own.
+func wgPrefixes(v string, network bool) ([]string, error) {
+	var out []string
+	for f := range strings.SplitSeq(v, ",") {
+		f = strings.TrimSpace(f)
+		var p netip.Prefix
+		var err error
+		if strings.Contains(f, "/") {
+			p, err = netip.ParsePrefix(f)
+		} else {
+			var a netip.Addr
+			if a, err = netip.ParseAddr(f); err == nil && a.Zone() == "" {
+				p = netip.PrefixFrom(a, a.BitLen())
+			}
+		}
+		if err != nil || !p.IsValid() || p.Addr().Zone() != "" {
+			return nil, errors.New("holds an entry that is not an IPv4 or IPv6 address, with or without a /prefix")
+		}
+		if network {
+			p = p.Masked()
+		}
+		out = append(out, p.String())
+	}
+	return out, nil
+}
+
+// A key name goes into an error only if it reads as one: a line with no = is
+// refused before this, but a value pasted where a key belongs must not be
+// echoed.
+func safeKey(k string) string {
+	if wgKeyNameRE.MatchString(k) {
+		return k
+	}
+	return "a key"
+}
+
+var wgKeyNameRE = regexp.MustCompile(`^[A-Za-z]{1,24}$`)
 
 // The commands that print what a client config needs from a server secret.
 var clientValues = map[string]func(file string) (string, error){

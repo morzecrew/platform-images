@@ -74,6 +74,7 @@ of these. Everything else in the config stays as written.
 | `{"$vlessDecryption": "/abs/path"}` | the VLESS Encryption server key derived from the seed in the file (see below) |
 | `{"$vlessClients": "/abs/path"}` | a VLESS inbound's `clients` array, one client per line of the file (see below) |
 | `{"$proxy": "/abs/path"}` | a socks or http outbound's `settings`, split from the `[user:pass@]host:port` in the file (see below) |
+| `{"$wireguard": "/abs/path"}` | a wireguard outbound's `settings`, from the wg-quick client config in the file (see below) |
 
 ```json
 "settings": {
@@ -106,8 +107,8 @@ file, the JSON path and the referenced path, never a value.
   file (a directory counts: Compose leaves one where a secret's source file is
   missing), over 64 KiB, not UTF-8, or holding a NUL byte. These are the
   checks the shared `_FILE` contract makes.
-- An object holding `$file`, `$vlessDecryption`, `$vlessClients` or `$proxy`
-  and any other key, or a path that is not an absolute path in a string. A near
+- An object holding `$file`, `$vlessDecryption`, `$vlessClients`, `$proxy` or
+  `$wireguard` and any other key, or a path that is not an absolute path in a string. A near
   miss would otherwise reach Xray as a literal.
 - A seed file that is not exactly 128 hex characters.
 - A client list with a line it refuses (see below).
@@ -225,6 +226,71 @@ the value or any part of it:
   become a port that nothing redacts. A proxy that asks for no login is
   written with a dotted name or an address.
 - A missing port, or one that is not a number from 1 to 65535.
+
+## A WireGuard upstream from one secret
+
+`{"$wireguard": "/run/secrets/upstream"}` resolves to the whole `settings` of a
+`wireguard` outbound, from the wg-quick client config a VPN provider or a
+router exports, so a WireGuard upstream is one secret file as a proxy is:
+
+```ini
+[Interface]
+PrivateKey = <base64>
+Address = 10.34.0.3/32, fd30:2::3/128
+DNS = 1.1.1.1
+
+[Peer]
+PublicKey = <base64>
+Endpoint = vpn.example:51820
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
+```
+
+```json
+{"tag": "upstream", "protocol": "wireguard", "settings": {"$wireguard": "/run/secrets/upstream"}}
+```
+
+```json
+{"tag": "upstream", "protocol": "wireguard", "settings": {"secretKey": "<base64>", "address": ["10.34.0.3/32", "fd30:2::3/128"], "peers": [{"publicKey": "<base64>", "endpoint": "vpn.example:51820", "allowedIPs": ["0.0.0.0/0", "::/0"], "keepAlive": 25}], "mtu": 1420, "noKernelTun": true}}
+```
+
+- `noKernelTun` is always set: Xray runs WireGuard on its own TCP/IP stack,
+  which needs no capability, so the container keeps `cap_drop: ALL` and a
+  read-only root.
+- `[Interface]` takes `PrivateKey` and `Address` (both required) and `MTU`
+  (1280 to 65535; 1420, wg-quick's default, when absent). `[Peer]`, one or
+  more, takes `PublicKey`, `Endpoint` and `AllowedIPs` (all required: an
+  outbound dials out), `PresharedKey` and `PersistentKeepalive` (seconds, or
+  `off`).
+- `DNS`, `ListenPort`, `Table`, `FwMark`, `SaveConfig` and the `PreUp`,
+  `PostUp`, `PreDown` and `PostDown` scripts are accepted and left out: only
+  wg-quick acts on them, and this container has no resolver, routes or
+  scripts of the host's to change.
+- Keys are matched ignoring case, as wg(8) matches them. `Address` and
+  `AllowedIPs` may repeat, adding to the list, and take a bare address as a
+  single host (`/32`, `/128`). `AllowedIPs` networks lose their host bits as
+  wg(8) clears them; an `Address` keeps its own.
+- The endpoint is a DNS name, an IPv4 address, or an IPv6 address in brackets,
+  with a port from 1 to 65535. Xray resolves a name itself, outside the
+  tunnel.
+- Xray's userspace stack does not carry a loopback destination through the
+  tunnel. A peer's `AllowedIPs` decides what the outbound sends at all.
+- The summary shows the peers' endpoints, which are not secret. The private
+  key and any preshared key are redacted from `xray run -test` output like
+  every other resolved value.
+
+Each of these exits 78. The message names the file, the line and the key, and
+never a value: a key's base64 is the secret itself.
+
+- No `[Interface]`, a second one, or no `[Peer]`.
+- A section other than `[Interface]` and `[Peer]`, or a key before any.
+- A key wg-quick does not know in its section, such as a typo; an
+  `[Interface]` key in a `[Peer]`.
+- A key other than `Address` and `AllowedIPs` twice in one section.
+- A missing required key, or an empty value.
+- A key that is not 32 bytes of standard base64; an address or network that
+  does not parse, or carries a zone; an endpoint that is not `host:port`; an
+  MTU outside 1280 to 65535; a keepalive that is neither `off` nor a number.
 
 ## VLESS Encryption from one seed
 
