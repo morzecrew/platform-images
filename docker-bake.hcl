@@ -520,7 +520,7 @@ target "mihomo" {
 # moving ALPINE_VERSION means moving the depName below with it.
 # renovate: datasource=docker depName=alpine
 variable "ALPINE_VERSION" {
-  default = "3.22"
+  default = "3.24.4"
 }
 
 # renovate: datasource=repology depName=alpine_3_22/openvpn versioning=loose
