@@ -438,6 +438,8 @@ var wgIgnored = map[string]bool{
 	"preup": true, "postup": true, "predown": true, "postdown": true,
 }
 
+// wireguard resolves {"$wireguard": path}: the outbound's settings, with the
+// private key and any preshared key to redact, and the endpoints as the note.
 func wireguard(name string) (envconf.Resolution, error) {
 	s, err := envconf.ReadSecret(name)
 	if err != nil {
@@ -550,6 +552,7 @@ func parseWireGuard(s string) (wgSettings, error) {
 	return w, nil
 }
 
+// setInterface takes one [Interface] key, lowercased, and its value.
 func (w *wgSettings) setInterface(key, v string) error {
 	switch key {
 	case "privatekey":
@@ -576,6 +579,7 @@ func (w *wgSettings) setInterface(key, v string) error {
 	return nil
 }
 
+// set takes one [Peer] key, lowercased, and its value.
 func (p *wgPeer) set(key, v string) error {
 	switch key {
 	case "publickey":
@@ -628,6 +632,7 @@ func (p *wgPeer) set(key, v string) error {
 	return nil
 }
 
+// wgKey reports whether v is a WireGuard key: 32 bytes in standard base64.
 func wgKey(v string) bool {
 	b, err := base64.StdEncoding.Strict().DecodeString(v)
 	return err == nil && len(b) == 32
