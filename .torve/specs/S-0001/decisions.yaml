@@ -358,7 +358,8 @@ decisions:
       `variable` or `ARG` line in `docker-bake.hcl`, and the same annotation directly
       above each Dockerfile `ARG` default that copies the value. The dockerfile manager
       is off except for `docker/dockerfile`, Renovate reads patch tags only, and automerge
-      is on except for Node.
+      is on except for Node and `alpine`. `ALPINE_VERSION` is a release, read with
+      `versioning=docker` so that it moves to a release and never to a patch tag.
     paths: [.github/renovate.json, docker-bake.hcl, images/*/Dockerfile]
     consequence: >-
       a version without its annotation is invisible to Renovate, and an RC never ships
@@ -366,7 +367,7 @@ decisions:
     rationale: >-
       Execution-log A42 (a comment gap unhooked python-distroless), D072, D073 (drift:
       an RC shipped as valkey 9.2).
-    fingerprint: e7b7be3ada85c237/c6970b5335db8cfe
+    fingerprint: 6760c17f2a02c9af/c6970b5335db8cfe
   - id: D-24
     grade: ASSUMED
     text: >-

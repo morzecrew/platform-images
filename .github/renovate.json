@@ -41,6 +41,13 @@
                 "node"
             ],
             "automerge": false
+        },
+        {
+            "description": "The Alpine release openvpn is built on also names its Repology package (`alpine_3_22/openvpn`), and a new release usually ships a different openvpn. Renovate moves only ALPINE_VERSION, so its pull request fails the openvpn build until a person moves the other two on its branch, and must never merge on its own. See S-0001/D-23.",
+            "matchPackageNames": [
+                "alpine"
+            ],
+            "automerge": false
         }
     ],
     "customManagers": [

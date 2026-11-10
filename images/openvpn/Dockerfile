@@ -3,7 +3,7 @@
 # The Alpine release whose openvpn package this image ships. The base floats
 # within it, so the weekly rebuild brings musl, OpenSSL and the CA bundle
 # current.
-# renovate: datasource=docker depName=alpine
+# renovate: datasource=docker depName=alpine versioning=docker
 ARG ALPINE_VERSION=3.22
 # That release's openvpn package, by Repology's name for it, which names the
 # release too: moving ALPINE_VERSION moves the depName with it. Alpine keeps

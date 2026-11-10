@@ -169,6 +169,12 @@ package name holds the Alpine release (`alpine_3_22/openvpn`), so moving
 branch, so the build refuses a package that no longer matches
 `OPENVPN_VERSION`, rather than ship it under the wrong tag.
 
+Renovate's pull request for a new Alpine release moves only `ALPINE_VERSION`,
+to the release (`3.24`, never a patch tag). It never automerges, and it fails
+that check whenever the new release ships another openvpn. Finish it on its
+branch: move the Repology name to the new release and `OPENVPN_VERSION` to the
+package that release ships.
+
 ## Layout
 
 | Path | |
