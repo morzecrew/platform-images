@@ -138,6 +138,9 @@ smoke-pass
 	ip route replace default via ${SRV_IP} && exec /usr/local/bin/openvpn-entrypoint run" >/dev/null
 
 in_client() { "${ENGINE}" exec "${CLI}" "$@"; }
+# Whether the client's log has a line matching $1. grep -c reads it all:
+# under pipefail, grep -q's early exit fails the pipeline by SIGPIPE.
+logged() { "${ENGINE}" logs "${CLI}" 2>&1 | grep -c -- "$1" >/dev/null; }
 far() { in_client sh -c "nc -w 3 ${TGT_IP} 7000" 2>/dev/null || true; }
 no_way_out() { # <label>: no default route, and no route to an outside address but the tunnel
 	local r
@@ -152,7 +155,7 @@ no_way_out() { # <label>: no default route, and no route to an outside address b
 # --- 4. a fresh start with the server down ------------------------------------
 
 for _ in $(seq 1 30); do
-	"${ENGINE}" logs "${CLI}" 2>&1 | grep -q "kill switch" && break
+	logged "kill switch" && break
 	sleep 1
 done
 logs="$("${ENGINE}" logs "${CLI}" 2>&1)"
@@ -167,10 +170,10 @@ echo "ok: started with the server down, nothing gets out, and the healthcheck fa
 
 "${ENGINE}" start "${SRV}" >/dev/null
 for _ in $(seq 1 150); do
-	"${ENGINE}" logs "${CLI}" 2>&1 | grep -q "Initialization Sequence Completed" && break
+	logged "Initialization Sequence Completed" && break
 	sleep 1
 done
-"${ENGINE}" logs "${CLI}" 2>&1 | grep -q "Initialization Sequence Completed" || fail "the client never connected"
+logged "Initialization Sequence Completed" || fail "the client never connected"
 [ "$(far)" = far-only ] || fail "the far target did not answer through the tunnel"
 in_client /usr/local/bin/openvpn-entrypoint healthcheck >/dev/null || fail "unhealthy with the tunnel up"
 no_way_out "tunnel up"
