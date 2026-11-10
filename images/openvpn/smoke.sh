@@ -128,9 +128,12 @@ smoke-pass
 
 # The client: the image as a consumer runs it, but with its default route
 # pointed at the server before the entrypoint starts, so the server is behind
-# a gateway. vpn.smoke resolves to the server's second address.
+# a gateway. vpn.smoke resolves to the server's second address. Read-only as
+# Docker makes it: a tmpfs at /dev/shm and none at /tmp, which Podman's own
+# --read-only would add, so openvpn's temporary directory has to be the
+# image's /dev/shm.
 "${ENGINE}" run -d --name "${CLI}" --network "${RIG}" "${NET_ADMIN[@]}" --read-only \
-	--add-host "vpn.smoke:${SRV_VPN}" -v "${WORK}/client.conf:/etc/openvpn/client.conf:ro" \
+	--read-only-tmpfs=false --tmpfs /dev/shm:rw,size=1m --add-host "vpn.smoke:${SRV_VPN}" -v "${WORK}/client.conf:/etc/openvpn/client.conf:ro" \
 	--entrypoint sh "${IMAGE}" -c "
 	ip route replace default via ${SRV_IP} && exec /usr/local/bin/openvpn-entrypoint run" >/dev/null
 

@@ -152,6 +152,9 @@ done
 # Later options win over the config's: the tun device and its routes outlive a
 # reconnect, so traffic waits in the tunnel instead of finding the way the
 # kill switch closed; every IPv4 destination goes into the tunnel even if the
-# server pushes no route; and no script runs in this privileged container.
+# server pushes no route; no script runs in this privileged container; and the
+# temporary directory openvpn refuses to start without is /dev/shm, a tmpfs
+# Docker and Podman mount even under a read-only root, where /tmp is not one
+# under Docker's read_only.
 exec openvpn --config "${CONFIG}" --persist-tun --persist-key \
-	--redirect-gateway def1 --script-security 1
+	--redirect-gateway def1 --script-security 1 --tmp-dir /dev/shm
