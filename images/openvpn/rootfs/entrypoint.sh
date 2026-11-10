@@ -152,9 +152,13 @@ done
 # Later options win over the config's: the tun device and its routes outlive a
 # reconnect, so traffic waits in the tunnel instead of finding the way the
 # kill switch closed; every IPv4 destination goes into the tunnel even if the
-# server pushes no route; no script runs in this privileged container; and the
-# temporary directory openvpn refuses to start without is /dev/shm, a tmpfs
-# Docker and Podman mount even under a read-only root, where /tmp is not one
-# under Docker's read_only.
-exec openvpn --config "${CONFIG}" --persist-tun --persist-key \
-	--redirect-gateway def1 --script-security 1 --tmp-dir /dev/shm
+# server pushes no route; and no script runs in this privileged container.
+# The temporary directory openvpn refuses to start without is /dev/shm, a
+# tmpfs Docker and Podman mount even under a read-only root, where /tmp is not
+# one under Docker's read_only, unless the config names its own or a chroot,
+# inside which the directory would be looked for, or TMPDIR names one.
+set -- --config "${CONFIG}" --persist-tun --persist-key --redirect-gateway def1 --script-security 1
+if [ -z "${TMPDIR:-}" ] && ! directives | awk '$1 == "tmp-dir" || $1 == "chroot" { found = 1 } END { exit !found }'; then
+	set -- "$@" --tmp-dir /dev/shm
+fi
+exec openvpn "$@"
