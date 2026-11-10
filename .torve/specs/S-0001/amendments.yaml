@@ -385,6 +385,40 @@ amendments:
       turns a proxy line into a socks or http outbound's. It parses wg-quick's keys,
       leaves out those only wg-quick acts on (DNS, routes, scripts), refuses unknown
       ones, and names a line and a key in its errors, never a value.
+  - id: A-13
+    at: '2026-11-10T08:16:58Z'
+    title: >-
+      openvpn is the third image admitted on the owner's call
+    changes:
+      - subject: D-25
+        field: text
+        before: >-
+          An image is admitted by route 1, hand-rolled in two or more projects, or
+          route 2, the same upstream run and diverged in two or more; a pair counts
+          once. `xray` and `mihomo` are the images admitted on neither, by their owner's
+          calls on #125 and #140, and their rows say so. Refusals are recorded under
+          "Admissions on record". An image unused for a year is deleted, its package
+          frozen by default and kept in `PACKAGES`. The annual workflow opens the
+          review issue on 8 January with a consumer scan.
+        after: >-
+          An image is admitted by route 1, hand-rolled in two or more projects, or
+          route 2, the same upstream run and diverged in two or more; a pair counts
+          once. `xray`, `mihomo` and `openvpn` are the images admitted on neither,
+          by their owner's calls on #125, #140 and #144, and their rows say so. Refusals
+          are recorded under "Admissions on record". An image unused for a year is
+          deleted, its package frozen by default and kept in `PACKAGES`. The annual
+          workflow opens the review issue on 8 January with a consumer scan.
+      - subject: D-25
+        field: fingerprint
+        before: c13706ce444da31a/482c6c960e0d6250
+        after: dba2cfc2d7cb5cb4/482c6c960e0d6250
+    md: >-
+      #144 adds openvpn, an OpenVPN client, for dotdash's OpenVPN upstream, which
+      Xray cannot carry. Only dotdash uses it, which meets neither route, so the
+      owner admitted it as with xray on #125 and mihomo on #140, and
+      images/README.md records it under "Admissions on record". A spike showed a
+      stock client container leaks on a fresh start while its server is down,
+      which is why the kill switch is in a reviewed image rather than a bundle.
 editorial:
   - subject: D-5
     field: text

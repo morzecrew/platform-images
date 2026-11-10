@@ -44,6 +44,7 @@ variable "DESCRIPTIONS" {
     "pgbouncer"         = "PgBouncer with an entrypoint-generated config, file-first credentials, and allowlist-based overrides via env."
     "xray"              = "Xray-core, non-root on distroless: secrets as files referenced from its JSON config, and a healthcheck that probes egress."
     "mihomo"            = "mihomo, a client proxy, non-root on distroless: secrets as files referenced from its JSON config, pinned geodata, and a healthcheck that probes egress."
+    "openvpn"           = "OpenVPN client whose kill switch holds from the first packet: default routes swapped for host routes to its servers before openvpn starts."
   }
 }
 
@@ -512,10 +513,40 @@ target "mihomo" {
 
 # ....................... #
 
+# The Alpine release whose openvpn package the image ships, and that package's
+# version, which is the tag. Alpine keeps one version per branch, so the
+# Dockerfile refuses a package that has moved on; Renovate's Repology pull
+# request then moves OPENVPN_VERSION. Repology's name holds the release, so
+# moving ALPINE_VERSION means moving the depName below with it.
+# renovate: datasource=docker depName=alpine
+variable "ALPINE_VERSION" {
+  default = "3.22"
+}
+
+# renovate: datasource=repology depName=alpine_3_22/openvpn versioning=loose
+variable "OPENVPN_VERSION" {
+  default = "2.6.20"
+}
+
+target "openvpn" {
+  inherits   = ["_attested"]
+  context    = "./images/openvpn"
+  contexts   = { shared = "./shared" }
+  dockerfile = "Dockerfile"
+  tags       = tag("openvpn", OPENVPN_VERSION)
+  labels     = label("openvpn", OPENVPN_VERSION)
+  args = {
+    ALPINE_VERSION  = ALPINE_VERSION
+    OPENVPN_VERSION = OPENVPN_VERSION
+  }
+}
+
+# ....................... #
+
 group "default" {
   targets = [
     "flyway", "caddy", "postgres", "postgres-pgvector", "postgres-cron",
     "uv-builder", "npm-builder", "python-distroless", "valkey", "rustfs", "pgbouncer",
-    "xray", "mihomo",
+    "xray", "mihomo", "openvpn",
   ]
 }
