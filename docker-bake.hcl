@@ -517,8 +517,10 @@ target "mihomo" {
 # version, which is the tag. Alpine keeps one version per branch, so the
 # Dockerfile refuses a package that has moved on; Renovate's Repology pull
 # request then moves OPENVPN_VERSION. Repology's name holds the release, so
-# moving ALPINE_VERSION means moving the depName below with it.
-# renovate: datasource=docker depName=alpine
+# moving ALPINE_VERSION means moving the depName below with it. Renovate
+# cannot do that, so its alpine pull request never automerges, and docker
+# versioning keeps it to a release such as 3.24, never a patch tag.
+# renovate: datasource=docker depName=alpine versioning=docker
 variable "ALPINE_VERSION" {
   default = "3.22"
 }
