@@ -27,8 +27,9 @@ COPY rootfs/entrypoint.sh /usr/local/bin/openvpn-entrypoint
 RUN chmod 0755 /usr/local/bin/openvpn-entrypoint && chmod 0644 /usr/local/lib/envconf.sh
 
 # Root, because openvpn needs NET_ADMIN for its tun device and routes, and the
-# entrypoint for the kill switch. Nothing is written at run time, so a
-# read-only root works as it is.
+# entrypoint for the kill switch. openvpn insists on a writable --tmp-dir,
+# which the entrypoint points at /dev/shm, a tmpfs Docker and Podman mount
+# even under a read-only root, so a read-only root needs nothing more.
 ENV OPENVPN_CONFIG=/etc/openvpn/client.conf
 
 ENTRYPOINT ["/usr/local/bin/openvpn-entrypoint"]

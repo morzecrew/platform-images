@@ -17,7 +17,7 @@ openvpn is Alpine's package, unchanged. The image adds a POSIX sh entrypoint,
 | User | root: openvpn needs `NET_ADMIN` for its tun device and routes, and the kill switch for its routes |
 | Base | `alpine:3.22`, floating within the release |
 | Config | one client config at `OPENVPN_CONFIG` (`/etc/openvpn/client.conf`), mounted read-only |
-| Writes | nothing, so a read-only root works as it is |
+| Writes | nothing but openvpn's temporary directory, `/dev/shm`, so a read-only root works as it is |
 | Logs | openvpn's log, which `docker logs` shows |
 
 This image meets neither route of the
@@ -87,6 +87,7 @@ openvpn is then started with these overrides after the config, so they win:
 | `--persist-tun`, `--persist-key` | the tun device and its routes outlive a reconnect, so traffic waits in the tunnel instead of meeting no route |
 | `--redirect-gateway def1` | every IPv4 destination goes into the tunnel, even if the server pushes no route |
 | `--script-security 1` | no script in the config runs in this privileged container |
+| `--tmp-dir /dev/shm` | openvpn refuses to start without a writable temporary directory, and `/tmp` is not one under Docker's `read_only`; `/dev/shm` is a tmpfs Docker and Podman mount even then |
 
 IPv6 goes into the tunnel only if the server pushes IPv6 routes. Otherwise it
 has no route, since its default route is gone.

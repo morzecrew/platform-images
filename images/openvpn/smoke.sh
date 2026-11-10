@@ -2,7 +2,7 @@
 # Smoke test for the openvpn image. See images/openvpn/README.md.
 #
 # No internet: the stand-in server is this image running openvpn in server
-# mode, and the target is a listener on a second, internal network that only
+# mode, and the target is a listener on a second network that only
 # the server joins, so a reply from it proves the traffic went through the
 # tunnel. The target routes the tunnel's subnet back via the server instead of
 # the server masquerading, which would need iptables. Rootless Podman does not
@@ -21,9 +21,15 @@ SRV="${TAG}-server" CLI="${TAG}-client" TGT="${TAG}-target"
 # beyond it, its address on the far network, and the target's.
 SRV_IP=10.231.77.50 SRV_VPN=10.231.99.50 SRV_FAR=10.231.78.50 TGT_IP=10.231.78.9
 NET_ADMIN=(--cap-add NET_ADMIN --device /dev/net/tun)
+# Read-only as Docker makes it: a tmpfs at /dev/shm and none at /tmp. Docker's
+# --read-only is that already; Podman's adds tmpfs at /tmp and the like, so
+# under Podman they are taken away and /dev/shm given back.
+READ_ONLY=(--read-only)
+# shellcheck disable=SC2054 # the commas are the option's own
+[ "${ENGINE##*/}" != podman ] || READ_ONLY+=(--read-only-tmpfs=false --tmpfs /dev/shm:rw,size=1m)
 
 cleanup() {
-	"${ENGINE}" rm -f -t 0 "${CLI}" "${SRV}" "${TGT}" >/dev/null 2>&1 || true
+	"${ENGINE}" rm -f "${CLI}" "${SRV}" "${TGT}" >/dev/null 2>&1 || true
 	"${ENGINE}" network rm "${RIG}" "${FAR}" >/dev/null 2>&1 || true
 	rm -rf "${WORK}"
 }
@@ -109,7 +115,10 @@ smoke-pass
 "${ENGINE}" network create --subnet 10.231.77.0/24 --ipv6 --subnet fd00:231:77::/64 "${RIG}" >/dev/null
 [ -n "$("${ENGINE}" run --rm --network "${RIG}" --entrypoint ip "${IMAGE}" -6 route show default)" ] ||
 	fail "the rig network has no IPv6 default route, so the IPv6 half of the kill switch would go untested"
-"${ENGINE}" network create --internal --subnet 10.231.78.0/24 "${FAR}" >/dev/null
+# Not --internal: Docker drops a packet on an internal network whose source is
+# outside its subnet, as the tunnel's are. Neither runtime routes between its
+# networks, so the far network is still reached through the server alone.
+"${ENGINE}" network create --subnet 10.231.78.0/24 "${FAR}" >/dev/null
 
 # The server: this image's openvpn in server mode, answering on SRV_VPN too,
 # from the address each packet came to (--multihome): the client's socket
@@ -128,13 +137,17 @@ smoke-pass
 
 # The client: the image as a consumer runs it, but with its default route
 # pointed at the server before the entrypoint starts, so the server is behind
-# a gateway. vpn.smoke resolves to the server's second address.
-"${ENGINE}" run -d --name "${CLI}" --network "${RIG}" "${NET_ADMIN[@]}" --read-only \
+# a gateway. vpn.smoke resolves to the server's second address. Read-only as
+# Docker makes it, so openvpn's temporary directory has to be /dev/shm.
+"${ENGINE}" run -d --name "${CLI}" --network "${RIG}" "${NET_ADMIN[@]}" "${READ_ONLY[@]}" \
 	--add-host "vpn.smoke:${SRV_VPN}" -v "${WORK}/client.conf:/etc/openvpn/client.conf:ro" \
 	--entrypoint sh "${IMAGE}" -c "
 	ip route replace default via ${SRV_IP} && exec /usr/local/bin/openvpn-entrypoint run" >/dev/null
 
 in_client() { "${ENGINE}" exec "${CLI}" "$@"; }
+# Whether the client's log has a line matching $1. grep -c reads it all:
+# under pipefail, grep -q's early exit fails the pipeline by SIGPIPE.
+logged() { "${ENGINE}" logs "${CLI}" 2>&1 | grep -c -- "$1" >/dev/null; }
 far() { in_client sh -c "nc -w 3 ${TGT_IP} 7000" 2>/dev/null || true; }
 no_way_out() { # <label>: no default route, and no route to an outside address but the tunnel
 	local r
@@ -149,7 +162,7 @@ no_way_out() { # <label>: no default route, and no route to an outside address b
 # --- 4. a fresh start with the server down ------------------------------------
 
 for _ in $(seq 1 30); do
-	"${ENGINE}" logs "${CLI}" 2>&1 | grep -q "kill switch" && break
+	logged "kill switch" && break
 	sleep 1
 done
 logs="$("${ENGINE}" logs "${CLI}" 2>&1)"
@@ -164,10 +177,10 @@ echo "ok: started with the server down, nothing gets out, and the healthcheck fa
 
 "${ENGINE}" start "${SRV}" >/dev/null
 for _ in $(seq 1 150); do
-	"${ENGINE}" logs "${CLI}" 2>&1 | grep -q "Initialization Sequence Completed" && break
+	logged "Initialization Sequence Completed" && break
 	sleep 1
 done
-"${ENGINE}" logs "${CLI}" 2>&1 | grep -q "Initialization Sequence Completed" || fail "the client never connected"
+logged "Initialization Sequence Completed" || fail "the client never connected"
 [ "$(far)" = far-only ] || fail "the far target did not answer through the tunnel"
 in_client /usr/local/bin/openvpn-entrypoint healthcheck >/dev/null || fail "unhealthy with the tunnel up"
 no_way_out "tunnel up"
