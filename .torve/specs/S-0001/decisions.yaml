@@ -384,12 +384,12 @@ decisions:
     grade: ASSUMED
     text: >-
       An image is admitted by route 1, hand-rolled in two or more projects, or route
-      2, the same upstream run and diverged in two or more; a pair counts once. `xray`
-      and `mihomo` are the images admitted on neither, by their owner's calls on #125
-      and #140, and their rows say so. Refusals are recorded under "Admissions on
-      record". An image unused for a year is deleted, its package frozen by default
-      and kept in `PACKAGES`. The annual workflow opens the review issue on 8 January
-      with a consumer scan.
+      2, the same upstream run and diverged in two or more; a pair counts once. `xray`,
+      `mihomo` and `openvpn` are the images admitted on neither, by their owner's
+      calls on #125, #140 and #144, and their rows say so. Refusals are recorded under
+      "Admissions on record". An image unused for a year is deleted, its package frozen
+      by default and kept in `PACKAGES`. The annual workflow opens the review issue
+      on 8 January with a consumer scan.
     paths:
       - images/README.md
       - .github/workflows/annual-image-review.yaml
@@ -400,5 +400,5 @@ decisions:
       RFC 0003 rows 1, 2, 3, 6, 9 and 10 (LOCKED) and 4, 5, 11 and 12 (ASSUMED). Defended:
       A38 (a missing row), R-35 and A48 (the scan searched names that never existed),
       A47.
-    fingerprint: c13706ce444da31a/482c6c960e0d6250
+    fingerprint: dba2cfc2d7cb5cb4/482c6c960e0d6250
 retired: [D-26]

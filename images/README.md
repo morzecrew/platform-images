@@ -89,6 +89,11 @@ contract. It is normative: image READMEs link here rather than restating it.
 >   curated names and `$file` as its one reference. mihomo's own names are
 >   `CLASH_*` and `SAFE_PATHS`, outside the prefix, and pass through, except
 >   the three that would replace the image's config, which are refused.
+> - **`openvpn`** has one curated name, `OPENVPN_CONFIG`, and warns about an
+>   unknown `OPENVPN_*` name, through the shared helper. It has no passthrough
+>   channel and no `_FILE` variable: openvpn is configured by one client config
+>   file, mounted as a secret, and its startup summary shows that file, the
+>   servers resolved from it and the kill switch's routes.
 >
 > Where an image's behaviour and this section disagree, this section is the
 > target and the image is the gap. Each image's own README states what it
@@ -307,6 +312,7 @@ author to remember.
 | `rustfs` | 2 (drift) | Two backends run `rustfs/rustfs:1.0.1` and have already fallen out of step: one probes a health path the other does not, and one has moved the server's log off stdout, so the same upstream reference is configured two ways for the same job. The fallback is closed rather than merely unadopted — MinIO no longer publishes an image, so there is no shared upstream reference to land on. See S-0002/D-4. | 2026-10-21, **admitted** |
 | `xray` | neither | One project, the dotdash bundle, needs Xray-core, so neither route is met. Admitted on the owner's call, because the fallback was a render job in that bundle, which would carry the same file resolution without a reviewed image. See [#125](https://github.com/morzecrew/platform-images/issues/125). | 2026-11-07, **admitted** (owner's call) |
 | `mihomo` | neither | One project, dotdash, needs mihomo: its planned client bundle, and its CI's compatibility smoke test, whose `images` check refuses a `ghcr.io/morzecrew/*` digest without provenance. Pulling `docker.io/metacubex/mihomo` there would also meet Docker Hub's rate limit. Filed by the owner as a maintainer's call, like `xray`. See [#140](https://github.com/morzecrew/platform-images/issues/140). | 2026-11-09, **admitted** (owner's call) |
+| `openvpn` | neither | One project, dotdash, needs an OpenVPN client for its OpenVPN upstream, which Xray cannot carry. A spike showed a stock client container leaks on a fresh start while its server is down, so the kill switch belongs in a reviewed image rather than in the bundle. Filed as a maintainer's call, like `xray` and `mihomo`. See [#144](https://github.com/morzecrew/platform-images/issues/144). | 2026-11-10, **admitted** (owner's call) |
 
 A refusal is recorded rather than left implicit, because the next person to want
 one of these will otherwise re-derive the case from scratch — and because the
