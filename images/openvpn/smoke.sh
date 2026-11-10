@@ -193,7 +193,33 @@ in_client ip route add 128.0.0.0/1 via 10.8.0.1 dev tun0
 in_client /usr/local/bin/openvpn-entrypoint healthcheck >/dev/null || fail "unhealthy once both halves are back"
 echo "ok: with half of def1 gone, the healthcheck fails and names it"
 
-# --- 6. the server goes away again --------------------------------------------
+# --- 6. openvpn dies, the container does not ----------------------------------
+
+# A restarted container would get a new network namespace and cut off any
+# container sharing this one, so the entrypoint starts openvpn again in place.
+connects() { "${ENGINE}" logs "${CLI}" 2>&1 | grep -c "Initialization Sequence Completed" || true; }
+started_at() { "${ENGINE}" inspect -f '{{.State.StartedAt}}' "${CLI}"; }
+netns_before="$(in_client readlink /proc/1/ns/net)"
+started_before="$(started_at)"
+before="$(connects)"
+in_client pkill -KILL -x openvpn
+for _ in $(seq 1 10); do
+	logged "openvpn exited with" && break
+	sleep 1
+done
+logged "openvpn exited with" || fail "the entrypoint did not notice openvpn exit"
+no_way_out "openvpn killed"
+for _ in $(seq 1 60); do
+	[ "$(connects)" -gt "${before}" ] && break
+	sleep 1
+done
+[ "$(connects)" -gt "${before}" ] || fail "openvpn did not connect again after it was killed"
+[ "$(started_at)" = "${started_before}" ] || fail "the container restarted when openvpn died"
+[ "$(in_client readlink /proc/1/ns/net)" = "${netns_before}" ] || fail "the network namespace changed when openvpn died"
+[ "$(far)" = far-only ] || fail "the far target did not answer once openvpn was back"
+echo "ok: openvpn killed, started again in the same container and namespace, and the tunnel carries traffic"
+
+# --- 7. the server goes away again --------------------------------------------
 
 # openvpn's restart markers, counted, so a new one after the stop is told
 # apart from those of the start, when the server was down.
@@ -211,9 +237,21 @@ no_way_out "server gone, after openvpn restarted"
 [ -z "$(far)" ] || fail "the far target answered with the server gone"
 echo "ok: with the server gone, after openvpn's restart, nothing gets out"
 
-# --- 7. no secret anywhere ----------------------------------------------------
+# --- 8. no secret anywhere ----------------------------------------------------
 
 case "$("${ENGINE}" logs "${CLI}" 2>&1)" in *"${KEY_LINE}"*) fail "the client's key is in its log" ;; esac
 echo "ok: the client's key appears in no output"
+
+# --- 9. a stop reaches openvpn ------------------------------------------------
+
+# The entrypoint is PID 1, which ignores TERM unless it traps it: without the
+# trap, the runtime would wait out the timeout and kill it.
+t0="$(date +%s)"
+"${ENGINE}" stop -t 20 "${CLI}" >/dev/null
+took=$(($(date +%s) - t0))
+[ "${took}" -lt 10 ] || fail "stopping took ${took} s, so TERM never reached openvpn"
+code="$("${ENGINE}" inspect -f '{{.State.ExitCode}}' "${CLI}")"
+[ "${code}" = 0 ] || fail "the client exited with ${code} on a stop"
+echo "ok: a stop ends openvpn and the entrypoint at once, with 0"
 
 echo "PASS: openvpn smoke (${IMAGE})"
