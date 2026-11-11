@@ -501,7 +501,9 @@ amendments:
       resolves the new tag's index digest and pushes it to the branch, and it
       dispatches `bake.yaml` because a push made with `GITHUB_TOKEN` starts no
       `pull_request` run. A version the branch has not moved is never resolved,
-      so a tag upstream rebuilds with fresh geodata leaves the pin alone.
+      so a tag upstream rebuilds with fresh geodata leaves the pin alone, and a
+      branch whose digest already differs from the base's is not resolved again,
+      so a rerun cannot replace the digest CI tested or one pinned by hand.
       `gitIgnoredAuthors` keeps Renovate rebasing a branch that carries the
       workflow's commit.
 editorial:

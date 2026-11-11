@@ -7,7 +7,10 @@
 # digest itself. See S-0001/D-23.
 #
 # A version the branch has not moved is left alone, digest and all: upstream
-# rebuilds a tag with fresh geodata, and the pin exists to keep that out.
+# rebuilds a tag with fresh geodata, and the pin exists to keep that out. So is
+# a digest the branch has already moved, by an earlier run or by hand: the
+# digest CI tested, or the one a person chose, is the one that merges, however
+# often upstream rebuilds the tag meanwhile.
 #
 # Invoked as: follow-digest.sh <base>, from the repository root. Prints the
 # reference and its new digest for each one moved. RESOLVE_DIGEST names a
@@ -38,10 +41,11 @@ for dockerfile in images/*/Dockerfile; do
 	prefix=${from#* }
 
 	version="$(arg "${prefix}_VERSION" <"${dockerfile}")"
-	before="$(git show "${base}:${dockerfile}" 2>/dev/null | arg "${prefix}_VERSION" || true)"
-	[ "${version}" != "${before}" ] || continue
-
 	pinned="$(arg "${prefix}_IMAGE_DIGEST" <"${dockerfile}")"
+	at_base="$(git show "${base}:${dockerfile}" 2>/dev/null || true)"
+	[ "${version}" != "$(arg "${prefix}_VERSION" <<<"${at_base}")" ] || continue
+	[ "${pinned}" = "$(arg "${prefix}_IMAGE_DIGEST" <<<"${at_base}")" ] || continue
+
 	ref=${ref/"\${${prefix}_VERSION}"/${version}}
 	if ! digest="$("${resolve}" "${ref}")"; then
 		echo "follow-digest: cannot resolve ${ref}. If upstream has not published it yet, rerun this once it has." >&2

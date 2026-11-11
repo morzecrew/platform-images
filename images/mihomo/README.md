@@ -294,9 +294,11 @@ upstream build fetches its geodata from `latest`. Two builds of one tag are not
 the same image. Renovate moves the version and not the digest, and
 [`follow-digest.yaml`](../../.github/workflows/follow-digest.yaml) then pushes
 the new version's digest onto its branch, in both `docker-bake.hcl` and the
-`Dockerfile`. A digest is moved only with its version, so a tag upstream
-rebuilds never moves the pin. Until the digest follows, `smoke.sh` fails on the
-version the label names. If upstream has not published the image yet, the
+`Dockerfile`. A digest is moved only with its version, and only while the
+branch still has the old one, so a tag upstream rebuilds never moves the pin on
+`main`, nor one already on the branch: the digest CI tested, or one pinned
+there by hand, is the one that merges. Until the digest follows, `smoke.sh`
+fails on the version the label names. If upstream has not published the image yet, the
 workflow fails; rerun it once it has, or move the digest by hand:
 
 ```sh

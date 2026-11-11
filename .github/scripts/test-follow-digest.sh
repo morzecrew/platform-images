@@ -12,20 +12,22 @@ trap 'rm -rf "${WORK}"' EXIT
 
 OLD=sha256:$(printf 'a%.0s' {1..64})
 NEW=sha256:$(printf 'b%.0s' {1..64})
+REBUILT=sha256:$(printf 'c%.0s' {1..64})
 
 fail() {
 	echo "FAIL: $*" >&2
 	exit 1
 }
 
-# Prints NEW for v1.1.0, something that is not a digest for v1.3.0, and fails
-# for anything else, as a registry does for a tag not yet published.
+# Prints NEW for v1.1.0, or REBUILT once upstream has rebuilt that tag,
+# something that is not a digest for v1.3.0, and fails for anything else, as a
+# registry does for a tag not yet published.
 cat >"${WORK}/resolve" <<EOF
 #!/bin/sh
 echo "\$1" >>"${WORK}/asked"
 [ "\$1" = "example.org/demo:v1.3.0" ] && { echo "<html>rate limited</html>"; exit 0; }
 [ "\$1" = "example.org/demo:v1.1.0" ] || exit 1
-echo "${NEW}"
+if [ -f "${WORK}/rebuilt" ]; then echo "${REBUILT}"; else echo "${NEW}"; fi
 EOF
 chmod +x "${WORK}/resolve"
 export RESOLVE_DIGEST="${WORK}/resolve"
@@ -64,10 +66,17 @@ grep -q "ARG DEMO_IMAGE_DIGEST=${NEW}" images/demo/Dockerfile || fail "the Docke
 grep -q "DEMO_IMAGE_DIGEST = \"${NEW}\"" docker-bake.hcl || fail "the bake kept the old digest"
 grep -q "${OLD}" docker-bake.hcl images/demo/Dockerfile && fail "the old digest survives"
 
-# A second run finds the digest already moved.
-out="$(bash "${SCRIPT}" "${base}")" || fail "a rerun exited non-zero"
-[ -z "${out}" ] || fail "a rerun printed '${out}'"
 git commit -qam follow
+
+# Once the branch carries a digest of its own, a rerun or a later push leaves
+# it, even after upstream rebuilds the tag: the digest CI tested, or one a
+# person pinned on the branch, is the one that merges.
+: >"${WORK}/asked"
+touch "${WORK}/rebuilt"
+out="$(bash "${SCRIPT}" "${base}")" || fail "a rerun exited non-zero"
+[ -z "${out}" ] && [ ! -s "${WORK}/asked" ] || fail "a rerun resolved the tag again and printed '${out}'"
+git diff --quiet || fail "a rerun moved the digest to the rebuilt tag's"
+rm "${WORK}/rebuilt"
 
 # A version the branch did not move is not resolved at all, so a tag upstream
 # rebuilt never moves the pin on an unrelated pull request.
@@ -76,7 +85,7 @@ out="$(bash "${SCRIPT}" HEAD)" || fail "an unmoved version exited non-zero"
 [ -z "${out}" ] && [ ! -s "${WORK}/asked" ] || fail "an unmoved version was resolved: $(cat "${WORK}/asked")"
 
 # A tag upstream has not published fails, and changes nothing.
-pin 1.2.0 "${OLD}"
+pin 1.2.0 "${NEW}"
 git commit -qam unpublished
 if bash "${SCRIPT}" HEAD~1 2>"${WORK}/err"; then
 	fail "an unpublished tag exited zero"
@@ -86,7 +95,7 @@ git diff --quiet || fail "an unpublished tag changed the tree"
 
 # Whatever the registry answers is written into two files only if it is a
 # digest.
-pin 1.3.0 "${OLD}"
+pin 1.3.0 "${NEW}"
 git commit -qam garbled
 if bash "${SCRIPT}" HEAD~1 2>"${WORK}/err"; then
 	fail "an answer that is not a digest exited zero"
