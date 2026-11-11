@@ -10,7 +10,7 @@ ARG MIHOMO_VERSION=1.19.33
 # geodata. Moved by hand with the version -- see docker-bake.hcl.
 ARG MIHOMO_IMAGE_DIGEST=sha256:9211361a3ed85305383288d38c05e85862d6d5a590c10007c37fc059cca82e9c
 # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
-ARG GO_VERSION=1.27.3
+ARG GO_VERSION=1.27.4
 
 FROM docker.io/metacubex/mihomo:v${MIHOMO_VERSION}@${MIHOMO_IMAGE_DIGEST} AS upstream
 

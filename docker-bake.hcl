@@ -475,7 +475,7 @@ target "xray" {
     XRAY_VERSION      = XRAY_VERSION
     XRAY_IMAGE_DIGEST = "sha256:ceabeac03a89d991d2a247361825c1d1d2e9c91cd5dc010f298c7dc0c2f325c9"
     # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
-    GO_VERSION        = "1.27.3"
+    GO_VERSION        = "1.27.4"
   }
 }
 
@@ -507,7 +507,7 @@ target "mihomo" {
     MIHOMO_VERSION      = MIHOMO_VERSION
     MIHOMO_IMAGE_DIGEST = "sha256:9211361a3ed85305383288d38c05e85862d6d5a590c10007c37fc059cca82e9c"
     # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
-    GO_VERSION          = "1.27.3"
+    GO_VERSION          = "1.27.4"
   }
 }
 
