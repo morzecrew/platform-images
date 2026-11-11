@@ -447,9 +447,15 @@ The upstream image is pinned by digest, `XRAY_IMAGE_DIGEST`, because upstream
 rebuilds a tag when a prerelease is promoted and on a manual dispatch, and each
 build fetches its geodata from `latest`. The pin is what makes a rebuild here
 ship the same `geoip.dat` and `geosite.dat`, which `geoip:private` routing
-depends on. Renovate moves the version and not the digest. Its pull request
-fails `smoke.sh`, which compares the binary's version with the label, until the
-digest is moved in both `docker-bake.hcl` and the `Dockerfile`:
+depends on. Renovate moves the version and not the digest, and
+[`follow-digest.yaml`](../../.github/workflows/follow-digest.yaml) then pushes
+the new version's digest onto its branch, in both `docker-bake.hcl` and the
+`Dockerfile`. A digest is moved only with its version, and only while the
+branch still has the old one, so a tag upstream rebuilds never moves the pin on
+`main`, nor one already on the branch: the digest CI tested, or one pinned
+there by hand, is the one that merges. Until the digest follows, `smoke.sh`
+fails on the version the label names. If upstream has not published the image yet, the
+workflow fails; rerun it once it has, or move the digest by hand:
 
 ```sh
 docker buildx imagetools inspect ghcr.io/xtls/xray-core:<version> \

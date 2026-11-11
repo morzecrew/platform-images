@@ -7,7 +7,8 @@ ARG MIHOMO_VERSION=1.19.34
 # The image index digest of docker.io/metacubex/mihomo:v${MIHOMO_VERSION}.
 # Each upstream build fetches its geodata from `latest`, so a rebuild of a tag
 # is not the same image; the digest is what makes a rebuild here ship the same
-# geodata. Moved by hand with the version -- see docker-bake.hcl.
+# geodata. Moved with the version by .github/workflows/follow-digest.yaml --
+# see docker-bake.hcl.
 ARG MIHOMO_IMAGE_DIGEST=sha256:4c2495d705f152897a58eac410350f243835fd01ce2fe44949a571faa824d532
 # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
 ARG GO_VERSION=1.27.4

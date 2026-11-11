@@ -459,8 +459,9 @@ variable "XRAY_VERSION" {
 
 # Upstream's binary and geodata, pinned by the index digest of
 # ghcr.io/xtls/xray-core:${XRAY_VERSION}. Renovate moves the version and not the
-# digest, so its pull request fails images/xray/smoke.sh, where the binary's
-# version is compared with the label, until the digest is moved too:
+# digest; .github/workflows/follow-digest.yaml then pushes the new version's
+# digest onto its branch. Until it has, images/xray/smoke.sh fails on the
+# version the label names. By hand:
 #
 #   docker buildx imagetools inspect ghcr.io/xtls/xray-core:<version> \
 #     --format '{{json .Manifest.Digest}}'
@@ -490,9 +491,10 @@ variable "MIHOMO_VERSION" {
 
 # Upstream's binary and geodata, pinned by the index digest of
 # docker.io/metacubex/mihomo:v${MIHOMO_VERSION}, which is not on ghcr.io.
-# Renovate moves the version and not the digest, so its pull request fails
-# images/mihomo/smoke.sh, where the binary's version is compared with the
-# label, until the digest is moved too:
+# Renovate moves the version and not the digest;
+# .github/workflows/follow-digest.yaml then pushes the new version's digest
+# onto its branch. Until it has, images/mihomo/smoke.sh fails on the version
+# the label names. By hand:
 #
 #   docker buildx imagetools inspect docker.io/metacubex/mihomo:v<version> \
 #     --format '{{json .Manifest.Digest}}'

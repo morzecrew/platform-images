@@ -446,14 +446,71 @@ amendments:
         after: 6760c17f2a02c9af/c6970b5335db8cfe
     md: >-
       #146 moved `ALPINE_VERSION` from `3.22` to `3.24.4` and nothing else. Alpine
-      3.24 ships openvpn 2.7.7, so the openvpn build refused it against
-      `OPENVPN_VERSION` 2.6.20, while the Repology name `alpine_3_22/openvpn` still
-      named the old release. Renovate cannot move those two, and under
-      `semver-coerced` it turned the floating release into a patch tag. With
-      `versioning=docker` a candidate must have as many parts as `3.22`, and with
-      automerge off a person finishes the pull request on its branch, including a
-      release that happens to ship the same openvpn and would otherwise go green
-      with a stale Repology name.
+      3.24 ships openvpn 2.7.7, so the openvpn build refused it against `OPENVPN_VERSION`
+      2.6.20, while the Repology name `alpine_3_22/openvpn` still named the old release.
+      Renovate cannot move those two, and under `semver-coerced` it turned the floating
+      release into a patch tag. With `versioning=docker` a candidate must have as
+      many parts as `3.22`, and with automerge off a person finishes the pull request
+      on its branch, including a release that happens to ship the same openvpn and
+      would otherwise go green with a stale Repology name.
+  - id: A-15
+    at: '2026-11-11T14:59:37Z'
+    title: >-
+      A pinned upstream digest follows its version on Renovate's branch
+    changes:
+      - subject: D-23
+        field: paths
+        before: [.github/renovate.json, docker-bake.hcl, images/*/Dockerfile]
+        after:
+          - .github/renovate.json
+          - docker-bake.hcl
+          - images/*/Dockerfile
+          - .github/workflows/follow-digest.yaml
+          - .github/scripts/*follow-digest.sh
+      - subject: D-23
+        field: text
+        before: >-
+          Versions are tracked only through `# renovate:` annotations directly above
+          a `variable` or `ARG` line in `docker-bake.hcl`, and the same annotation
+          directly above each Dockerfile `ARG` default that copies the value. The
+          dockerfile manager is off except for `docker/dockerfile`, Renovate reads
+          patch tags only, and automerge is on except for Node and `alpine`. `ALPINE_VERSION`
+          is a release, read with `versioning=docker` so that it moves to a release
+          and never to a patch tag.
+        after: >-
+          Versions are tracked only through `# renovate:` annotations directly above
+          a `variable` or `ARG` line in `docker-bake.hcl`, and the same annotation
+          directly above each Dockerfile `ARG` default that copies the value. The
+          dockerfile manager is off except for `docker/dockerfile`, Renovate reads
+          patch tags only, and automerge is on except for Node and `alpine`. `ALPINE_VERSION`
+          is a release, read with `versioning=docker` so that it moves to a release
+          and never to a patch tag. An upstream image pinned as `<P>_IMAGE_DIGEST`
+          beside `<P>_VERSION` has its digest moved on Renovate's branch by `follow-digest.yaml`,
+          only while the branch moves the version and still carries the base's digest,
+          and only to an index holding linux/amd64 and linux/arm64. The push uses
+          the follow-digest GitHub App's token, so that it starts the `pull_request`
+          run the required check is counted from.
+      - subject: D-23
+        field: fingerprint
+        before: 6760c17f2a02c9af/c6970b5335db8cfe
+        after: 4eb425a56c81d183/4a272434be8ad094
+    md: >-
+      #139 and #153 each moved a version and sat red on the smoke test's
+      version-against-label check until the digest was moved by hand. Renovate
+      reads xray's and mihomo's versions from GitHub releases, because xray
+      publishes its prereleases as image tags of the same form (v26.9.30 among
+      them), so it has no docker datasource to move a digest with. The workflow
+      resolves the new tag's image index and pushes its digest to the branch. A
+      version the branch has not moved is never resolved, so a tag upstream
+      rebuilds with fresh geodata leaves the pin alone, and a branch whose digest
+      already differs from the base's is not resolved again, so a rerun cannot
+      replace the digest CI tested or one pinned by hand. That also makes a
+      partial index stick, so only one holding both platforms is accepted. A
+      push made with `GITHUB_TOKEN` starts no `pull_request` run, and a
+      dispatched `bake.yaml` does not count: rule suite 4967748496 records that
+      #136's merge failed the required check, with "Bake Images (build only)"
+      still expected, and went through by bypass. Hence the app token. `gitIgnoredAuthors` keeps Renovate
+      rebasing a branch that carries the workflow's commit.
 editorial:
   - subject: D-5
     field: text

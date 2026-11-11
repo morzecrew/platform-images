@@ -1,0 +1,86 @@
+name: Follow upstream digest
+
+# Renovate reads xray's and mihomo's versions from GitHub releases, where
+# prereleases are marked, so its pull request moves <P>_VERSION and leaves
+# <P>_IMAGE_DIGEST behind, and the smoke test fails on the version the label
+# names. This puts the new version's index digest on the same branch.
+#
+# The push is made with a token minted for the follow-digest GitHub App, which
+# holds only Contents: read & write on this repository: a push made with
+# GITHUB_TOKEN starts no pull_request run, and main's ruleset counts the
+# required "Bake Images (build only)" check only from one. See S-0001/D-23.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - images/*/Dockerfile
+
+permissions:
+  contents: read
+
+concurrency:
+  group: follow-digest-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  follow:
+    # Only Renovate's branches in this repository: the job pushes to the head
+    # branch.
+    if: >-
+      github.event.pull_request.user.login == 'renovate[bot]'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    name: Follow upstream digest
+
+    steps:
+      - name: Checkout the pull request's branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      # main's copy of the script, so nothing the branch carries runs in this
+      # job, and no step that runs it holds a token.
+      - name: Move each digest whose version moved
+        id: follow
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git show "${BASE}:.github/scripts/follow-digest.sh" >"${RUNNER_TEMP}/follow-digest.sh"
+          moved="$(bash "${RUNNER_TEMP}/follow-digest.sh" "${BASE}")"
+          if [ -z "${moved}" ]; then
+            echo "No pinned digest is behind its version."
+            exit 0
+          fi
+          printf '%s\n' "${moved}"
+          {
+            echo 'moved<<MOVED'
+            printf '%s\n' "${moved}"
+            echo MOVED
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Mint a token that starts CI
+        if: steps.follow.outputs.moved != ''
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          client-id: ${{ vars.FOLLOW_DIGEST_CLIENT_ID }}
+          private-key: ${{ secrets.FOLLOW_DIGEST_APP_KEY }}
+          permission-contents: write
+
+      - name: Push the digest
+        if: steps.follow.outputs.moved != ''
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          MOVED: ${{ steps.follow.outputs.moved }}
+          TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -c core.hooksPath=/dev/null commit -qam "⬆️ build(deps): pin the upstream image by its new index digest" -m "${MOVED}"
+          auth="$(printf 'x-access-token:%s' "${TOKEN}" | base64 -w0)"
+          echo "::add-mask::${auth}"
+          git -c core.hooksPath=/dev/null -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+            push origin "HEAD:${HEAD_REF}"
