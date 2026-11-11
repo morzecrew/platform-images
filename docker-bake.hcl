@@ -485,7 +485,7 @@ target "xray" {
 # Prerelease-Alpha, is marked as one there, and its tag is not a version.
 # renovate: datasource=github-releases depName=MetaCubeX/mihomo extractVersion=^v(?<version>.+)$
 variable "MIHOMO_VERSION" {
-  default = "1.19.33"
+  default = "1.19.34"
 }
 
 # Upstream's binary and geodata, pinned by the index digest of

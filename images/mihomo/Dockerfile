@@ -3,7 +3,7 @@
 # Stable releases only. Upstream's one prerelease, Prerelease-Alpha, is marked
 # as one on GitHub, and its tag is not a version.
 # renovate: datasource=github-releases depName=MetaCubeX/mihomo extractVersion=^v(?<version>.+)$
-ARG MIHOMO_VERSION=1.19.33
+ARG MIHOMO_VERSION=1.19.34
 # The image index digest of docker.io/metacubex/mihomo:v${MIHOMO_VERSION}.
 # Each upstream build fetches its geodata from `latest`, so a rebuild of a tag
 # is not the same image; the digest is what makes a rebuild here ship the same
