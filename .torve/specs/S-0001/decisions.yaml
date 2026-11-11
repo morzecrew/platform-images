@@ -360,14 +360,25 @@ decisions:
       is off except for `docker/dockerfile`, Renovate reads patch tags only, and automerge
       is on except for Node and `alpine`. `ALPINE_VERSION` is a release, read with
       `versioning=docker` so that it moves to a release and never to a patch tag.
-    paths: [.github/renovate.json, docker-bake.hcl, images/*/Dockerfile]
+      An upstream image pinned as `<P>_IMAGE_DIGEST` beside `<P>_VERSION` has its
+      digest moved on Renovate's branch by `follow-digest.yaml`, only while the branch
+      moves the version and still carries the base's digest, and only to an index
+      holding linux/amd64 and linux/arm64. The push uses the follow-digest GitHub
+      App's token, so that it starts the `pull_request` run the required check is
+      counted from.
+    paths:
+      - .github/renovate.json
+      - docker-bake.hcl
+      - images/*/Dockerfile
+      - .github/workflows/follow-digest.yaml
+      - .github/scripts/*follow-digest.sh
     consequence: >-
       a version without its annotation is invisible to Renovate, and an RC never ships
       as a release
     rationale: >-
       Execution-log A42 (a comment gap unhooked python-distroless), D072, D073 (drift:
       an RC shipped as valkey 9.2).
-    fingerprint: 6760c17f2a02c9af/c6970b5335db8cfe
+    fingerprint: 4eb425a56c81d183/4a272434be8ad094
   - id: D-24
     grade: ASSUMED
     text: >-

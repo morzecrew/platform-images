@@ -57,8 +57,8 @@ jobs:
       - name: Check bake argument defaults
         run: bash .github/scripts/arg-defaults.sh
 
-      # S-0001/D-23: follow-digest.yaml runs this on Renovate's branches with a
-      # token that can push, so its test runs on every change to it.
+      # S-0001/D-23: follow-digest.yaml runs main's copy of this on Renovate's
+      # branches and pushes what it writes, so its test runs on every change.
       - name: Test the digest follower
         run: bash .github/scripts/test-follow-digest.sh
 

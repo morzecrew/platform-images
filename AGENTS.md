@@ -67,9 +67,9 @@ One exact-patch `DISTROLESS_PYTHON_VERSION` drives both uv-builder and python-di
 
 ### S-0001/D-23 — `ASSUMED` (Standing decisions)
 
-Versions are tracked only through `# renovate:` annotations directly above a `variable` or `ARG` line in `docker-bake.hcl`, and the same annotation directly above each Dockerfile `ARG` default that copies the value. The dockerfile manager is off except for `docker/dockerfile`, Renovate reads patch tags only, and automerge is on except for Node and `alpine`. `ALPINE_VERSION` is a release, read with `versioning=docker` so that it moves to a release and never to a patch tag.
+Versions are tracked only through `# renovate:` annotations directly above a `variable` or `ARG` line in `docker-bake.hcl`, and the same annotation directly above each Dockerfile `ARG` default that copies the value. The dockerfile manager is off except for `docker/dockerfile`, Renovate reads patch tags only, and automerge is on except for Node and `alpine`. `ALPINE_VERSION` is a release, read with `versioning=docker` so that it moves to a release and never to a patch tag. An upstream image pinned as `<P>_IMAGE_DIGEST` beside `<P>_VERSION` has its digest moved on Renovate's branch by `follow-digest.yaml`, only while the branch moves the version and still carries the base's digest, and only to an index holding linux/amd64 and linux/arm64. The push uses the follow-digest GitHub App's token, so that it starts the `pull_request` run the required check is counted from.
 
-- Paths: `.github/renovate.json` `docker-bake.hcl` `images/*/Dockerfile`
+- Paths: `.github/renovate.json` `docker-bake.hcl` `images/*/Dockerfile` `.github/workflows/follow-digest.yaml` `.github/scripts/*follow-digest.sh`
 - Consequence: a version without its annotation is invisible to Renovate, and an RC never ships as a release
 
 ### S-0002/D-2 — `ASSUMED` (Service images and the drift CI cannot see)
