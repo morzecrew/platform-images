@@ -636,3 +636,135 @@ func TestWireGuardRefusals(t *testing.T) {
 		})
 	}
 }
+
+func TestUpstreams(t *testing.T) {
+	dir := t.TempDir()
+	encoded := strings.NewReplacer("+", "%2B", "/", "%2F", "=", "%3D").Replace(wgPriv)
+	list := `# the ways out, in order
+socks5://alice:p@ss:word@proxy.example:1080 name=isp-a
+https://bob:secret@203.0.113.9:8443         name=isp-b
+
+wireguard://` + wgPriv + `@vpn.example:51820?publickey=` + wgPub + `&address=10.34.0.3/32,fd30:2::3/128&mtu=1280 name=home group=upstream,ipv6
+openvpn
+wireguard://` + encoded + `@[2001:db8::7]:51820/?PublicKey=` + wgPub + `&presharedkey=` + wgPSK + `&address=fd30:2::4/128&allowedips=::/0&keepalive=25#my%20exit group=ipv6
+socks5+tls://carol:pw@[2001:db8::9]:1080 group=ipv6 name=isp-c6
+http://198.51.100.4:3128
+`
+	file := write(t, filepath.Join(dir, "upstreams"), list, 0o600)
+	aliases, err := upstreamAliases("openvpn=socks5://vpn:1080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outs, secrets, note, err := parseUpstreams(list, aliases, "isp-b, isp-c6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type got struct{ tag, protocol, tls, where string }
+	var have []got
+	for _, o := range outs {
+		g := got{tag: o.Tag, protocol: o.Protocol}
+		if o.StreamSettings != nil {
+			g.tls = o.StreamSettings.Security
+		}
+		switch s := o.Settings.(type) {
+		case proxyServer:
+			g.where = s.Address
+		case wgSettings:
+			g.where = s.Peers[0].Endpoint
+		}
+		have = append(have, g)
+	}
+	want := []got{
+		// isp-b pinned first, then the rest of the group in order.
+		{"upstream-0", "http", "tls", "203.0.113.9"},
+		{"upstream-b1", "socks", "", "proxy.example"},
+		{"upstream-b2", "wireguard", "", "vpn.example:51820"},
+		{"upstream-b3", "socks", "", "vpn"},
+		{"upstream-b4", "http", "", "198.51.100.4"},
+		// isp-c6 pinned first in ipv6; home is in both groups.
+		{"ipv6-0", "socks", "tls", "2001:db8::9"},
+		{"ipv6-b1", "wireguard", "", "vpn.example:51820"},
+		{"ipv6-b2", "wireguard", "", "[2001:db8::7]:51820"},
+	}
+	if !slices.Equal(have, want) {
+		t.Fatalf("outbounds\n got %+v\nwant %+v", have, want)
+	}
+	if p := outs[1].Settings.(proxyServer); p.User != "alice" || p.Pass != "p@ss:word" || p.Port != 1080 {
+		t.Errorf("the userinfo did not split at the last @ and the first colon: %+v", p)
+	}
+	if w := outs[2].Settings.(wgSettings); w.SecretKey != wgPriv || w.MTU != 1280 || !slices.Equal(w.Address, []string{"10.34.0.3/32", "fd30:2::3/128"}) ||
+		!slices.Equal(w.Peers[0].AllowedIPs, []string{"0.0.0.0/0", "::/0"}) || !w.NoKernelTun {
+		t.Errorf("the first wireguard URL: %+v", w)
+	}
+	if w := outs[7].Settings.(wgSettings); w.SecretKey != wgPriv || w.Peers[0].PreSharedKey != wgPSK || w.Peers[0].KeepAlive != 25 ||
+		!slices.Equal(w.Peers[0].AllowedIPs, []string{"::/0"}) {
+		t.Errorf("the percent-encoded wireguard URL: %+v", w)
+	}
+	for _, s := range []string{"alice", "p@ss:word", "bob", "secret", "carol", "pw", wgPriv, wgPSK} {
+		if !slices.Contains(secrets, s) {
+			t.Errorf("%q is not among the values to redact", s)
+		}
+		if strings.Contains(note, s) {
+			t.Errorf("the summary note %q shows %q", note, s)
+		}
+	}
+	if !strings.Contains(note, "upstream-0 (isp-b) http 203.0.113.9:8443") || !strings.Contains(note, "ipv6-b2 wireguard [2001:db8::7]:51820") {
+		t.Errorf("the summary note %q does not name the tags, names and endpoints", note)
+	}
+
+	// Through the reference, with the aliases from the environment.
+	t.Setenv("XRAY_UPSTREAM_ALIASES", "openvpn=socks5://vpn:1080")
+	t.Setenv("XRAY_UPSTREAM_PIN", "")
+	src := write(t, filepath.Join(dir, "c.json"), `{"outbounds": {"$upstreams": "`+file+`"}}`, 0o600)
+	c, err := resolveFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(c.Out, []byte(`"tag":"upstream-0","protocol":"socks","settings":{"address":"proxy.example"`)) {
+		t.Errorf("without a pin the first line is not upstream-0: %s", c.Out)
+	}
+}
+
+func TestUpstreamsRefusals(t *testing.T) {
+	aliases := map[string]string{"openvpn": "socks5://vpn:1080"}
+	wg := "wireguard://" + wgPriv + "@vpn.example:51820?publickey=" + wgPub + "&address=10.34.0.3/32"
+	for _, tc := range []struct{ name, list, pin, want string }{
+		{"empty", "", "", "lists no upstream"},
+		{"comments only", "# nothing yet\n\n", "", "lists no upstream"},
+		{"no scheme", "alice:secret@proxy.example:1080\n", "", "line 1: does not start with a URL"},
+		{"an undefined word", "socks5://proxy.example:1080\nwarp\n", "", "line 2: warp is not a word XRAY_UPSTREAM_ALIASES defines"},
+		{"an unknown scheme", "ss://alice:secret@proxy.example:8388\n", "", "line 1: its scheme is not socks5"},
+		{"a bad proxy", "socks5://alice@proxy.example:1080\n", "", "line 1: does not hold [user:pass@]host:port"},
+		{"an unknown option", "socks5://proxy.example:1080 weight=2\n", "", "line 1: after the URL comes name="},
+		{"an option twice", "socks5://proxy.example:1080 name=a name=b\n", "", "line 1: after the URL comes name="},
+		{"a bare word option", "socks5://proxy.example:1080 ipv6\n", "", "line 1: after the URL comes name="},
+		{"a bad name", "socks5://proxy.example:1080 name=ISP_A\n", "", "line 1: a name is 1 to 32"},
+		{"a bad group", "socks5://proxy.example:1080 group=v6-only\n", "", "line 1: a group is 1 to 16"},
+		{"a name twice", "socks5://a.example:1080 name=isp\nsocks5://b.example:1080 name=isp\n", "", "line 2: name=isp again, first on line 1"},
+		{"a pin no line has", "socks5://a.example:1080 name=isp\n", "home", `XRAY_UPSTREAM_PIN names "home"`},
+		{"two pins in a group", "socks5://a.example:1080 name=a\nsocks5://b.example:1080 name=b\n", "a,b", "XRAY_UPSTREAM_PIN pins a and b, both in group upstream"},
+		{"a wireguard URL with no key", "wireguard://vpn.example:51820?publickey=" + wgPub + "\n", "", "line 1: is a wireguard:// URL with no private key"},
+		{"an unknown wireguard key", wg + "&reserved=1,2,3\n", "", "line 1: is a wireguard:// URL with reserved, which is none of"},
+		{"a wireguard key twice", wg + "&mtu=1280&mtu=1420\n", "", "line 1: is a wireguard:// URL with mtu twice"},
+		{"a wireguard URL with no address", "wireguard://" + wgPriv + "@vpn.example:51820?publickey=" + wgPub + "\n", "", "settings fail: the [Interface] on line 1 has no Address"},
+		{"a short wireguard key", "wireguard://" + wgPriv[:40] + "@vpn.example:51820?publickey=" + wgPub + "&address=10.34.0.3/32\n", "", "settings fail: PrivateKey is not a WireGuard key"},
+		{"a line break smuggled in", wg + "&mtu=1280%0A[Peer]\n", "", "line 1: is a wireguard:// URL with a line break or a # in a value"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, err := parseUpstreams(tc.list, aliases, tc.pin)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v\nwant %q", err, tc.want)
+			}
+			for _, s := range []string{"alice", "secret", wgPriv, wgPriv[:12], wgPub[:12]} {
+				if strings.Contains(err.Error(), s) {
+					t.Errorf("error %q carries %q", err, s)
+				}
+			}
+		})
+	}
+	for _, env := range []string{"openvpn", "openvpn=vpn:1080", "Open=socks5://vpn:1080", "a=socks5://x.example:1 a=socks5://y.example:1", "vpn=socks5://alice:secret@vpn:1080"} {
+		if _, err := upstreamAliases(env); err == nil {
+			t.Errorf("XRAY_UPSTREAM_ALIASES=%q was taken", env)
+		}
+	}
+}

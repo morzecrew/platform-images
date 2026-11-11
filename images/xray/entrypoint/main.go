@@ -15,7 +15,9 @@
 // or exactly {"$proxy": "/absolute/path"} with a socks or http outbound's
 // settings, split from the [user:pass@]host:port in that file, or exactly
 // {"$wireguard": "/absolute/path"} with a wireguard outbound's settings, from
-// the wg-quick client config in that file, and changes nothing else. The contract is in images/xray/README.md.
+// the wg-quick client config in that file, or exactly
+// {"$upstreams": "/absolute/path"} with an outbounds array, one outbound per
+// line of that file, and changes nothing else. The contract is in images/xray/README.md.
 package main
 
 import (
@@ -25,12 +27,15 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -50,6 +55,8 @@ var img = &envconf.Image{
 		{Name: "XRAY_HEALTHCHECK_PROXY", Default: ""},
 		{Name: "XRAY_HEALTHCHECK_TIMEOUT", Default: "10s"},
 		{Name: "XRAY_HEALTHCHECK_EXPECT", Default: ""},
+		{Name: "XRAY_UPSTREAM_ALIASES", Default: ""},
+		{Name: "XRAY_UPSTREAM_PIN", Default: ""},
 	},
 	Upstream: map[string]bool{
 		"XRAY_LOCATION_ASSET": true, "XRAY_LOCATION_CERT": true,
@@ -121,6 +128,7 @@ var references = []envconf.Reference{
 	{Key: "$vlessClients", Resolve: vlessClients},
 	{Key: "$proxy", Resolve: proxy},
 	{Key: "$wireguard", Resolve: wireguard},
+	{Key: "$upstreams", Resolve: upstreams},
 }
 
 func resolveDir(dir string) ([]*envconf.Config, error) {
@@ -359,7 +367,12 @@ func proxy(name string) (envconf.Resolution, error) {
 // scheme is refused so that it is not written as one. The errors never quote
 // the value: without its @, "user:pass" parses as a host and a port, and the
 // port would be the password.
-func parseProxy(s string) (proxyServer, error) {
+func parseProxy(s string) (proxyServer, error) { return parseProxyFrom(s, false) }
+
+// parseProxyFrom is parseProxy; with bare, a host with no dot is taken, as a
+// deployment's own alias names a service on its network (vpn:1080). An alias
+// is not a secret, so no password can hide in it.
+func parseProxyFrom(s string, bare bool) (proxyServer, error) {
 	fail := func(what string) (proxyServer, error) {
 		return proxyServer{}, errors.New("does not hold [user:pass@]host:port: " + what)
 	}
@@ -390,7 +403,7 @@ func parseProxy(s string) (proxyServer, error) {
 		}
 	case !validHost(host):
 		return fail("the host is not a DNS name, an IPv4 address or an IPv6 address in brackets")
-	case p.User == "" && !strings.Contains(host, ".") && !strings.HasPrefix(hostport, "["):
+	case !bare && p.User == "" && !strings.Contains(host, ".") && !strings.HasPrefix(hostport, "["):
 		// Most likely "user:pass" that lost its "@host:port", whose password
 		// would become a port that nothing redacts. A proxy that asks for no
 		// login is reached at a dotted name or an address.
@@ -664,6 +677,325 @@ func wgPrefixes(v string, network bool) ([]string, error) {
 		out = append(out, p.String())
 	}
 	return out, nil
+}
+
+// An outbound $upstreams makes. Settings is a proxyServer or wgSettings.
+type upstreamOutbound struct {
+	Tag            string          `json:"tag"`
+	Protocol       string          `json:"protocol"`
+	Settings       any             `json:"settings"`
+	StreamSettings *upstreamStream `json:"streamSettings,omitempty"`
+}
+
+type upstreamStream struct {
+	Security string `json:"security"`
+}
+
+// One line of an upstreams file, parsed.
+type upstreamLine struct {
+	n       int // its line number
+	out     upstreamOutbound
+	name    string
+	groups  []string
+	where   string // host:port, which the summary may show
+	secrets []string
+}
+
+var (
+	upstreamNameRE  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+	upstreamGroupRE = regexp.MustCompile(`^[a-z][a-z0-9]{0,15}$`)
+	upstreamWordRE  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+)
+
+// upstreams resolves {"$upstreams": path}: an outbounds array, one outbound per
+// line of the file, "<url> [name=<name>] [group=<group>[,<group>]]", so any
+// number of proxies and WireGuard exits is one secret, in order. In each group,
+// default "upstream", the first line is tagged "<group>-0" and each later one
+// "<group>-b<n>", so a balancer selects the first ("<group>-0"), the rest
+// ("<group>-b") or all ("<group>-"). XRAY_UPSTREAM_PIN names lines to move to
+// the front of their groups; XRAY_UPSTREAM_ALIASES gives the URL for a line
+// that is one word, such as a tunnel's hop the deployment defines.
+func upstreams(name string) (envconf.Resolution, error) {
+	s, err := envconf.ReadSecret(name)
+	if err != nil {
+		return envconf.Resolution{}, err
+	}
+	aliases, err := upstreamAliases(os.Getenv("XRAY_UPSTREAM_ALIASES"))
+	if err != nil {
+		return envconf.Resolution{}, err
+	}
+	outs, secrets, note, err := parseUpstreams(s, aliases, os.Getenv("XRAY_UPSTREAM_PIN"))
+	if err != nil {
+		return envconf.Resolution{}, err
+	}
+	return envconf.Resolution{Value: outs, Secrets: secrets, Note: note}, nil
+}
+
+// "<word>=<url> ..." from the environment, for a hop the deployment itself
+// defines, such as a tunnel's SOCKS port. It holds no login. An error names the
+// word, never the URL.
+func upstreamAliases(env string) (map[string]string, error) {
+	aliases := map[string]string{}
+	for _, f := range strings.Fields(env) {
+		word, u, ok := strings.Cut(f, "=")
+		if !ok || !upstreamWordRE.MatchString(word) || !strings.Contains(u, "://") {
+			return nil, errors.New("XRAY_UPSTREAM_ALIASES holds an entry that is not <word>=<url>")
+		}
+		if _, dup := aliases[word]; dup {
+			return nil, fmt.Errorf("XRAY_UPSTREAM_ALIASES names %s twice", word)
+		}
+		// The environment is printed at start and in docker inspect: a login
+		// belongs in the upstreams file, which is a secret.
+		if strings.Contains(u, "@") {
+			return nil, fmt.Errorf("XRAY_UPSTREAM_ALIASES gives %s a URL with a login, which the environment would show: put that line in the upstreams file", word)
+		}
+		aliases[word] = u
+	}
+	return aliases, nil
+}
+
+func parseUpstreams(s string, aliases map[string]string, pin string) ([]upstreamOutbound, []string, string, error) {
+	var lines []upstreamLine
+	names := map[string]int{}
+	for i, raw := range strings.Split(s, "\n") {
+		n := i + 1
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		l, err := parseUpstreamLine(line, aliases)
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("line %d: %v", n, err)
+		}
+		l.n = n
+		if l.name != "" {
+			if first, dup := names[l.name]; dup {
+				return nil, nil, "", fmt.Errorf("line %d: name=%s again, first on line %d", n, l.name, first)
+			}
+			names[l.name] = n
+		}
+		lines = append(lines, l)
+	}
+	if len(lines) == 0 {
+		return nil, nil, "", errors.New("lists no upstream")
+	}
+
+	// Each group's lines in order, a pinned one first.
+	var order []string
+	byGroup := map[string][]*upstreamLine{}
+	for i := range lines {
+		for _, g := range lines[i].groups {
+			if _, ok := byGroup[g]; !ok {
+				order = append(order, g)
+			}
+			byGroup[g] = append(byGroup[g], &lines[i])
+		}
+	}
+	pinned := map[string]string{}
+	for _, p := range strings.FieldsFunc(pin, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+		at, ok := names[p]
+		if !ok {
+			return nil, nil, "", fmt.Errorf("XRAY_UPSTREAM_PIN names %q, which no line has as its name", p)
+		}
+		for _, l := range lines {
+			if l.n != at {
+				continue
+			}
+			for _, g := range l.groups {
+				if other, dup := pinned[g]; dup {
+					return nil, nil, "", fmt.Errorf("XRAY_UPSTREAM_PIN pins %s and %s, both in group %s", other, p, g)
+				}
+				pinned[g] = p
+				list := byGroup[g]
+				for j, m := range list {
+					if m.n == at {
+						byGroup[g] = append([]*upstreamLine{m}, append(append([]*upstreamLine{}, list[:j]...), list[j+1:]...)...)
+						break
+					}
+				}
+			}
+		}
+	}
+
+	var outs []upstreamOutbound
+	var secrets, notes []string
+	for i := range lines {
+		secrets = append(secrets, lines[i].secrets...)
+	}
+	for _, g := range order {
+		for j, l := range byGroup[g] {
+			o := l.out
+			if j == 0 {
+				o.Tag = g + "-0"
+			} else {
+				o.Tag = fmt.Sprintf("%s-b%d", g, j)
+			}
+			outs = append(outs, o)
+			label := o.Tag
+			if l.name != "" {
+				label += " (" + l.name + ")"
+			}
+			notes = append(notes, label+" "+o.Protocol+" "+l.where)
+		}
+	}
+	return outs, secrets, strings.Join(notes, ", "), nil
+}
+
+// One non-blank line: a URL or an alias word, then its options. Errors never
+// quote the URL, which may hold credentials.
+func parseUpstreamLine(line string, aliases map[string]string) (upstreamLine, error) {
+	fields := strings.Fields(line)
+	l := upstreamLine{groups: []string{"upstream"}}
+	u, alias := fields[0], false
+	if !strings.Contains(u, "://") {
+		if !upstreamWordRE.MatchString(u) {
+			return l, errors.New("does not start with a URL (socks5://, socks5+tls://, http://, https://, wireguard://) or a word XRAY_UPSTREAM_ALIASES defines")
+		}
+		a, ok := aliases[u]
+		if !ok {
+			return l, fmt.Errorf("%s is not a word XRAY_UPSTREAM_ALIASES defines", u)
+		}
+		u, alias = a, true
+	}
+	seen := map[string]bool{}
+	for _, opt := range fields[1:] {
+		k, v, ok := strings.Cut(opt, "=")
+		if !ok || seen[k] {
+			return l, errors.New("after the URL comes name=<name> and group=<group>[,<group>], each at most once")
+		}
+		seen[k] = true
+		switch k {
+		case "name":
+			if !upstreamNameRE.MatchString(v) {
+				return l, errors.New("a name is 1 to 32 lowercase letters, digits and dashes, starting with a letter or a digit")
+			}
+			l.name = v
+		case "group":
+			l.groups = strings.Split(v, ",")
+			for _, g := range l.groups {
+				if !upstreamGroupRE.MatchString(g) {
+					return l, errors.New("a group is 1 to 16 lowercase letters and digits, starting with a letter")
+				}
+			}
+		default:
+			return l, errors.New("after the URL comes name=<name> and group=<group>[,<group>], each at most once")
+		}
+	}
+
+	scheme, rest, _ := strings.Cut(u, "://")
+	switch scheme {
+	case "socks", "socks5", "socks5+tls", "http", "https":
+		p, err := parseProxyFrom(rest, alias)
+		if err != nil {
+			return l, err
+		}
+		l.out = upstreamOutbound{Protocol: "socks", Settings: p}
+		if strings.HasPrefix(scheme, "http") {
+			l.out.Protocol = "http"
+		}
+		if scheme == "socks5+tls" || scheme == "https" {
+			l.out.StreamSettings = &upstreamStream{Security: "tls"}
+		}
+		l.where = net.JoinHostPort(p.Address, strconv.Itoa(p.Port))
+		if p.User != "" {
+			l.secrets = []string{p.User, p.Pass}
+		}
+	case "wireguard":
+		w, err := parseWireGuardURL(rest)
+		if err != nil {
+			return l, err
+		}
+		l.out = upstreamOutbound{Protocol: "wireguard", Settings: w}
+		l.secrets = []string{w.SecretKey}
+		ends := make([]string, len(w.Peers))
+		for i, p := range w.Peers {
+			ends[i] = p.Endpoint
+			if p.PreSharedKey != "" {
+				l.secrets = append(l.secrets, p.PreSharedKey)
+			}
+		}
+		l.where = strings.Join(ends, " ")
+	default:
+		return l, errors.New("its scheme is not socks5, socks5+tls, http, https or wireguard")
+	}
+	return l, nil
+}
+
+// wireguardURLKeys maps a wireguard:// URL's query keys to wg-quick's.
+var wireguardURLKeys = map[string]struct{ section, key string }{
+	"address":      {"Interface", "Address"},
+	"mtu":          {"Interface", "MTU"},
+	"publickey":    {"Peer", "PublicKey"},
+	"presharedkey": {"Peer", "PresharedKey"},
+	"allowedips":   {"Peer", "AllowedIPs"},
+	"keepalive":    {"Peer", "PersistentKeepalive"},
+}
+
+// A wireguard:// URL, as apps share one: the private key before the @, the
+// peer's endpoint after it, the rest in the query; a #fragment, an app's name
+// for it, is dropped. It becomes the wg-quick file it stands for, so it is
+// checked by the same rules as $wireguard. A value may not hold a line break,
+// which would add a line of its own to that file.
+func parseWireGuardURL(rest string) (wgSettings, error) {
+	rest, _, _ = strings.Cut(rest, "#")
+	authority, query, _ := strings.Cut(rest, "?")
+	authority = strings.TrimSuffix(authority, "/")
+	at := strings.LastIndexByte(authority, '@')
+	if at < 0 {
+		return wgSettings{}, errors.New("is a wireguard:// URL with no private key before an @")
+	}
+	key, err := url.PathUnescape(authority[:at])
+	if err != nil {
+		return wgSettings{}, errors.New("is a wireguard:// URL whose private key is not percent-encoded correctly")
+	}
+	vals := map[string]string{}
+	for _, kv := range strings.Split(query, "&") {
+		if kv == "" {
+			continue
+		}
+		k, v, _ := strings.Cut(kv, "=")
+		k = strings.ToLower(k)
+		if _, known := wireguardURLKeys[k]; !known {
+			return wgSettings{}, fmt.Errorf("is a wireguard:// URL with %s, which is none of address, mtu, publickey, presharedkey, allowedips and keepalive", safeKey(k))
+		}
+		if _, dup := vals[k]; dup {
+			return wgSettings{}, fmt.Errorf("is a wireguard:// URL with %s twice", k)
+		}
+		if vals[k], err = url.PathUnescape(v); err != nil {
+			return wgSettings{}, fmt.Errorf("is a wireguard:// URL whose %s is not percent-encoded correctly", k)
+		}
+	}
+	if _, ok := vals["allowedips"]; !ok {
+		vals["allowedips"] = "0.0.0.0/0, ::/0"
+	}
+	for _, v := range append([]string{key, authority[at+1:]}, slices.Collect(maps.Values(vals))...) {
+		if strings.ContainsAny(v, "\r\n#") {
+			return wgSettings{}, errors.New("is a wireguard:// URL with a line break or a # in a value")
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "[Interface]\nPrivateKey = %s\n", key)
+	for _, k := range []string{"address", "mtu"} {
+		if v, ok := vals[k]; ok {
+			fmt.Fprintf(&b, "%s = %s\n", wireguardURLKeys[k].key, v)
+		}
+	}
+	fmt.Fprintf(&b, "[Peer]\nEndpoint = %s\n", authority[at+1:])
+	for _, k := range []string{"publickey", "presharedkey", "allowedips", "keepalive"} {
+		if v, ok := vals[k]; ok {
+			fmt.Fprintf(&b, "%s = %s\n", wireguardURLKeys[k].key, v)
+		}
+	}
+	w, err := parseWireGuard(b.String())
+	if err != nil {
+		// Its line numbers are the made-up file's; the key names stand alone.
+		msg := err.Error()
+		if _, after, ok := strings.Cut(msg, ": "); ok && strings.HasPrefix(msg, "line ") {
+			msg = after
+		}
+		return wgSettings{}, errors.New("is a wireguard:// URL whose settings fail: " + msg)
+	}
+	return w, nil
 }
 
 // A key name goes into an error only if it reads as one: a line with no = is

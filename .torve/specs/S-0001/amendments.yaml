@@ -495,22 +495,57 @@ amendments:
         before: 6760c17f2a02c9af/c6970b5335db8cfe
         after: 4eb425a56c81d183/4a272434be8ad094
     md: >-
-      #139 and #153 each moved a version and sat red on the smoke test's
-      version-against-label check until the digest was moved by hand. Renovate
-      reads xray's and mihomo's versions from GitHub releases, because xray
-      publishes its prereleases as image tags of the same form (v26.9.30 among
-      them), so it has no docker datasource to move a digest with. The workflow
-      resolves the new tag's image index and pushes its digest to the branch. A
-      version the branch has not moved is never resolved, so a tag upstream
-      rebuilds with fresh geodata leaves the pin alone, and a branch whose digest
-      already differs from the base's is not resolved again, so a rerun cannot
-      replace the digest CI tested or one pinned by hand. That also makes a
-      partial index stick, so only one holding both platforms is accepted. A
-      push made with `GITHUB_TOKEN` starts no `pull_request` run, and a
-      dispatched `bake.yaml` does not count: rule suite 4967748496 records that
-      #136's merge failed the required check, with "Bake Images (build only)"
-      still expected, and went through by bypass. Hence the app token. `gitIgnoredAuthors` keeps Renovate
-      rebasing a branch that carries the workflow's commit.
+      #139 and #153 each moved a version and sat red on the smoke test's version-against-label
+      check until the digest was moved by hand. Renovate reads xray's and mihomo's
+      versions from GitHub releases, because xray publishes its prereleases as image
+      tags of the same form (v26.9.30 among them), so it has no docker datasource
+      to move a digest with. The workflow resolves the new tag's image index and pushes
+      its digest to the branch. A version the branch has not moved is never resolved,
+      so a tag upstream rebuilds with fresh geodata leaves the pin alone, and a branch
+      whose digest already differs from the base's is not resolved again, so a rerun
+      cannot replace the digest CI tested or one pinned by hand. That also makes a
+      partial index stick, so only one holding both platforms is accepted. A push
+      made with `GITHUB_TOKEN` starts no `pull_request` run, and a dispatched `bake.yaml`
+      does not count: rule suite 4967748496 records that #136's merge failed the required
+      check, with "Bake Images (build only)" still expected, and went through by bypass.
+      Hence the app token. `gitIgnoredAuthors` keeps Renovate rebasing a branch that
+      carries the workflow's commit.
+  - id: A-16
+    at: '2026-11-11T20:08:24Z'
+    title: >-
+      xray resolves one list of upstreams into outbounds ($upstreams)
+    changes:
+      - subject: D-18
+        field: text
+        before: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's and mihomo's servers have none,
+          so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
+          path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}`, `{"$proxy":
+          "<absolute path>"}` or `{"$wireguard": "<absolute path>"}`, and substitute
+          nothing else.
+        after: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's and mihomo's servers have none,
+          so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
+          path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}`, `{"$proxy":
+          "<absolute path>"}`, `{"$wireguard": "<absolute path>"}` or `{"$upstreams":
+          "<absolute path>"}`, and substitute nothing else.
+      - subject: D-18
+        field: fingerprint
+        before: f2199db5ed32310a/9e62c124a404b61d
+        after: 77ed62dbb81e611c/9e62c124a404b61d
+    md: >-
+      dotdash's server is to take any number of ways out, proxies and WireGuard exits
+      alike, in one list it fails over or balances across, rather than a secret and a
+      parameter per kind. `$upstreams` turns one secret file, a URL per line, into an
+      outbounds array whose tags a static config's balancers select by prefix: the
+      first of each group `<group>-0`, the rest `<group>-b<n>`. It reads a proxy as
+      `$proxy` does and a `wireguard://` share link as the wg-quick file it stands for,
+      takes a pin and the deployment's own aliases from the environment, refuses a login
+      there, and names a line in its errors, never a URL.
 editorial:
   - subject: D-5
     field: text
