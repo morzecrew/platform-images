@@ -505,7 +505,7 @@ target "mihomo" {
   labels     = label("mihomo", MIHOMO_VERSION)
   args = {
     MIHOMO_VERSION      = MIHOMO_VERSION
-    MIHOMO_IMAGE_DIGEST = "sha256:9211361a3ed85305383288d38c05e85862d6d5a590c10007c37fc059cca82e9c"
+    MIHOMO_IMAGE_DIGEST = "sha256:4c2495d705f152897a58eac410350f243835fd01ce2fe44949a571faa824d532"
     # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
     GO_VERSION          = "1.27.4"
   }
