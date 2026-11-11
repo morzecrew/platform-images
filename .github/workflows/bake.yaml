@@ -57,6 +57,11 @@ jobs:
       - name: Check bake argument defaults
         run: bash .github/scripts/arg-defaults.sh
 
+      # S-0001/D-23: follow-digest.yaml runs this on Renovate's branches with a
+      # token that can push, so its test runs on every change to it.
+      - name: Test the digest follower
+        run: bash .github/scripts/test-follow-digest.sh
+
       # Driven by targets, not by directories. Iterating images/*/smoke.sh tests
       # one image per directory, which silently skips any target sharing a
       # directory with another -- every postgres extension variant. A target's

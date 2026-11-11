@@ -1,0 +1,59 @@
+name: Follow upstream digest
+
+# Renovate reads xray's and mihomo's versions from GitHub releases, where
+# prereleases are marked, so its pull request moves <P>_VERSION and leaves
+# <P>_IMAGE_DIGEST behind, and the smoke test fails on the version the label
+# names. This puts the new version's index digest on the same branch. A push
+# made with GITHUB_TOKEN starts no pull_request run, so it then dispatches
+# bake.yaml, whose check is the one main requires. See S-0001/D-23.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - images/*/Dockerfile
+
+permissions:
+  contents: read
+
+concurrency:
+  group: follow-digest-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  follow:
+    # Only Renovate's branches in this repository: the job pushes to the head
+    # branch, and a fork's pull request gets no token that could.
+    if: >-
+      github.event.pull_request.user.login == 'renovate[bot]'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    name: Follow upstream digest
+    permissions:
+      contents: write # push the digest
+      actions: write # dispatch bake.yaml
+
+    steps:
+      - name: Checkout the pull request's branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Move each digest whose version moved
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_REF: ${{ github.head_ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          moved="$(bash .github/scripts/follow-digest.sh "${BASE}")"
+          if [ -z "${moved}" ]; then
+            echo "No pinned digest is behind its version."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -qam "⬆️ build(deps): pin the upstream image by its new index digest" -m "${moved}"
+          git push origin "HEAD:${HEAD_REF}"
+          gh workflow run bake.yaml --ref "${HEAD_REF}"
+          printf 'Moved %s\n' "${moved}"

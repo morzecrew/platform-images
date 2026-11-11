@@ -291,9 +291,13 @@ GitHub releases, stable ones only. Upstream's one prerelease,
 
 The upstream image is pinned by digest, `MIHOMO_IMAGE_DIGEST`, because each
 upstream build fetches its geodata from `latest`. Two builds of one tag are not
-the same image. Renovate moves the version and not the digest. Its pull request
-fails `smoke.sh`, which compares the binary's version with the label, until the
-digest is moved in both `docker-bake.hcl` and the `Dockerfile`:
+the same image. Renovate moves the version and not the digest, and
+[`follow-digest.yaml`](../../.github/workflows/follow-digest.yaml) then pushes
+the new version's digest onto its branch, in both `docker-bake.hcl` and the
+`Dockerfile`. A digest is moved only with its version, so a tag upstream
+rebuilds never moves the pin. Until the digest follows, `smoke.sh` fails on the
+version the label names. If upstream has not published the image yet, the
+workflow fails; rerun it once it has, or move the digest by hand:
 
 ```sh
 docker buildx imagetools inspect docker.io/metacubex/mihomo:v<version> \

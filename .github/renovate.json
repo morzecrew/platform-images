@@ -12,6 +12,9 @@
     "automerge": true,
     "platformAutomerge": true,
     "automergeType": "pr",
+    "gitIgnoredAuthors": [
+        "41898282+github-actions[bot]@users.noreply.github.com"
+    ],
     "packageRules": [
         {
             "description": "PR titles, and the squash commits GitHub makes from them, follow gitmoji-conventional: `⬆️ build(deps): update ...`. A rule for every package, because config:recommended's own rules set `chore` and `fix`; Renovate lowercases what follows the prefix. Nothing here produces a pin or a rollback, so neither gets its own emoji.",
