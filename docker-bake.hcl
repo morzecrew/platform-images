@@ -454,7 +454,7 @@ target "pgbouncer" {
 # which is which.
 # renovate: datasource=github-releases depName=XTLS/Xray-core extractVersion=^v(?<version>.+)$
 variable "XRAY_VERSION" {
-  default = "26.10.31"
+  default = "26.11.9"
 }
 
 # Upstream's binary and geodata, pinned by the index digest of
@@ -473,7 +473,7 @@ target "xray" {
   labels     = label("xray", XRAY_VERSION)
   args = {
     XRAY_VERSION      = XRAY_VERSION
-    XRAY_IMAGE_DIGEST = "sha256:ceabeac03a89d991d2a247361825c1d1d2e9c91cd5dc010f298c7dc0c2f325c9"
+    XRAY_IMAGE_DIGEST = "sha256:9812e382e229e9ed63fd179bf1a4e3fe244c12ff3ae4fd8128745d79c87575ab"
     # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
     GO_VERSION        = "1.27.4"
   }

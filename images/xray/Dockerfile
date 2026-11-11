@@ -4,13 +4,13 @@
 # version form, as image tags too, so the version comes from GitHub releases,
 # where they are marked.
 # renovate: datasource=github-releases depName=XTLS/Xray-core extractVersion=^v(?<version>.+)$
-ARG XRAY_VERSION=26.10.31
+ARG XRAY_VERSION=26.11.9
 # The image index digest of ghcr.io/xtls/xray-core:${XRAY_VERSION}. Upstream
 # rebuilds a tag when a prerelease is promoted and on a manual dispatch, and
 # each build fetches its geodata from `latest`; the digest is what makes a
 # rebuild here ship the same geoip.dat and geosite.dat. Moved by hand with the
 # version -- see docker-bake.hcl.
-ARG XRAY_IMAGE_DIGEST=sha256:ceabeac03a89d991d2a247361825c1d1d2e9c91cd5dc010f298c7dc0c2f325c9
+ARG XRAY_IMAGE_DIGEST=sha256:9812e382e229e9ed63fd179bf1a4e3fe244c12ff3ae4fd8128745d79c87575ab
 # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
 ARG GO_VERSION=1.27.4
 
