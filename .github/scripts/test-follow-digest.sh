@@ -19,18 +19,28 @@ fail() {
 	exit 1
 }
 
-# Prints NEW for v1.1.0, or REBUILT once upstream has rebuilt that tag,
-# something that is not a digest for v1.3.0, and fails for anything else, as a
-# registry does for a tag not yet published.
+# Prints the image index of each tag as `docker buildx imagetools inspect`
+# does: NEW for v1.1.0, or REBUILT once upstream has rebuilt that tag; an
+# answer that is not JSON for v1.3.0; an index holding amd64 alone for v1.4.0;
+# an index whose digest is not one for v1.5.0. It fails for anything else, as
+# a registry does for a tag not yet published.
 cat >"${WORK}/resolve" <<EOF
 #!/bin/sh
 echo "\$1" >>"${WORK}/asked"
-[ "\$1" = "example.org/demo:v1.3.0" ] && { echo "<html>rate limited</html>"; exit 0; }
-[ "\$1" = "example.org/demo:v1.1.0" ] || exit 1
-if [ -f "${WORK}/rebuilt" ]; then echo "${REBUILT}"; else echo "${NEW}"; fi
+amd64='{"platform":{"os":"linux","architecture":"amd64"}}'
+arm64='{"platform":{"os":"linux","architecture":"arm64"}}'
+index() { printf '{"mediaType":"application/vnd.oci.image.index.v1+json","digest":"%s","manifests":[%s]}\\n' "\$1" "\$2"; }
+case "\$1" in
+example.org/demo:v1.1.0)
+	if [ -f "${WORK}/rebuilt" ]; then index "${REBUILT}" "\$amd64,\$arm64"; else index "${NEW}" "\$amd64,\$arm64"; fi ;;
+example.org/demo:v1.3.0) echo "<html>rate limited</html>" ;;
+example.org/demo:v1.4.0) index "${REBUILT}" "\$amd64" ;;
+example.org/demo:v1.5.0) index "latest/&" "\$amd64,\$arm64" ;;
+*) exit 1 ;;
+esac
 EOF
 chmod +x "${WORK}/resolve"
-export RESOLVE_DIGEST="${WORK}/resolve"
+export RESOLVE_INDEX="${WORK}/resolve"
 
 cd "${WORK}"
 mkdir -p repo/images/demo repo/images/plain
@@ -93,14 +103,20 @@ fi
 grep -q "cannot resolve example.org/demo:v1.2.0" "${WORK}/err" || fail "unpublished: $(cat "${WORK}/err")"
 git diff --quiet || fail "an unpublished tag changed the tree"
 
-# Whatever the registry answers is written into two files only if it is a
-# digest.
-pin 1.3.0 "${NEW}"
-git commit -qam garbled
-if bash "${SCRIPT}" HEAD~1 2>"${WORK}/err"; then
-	fail "an answer that is not a digest exited zero"
-fi
-grep -q "which is not an image digest" "${WORK}/err" || fail "garbled: $(cat "${WORK}/err")"
-git diff --quiet || fail "an answer that is not a digest changed the tree"
+# Whatever the registry answers is written into two files only if it is an
+# index holding both platforms every target is built for, under a digest. The
+# digest is resolved once per branch, so a partial index would stick.
+expect_refusal() { # <version> <what> <message>
+	pin "$1" "${NEW}"
+	git commit -qam "$1"
+	if bash "${SCRIPT}" HEAD~1 2>"${WORK}/err"; then
+		fail "$2 exited zero"
+	fi
+	grep -q "$3" "${WORK}/err" || fail "$2: $(cat "${WORK}/err")"
+	git diff --quiet || fail "$2 changed the tree"
+}
+expect_refusal 1.3.0 "an answer that is not JSON" "is not an image index holding linux/amd64 and linux/arm64"
+expect_refusal 1.4.0 "an index without arm64" "is not an image index holding linux/amd64 and linux/arm64"
+expect_refusal 1.5.0 "an index whose digest is not one" "which is not an image digest"
 
 echo "ok: follow-digest moves a digest only with its version, and only to a published one"
