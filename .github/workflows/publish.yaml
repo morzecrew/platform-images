@@ -190,7 +190,14 @@ jobs:
           ref="${repo}@${digest}"
           echo "${TARGET}: ${ref}"
 
-          podman pull "${ref}"
+          # ghcr.io can answer `manifest unknown` for a digest pushed a moment
+          # ago, and one failed leg cancels every other.
+          for attempt in 1 2 3 4 5; do
+            podman pull "${ref}" && break
+            [ "${attempt}" -lt 5 ] || exit 1
+            echo "::warning::${ref} is not readable yet, retrying in $((attempt * 5))s"
+            sleep "$((attempt * 5))"
+          done
           bash "${script}" "${ref}"
 
           # Written only after the smoke test passed, so promote never sees a
