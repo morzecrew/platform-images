@@ -6,6 +6,9 @@ down. Before openvpn starts, the entrypoint swaps each default route for host
 routes to the servers the config names. So the namespace has no way out but
 the tunnel, on the first start too, before openvpn has routed anything into
 it. A healthcheck passes only while traffic is routed into the tunnel.
+Given an upstreams list instead, it runs a tunnel for each `openvpn://` line,
+each on its own device, for a proxy beside it to dial out through one at a
+time ([Several tunnels](#several-tunnels-from-an-upstreams-list)).
 
 openvpn is Alpine's package, unchanged. The image adds a POSIX sh entrypoint,
 `/usr/local/bin/openvpn-entrypoint`, on the shared `envconf.sh`.
@@ -16,8 +19,8 @@ openvpn is Alpine's package, unchanged. The image adds a POSIX sh entrypoint,
 | Tag | the version of Alpine's `openvpn` package |
 | User | root: openvpn needs `NET_ADMIN` for its tun device and routes, and the kill switch for its routes |
 | Base | `alpine:3.22`, floating within the release |
-| Config | one client config at `OPENVPN_CONFIG` (`/etc/openvpn/client.conf`), mounted read-only |
-| Writes | nothing but openvpn's temporary directory, `/dev/shm`, so a read-only root works as it is |
+| Config | one client config at `OPENVPN_CONFIG` (`/etc/openvpn/client.conf`), mounted read-only, or an upstreams list at `OPENVPN_UPSTREAMS` |
+| Writes | nothing but openvpn's temporary directory, `/dev/shm`, and a list's decoded configs there, so a read-only root works as it is |
 | Logs | openvpn's log, which `docker logs` shows |
 
 This image meets neither route of the
@@ -59,6 +62,52 @@ user
 password
 </auth-user-pass>
 ```
+
+## Several tunnels from an upstreams list
+
+`OPENVPN_UPSTREAMS` names an upstreams list, the file the
+[xray image's `$upstreams`](../xray/README.md#any-number-of-upstreams-from-one-list)
+reads, in place of `OPENVPN_CONFIG`. Each line whose URL is `openvpn://`
+holds a client config, gzipped, then base64url-encoded (padding optional),
+and runs as a tunnel of its own:
+
+```sh
+printf 'openvpn://%s name=vpn-a\n' "$(gzip -c client.ovpn | base64 -w0 | tr '+/' '-_' | tr -d '=')"
+```
+
+```yaml
+services:
+  vpn:
+    image: ghcr.io/morzecrew/openvpn:2.6.20
+    cap_add: [NET_ADMIN]
+    devices: [/dev/net/tun]
+    read_only: true
+    # Nothing routes into these tunnels, so the filter would drop their replies.
+    sysctls: {net.ipv4.conf.all.rp_filter: 0, net.ipv4.conf.default.rp_filter: 0}
+    environment:
+      OPENVPN_UPSTREAMS: /run/secrets/upstreams
+    secrets: [upstreams]
+```
+
+- The k-th line naming `openvpn`, counting from 0 in the file's order, runs
+  on `tun<k>`. The xray image counts the same lines for an alias's ports, so
+  with `XRAY_UPSTREAM_ALIASES=openvpn=socks5://vpn:1080` the k-th line dials
+  `vpn:1080+k`, where a proxy beside this container sends what it is given
+  into `tun<k>`. Other lines are skipped. A tunnel whose servers don't
+  resolve doesn't start, and keeps its number.
+- No tunnel takes the default route: each openvpn ignores the server's
+  `redirect-gateway`, which would claim every destination for one tunnel. What
+  dials out binds to a tunnel's device (`SO_BINDTODEVICE`, Xray's
+  `sockopt.interface`), and the kernel sends a socket bound to a device out of
+  it, with a route there or not. IPv6 needs a route the server pushes.
+- Reverse-path filtering must be off. The replies come from addresses no
+  route leads back to, so the filter drops them. `/proc/sys` is read-only in a
+  container, so the runtime sets it: `sysctls` as above. Otherwise the
+  entrypoint refuses to start.
+- Each openvpn has its own supervisor, which starts it again when it exits,
+  as for one tunnel. The decoded configs are in `/dev/shm/openvpn`, a
+  directory only root reads, and never in the log.
+- The kill switch pins every tunnel's servers. The rest of it is as below.
 
 ## The kill switch
 
@@ -140,6 +189,15 @@ problem, never the config's contents:
 - `daemon`, `log`, `log-append` or `syslog`, each of which would take
   openvpn's log away from the container's output.
 
+With a list, these are refused too. The message names the line, never its
+contents:
+
+- `OPENVPN_CONFIG` set as well;
+- no `openvpn://` line, or a bare `openvpn` with no config after it;
+- a line that is not a gzipped config in base64url, or whose config fails
+  the checks above;
+- reverse-path filtering on (`rp_filter` not 0 in `all` and `default`).
+
 Without `NET_ADMIN`, the route changes fail and it exits 78 saying so.
 
 ## Healthcheck
@@ -152,11 +210,16 @@ It exits 0 when the catch-all route leads to a tun device that is up: both
 halves of openvpn's `def1` pair, `0.0.0.0/1` and `128.0.0.0/1`, to the same
 device, or else a default route. Otherwise it exits 1, with the reason.
 
+With a list, it exits 0 while any tunnel's device is up with an address, and
+names each: `healthy: up: tun0 tun1; down: tun2`. `healthcheck <k>` checks
+`tun<k>` alone. As for one tunnel, it can't tell a live server from a dead one.
+
 ## Environment
 
 | Name | Default | |
 |---|---|---|
 | `OPENVPN_CONFIG` | `/etc/openvpn/client.conf` | the client config, an absolute path |
+| `OPENVPN_UPSTREAMS` | unset | an upstreams list, an absolute path: a tunnel for each `openvpn://` line, in place of `OPENVPN_CONFIG` |
 
 An unknown `OPENVPN_*` name warns. openvpn itself reads no environment
 variable.
@@ -198,5 +261,5 @@ package that release ships.
 | Path | |
 |---|---|
 | `Dockerfile` | Alpine, openvpn and iproute2, the version check, the entrypoint |
-| `rootfs/entrypoint.sh` | the checks, the kill switch, openvpn started again when it exits, the healthcheck |
-| `smoke.sh` | refusals, then the kill switch against a stand-in server: a fresh start with it down, the tunnel up, openvpn killed and started again in place, the server gone again, and a stop |
+| `rootfs/entrypoint.sh` | the checks, the kill switch, openvpn started again when it exits, a list's tunnels, the healthcheck |
+| `smoke.sh` | refusals, then the kill switch against a stand-in server: a fresh start with it down, the tunnel up, openvpn killed and started again in place, the server gone again, and a stop; then a list of three tunnels, two up and one dead, each reached through its device |

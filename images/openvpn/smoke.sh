@@ -29,7 +29,7 @@ READ_ONLY=(--read-only)
 [ "${ENGINE##*/}" != podman ] || READ_ONLY+=(--read-only-tmpfs=false --tmpfs /dev/shm:rw,size=1m)
 
 cleanup() {
-	"${ENGINE}" rm -f "${CLI}" "${SRV}" "${TGT}" >/dev/null 2>&1 || true
+	"${ENGINE}" rm -f "${TAG}-client" "${TAG}-list" "${SRV}" "${TGT}" >/dev/null 2>&1 || true
 	"${ENGINE}" network rm "${RIG}" "${FAR}" >/dev/null 2>&1 || true
 	rm -rf "${WORK}"
 }
@@ -99,6 +99,23 @@ log /tmp/openvpn.log" "${NET_ADMIN[@]}"
 refuse "no tun device" "/dev/net/tun is missing" "$(client_conf "remote 192.0.2.1 1194")" --cap-add NET_ADMIN
 refuse "a relative OPENVPN_CONFIG" "not an absolute path" "" -e OPENVPN_CONFIG=client.conf "${NET_ADMIN[@]}"
 
+# A list: each openvpn:// line holds a config, gzipped, then base64url.
+enc() { gzip -c | base64 -w0 | tr '+/' '-_' | tr -d '='; }
+# Nothing routes into a list's tunnels, so reverse-path filtering, which
+# would drop their replies, has to be off.
+NO_RP=(--sysctl net.ipv4.conf.all.rp_filter=0 --sysctl net.ipv4.conf.default.rp_filter=0)
+LIST=(-e OPENVPN_UPSTREAMS=/etc/openvpn/client.conf "${NET_ADMIN[@]}" "${NO_RP[@]}")
+refuse "a config and a list" "are both set" "" -e OPENVPN_CONFIG=/etc/openvpn/client.conf "${LIST[@]}"
+refuse "a list with reverse-path filtering" "reverse-path filtering is on (rp_filter all and default: 02)" "" \
+	-e OPENVPN_UPSTREAMS=/etc/openvpn/client.conf "${NET_ADMIN[@]}" --sysctl net.ipv4.conf.all.rp_filter=0 --sysctl net.ipv4.conf.default.rp_filter=2
+refuse "a list with no openvpn line" "has no openvpn:// line" "socks5://proxy.example:1080 name=p" "${LIST[@]}"
+refuse "a bare openvpn line" "line 2 of /etc/openvpn/client.conf names openvpn and holds no config" "# the ways out
+openvpn name=vpn" "${LIST[@]}"
+refuse "a line that is not base64url" "line 1 of /etc/openvpn/client.conf is not openvpn:// and a config" "openvpn://not*base64" "${LIST[@]}"
+refuse "a line not gzipped" "line 1 of /etc/openvpn/client.conf is not openvpn:// and a config" "openvpn://$(client_conf "remote 192.0.2.1 1194" | base64 -w0 | tr '+/' '-_')" "${LIST[@]}"
+refuse "a line whose config has a log file" "line 2 of /etc/openvpn/client.conf has \`log\`" "openvpn://$(client_conf "remote 192.0.2.1 1194" | enc) name=a
+openvpn://$(printf '%s\nlog /tmp/x\n' "$(client_conf "remote 192.0.2.1 1194")" | enc) name=b" "${LIST[@]}"
+
 # An inline login is accepted: it gets as far as the kill switch, which needs
 # NET_ADMIN this run lacks.
 refuse "an inline login without NET_ADMIN" "needs NET_ADMIN" "$(client_conf "remote 192.0.2.1 1194")
@@ -127,7 +144,7 @@ smoke-pass
 	--sysctl net.ipv4.ip_forward=1 -v "${WORK}:/pki:ro" --entrypoint sh "${IMAGE}" -c "
 	ip addr add ${SRV_VPN}/32 dev eth0 && exec openvpn --dev tun --proto udp --port 1194 --multihome \
 		--topology subnet --server 10.8.0.0 255.255.255.0 --ca /pki/ca.crt --cert /pki/server.crt \
-		--key /pki/server.key --dh none --push 'redirect-gateway def1' --keepalive 5 15 --verb 3" >/dev/null
+		--key /pki/server.key --dh none --push 'redirect-gateway def1' --keepalive 5 15 --duplicate-cn --verb 3" >/dev/null
 "${ENGINE}" network connect --ip "${SRV_FAR}" "${FAR}" "${SRV}"
 
 # The target, on the far network alone, routing the tunnel's subnet back.
@@ -253,5 +270,73 @@ took=$(($(date +%s) - t0))
 code="$("${ENGINE}" inspect -f '{{.State.ExitCode}}' "${CLI}")"
 [ "${code}" = 0 ] || fail "the client exited with ${code} on a stop"
 echo "ok: a stop ends openvpn and the entrypoint at once, with 0"
+
+# --- 10. a list: a tunnel for each openvpn:// line ----------------------------
+
+# Two tunnels to the server, which takes one certificate twice (duplicate-cn),
+# and a third to an address where nothing answers. Each runs on the device of
+# its line, none takes the default route the server pushes, and what binds to
+# a tunnel's device leaves through it alone.
+LCLI="${TAG}-list"
+up="$(client_conf "remote vpn.smoke 1194" | enc)"
+{
+	echo "# a proxy line, which the tunnels skip"
+	echo "socks5://proxy.example:1080 name=p"
+	echo "openvpn://${up} name=a"
+	echo "openvpn://${up} name=b group=upstream,ipv6"
+	echo "openvpn://$(client_conf "remote 192.0.2.1 1194" | enc) name=dead"
+} >"${WORK}/upstreams"
+CLI="${LCLI}"
+"${ENGINE}" start "${SRV}" >/dev/null
+"${ENGINE}" run -d --name "${LCLI}" --network "${RIG}" "${NET_ADMIN[@]}" "${NO_RP[@]}" --cap-add NET_RAW "${READ_ONLY[@]}" \
+	--add-host "vpn.smoke:${SRV_VPN}" -v "${WORK}/upstreams:/run/secrets/upstreams:ro" \
+	-e OPENVPN_UPSTREAMS=/run/secrets/upstreams --entrypoint sh "${IMAGE}" -c "
+	ip route replace default via ${SRV_IP} && exec /usr/local/bin/openvpn-entrypoint run" >/dev/null
+for _ in $(seq 1 120); do
+	[ "$(connects)" -ge 2 ] && break
+	sleep 1
+done
+[ "$(connects)" -ge 2 ] || fail "the list's two tunnels to the server did not both connect"
+logged "tunnels = tun0 (line 3), tun1 (line 4), tun2 (line 5)" || fail "the summary does not list the tunnels by line"
+[ "$(in_client stat -c %a /dev/shm/openvpn)" = 700 ] || fail "the decoded configs are not in a directory root's alone"
+no_way_out "a list's tunnels up"
+[ -z "$(in_client ip -4 route show 0.0.0.0/1)" ] || fail "a tunnel took the default route its server pushed"
+for dev in tun0 tun1; do
+	in_client ping -c 1 -W 3 -I "${dev}" "${TGT_IP}" >/dev/null 2>&1 || fail "the far target did not answer through ${dev}"
+done
+in_client ping -c 1 -W 2 "${TGT_IP}" >/dev/null 2>&1 && fail "the far target answered with no tunnel's device bound"
+in_client ping -c 1 -W 2 -I tun2 "${TGT_IP}" >/dev/null 2>&1 && fail "the far target answered through the tunnel that never connected"
+echo "ok: a list: each tunnel on its line's device, no default route, the target reached through each device bound"
+out="$(in_client /usr/local/bin/openvpn-entrypoint healthcheck 2>&1)" || fail "unhealthy with two of three tunnels up: ${out}"
+[ "${out}" = "healthy: up: tun0 tun1; down: tun2" ] || fail "the healthcheck does not name each tunnel: ${out}"
+in_client /usr/local/bin/openvpn-entrypoint healthcheck 1 >/dev/null || fail "tun1 is not healthy"
+in_client /usr/local/bin/openvpn-entrypoint healthcheck 2 >/dev/null 2>&1 && fail "tun2 is healthy with nothing behind it"
+echo "ok: a list: healthy while a tunnel is up, and each tunnel's own healthcheck"
+
+# One openvpn killed: its supervisor starts it again, on its device, and the
+# other tunnel carries traffic meanwhile.
+before="$(connects)"
+in_client pkill -KILL -f -- "--dev tun1 "
+for _ in $(seq 1 10); do
+	logged "openvpn on tun1 (line 4) exited with" && break
+	sleep 1
+done
+logged "openvpn on tun1 (line 4) exited with" || fail "the supervisor did not notice tun1's openvpn exit"
+in_client ping -c 1 -W 3 -I tun0 "${TGT_IP}" >/dev/null 2>&1 || fail "tun0 stopped carrying traffic when tun1's openvpn died"
+for _ in $(seq 1 60); do
+	[ "$(connects)" -gt "${before}" ] && break
+	sleep 1
+done
+[ "$(connects)" -gt "${before}" ] || fail "tun1's openvpn did not connect again"
+in_client ping -c 1 -W 3 -I tun1 "${TGT_IP}" >/dev/null 2>&1 || fail "the far target did not answer through tun1 once it was back"
+echo "ok: a list: one openvpn killed comes back on its device, and the other tunnel carried on"
+
+case "$("${ENGINE}" logs "${LCLI}" 2>&1)" in *"${KEY_LINE}"* | *"${up:20:40}"*) fail "a key or a line reached the list client's log" ;; esac
+t0="$(date +%s)"
+"${ENGINE}" stop -t 20 "${LCLI}" >/dev/null
+took=$(($(date +%s) - t0))
+[ "${took}" -lt 10 ] || fail "stopping the list client took ${took} s"
+[ "$("${ENGINE}" inspect -f '{{.State.ExitCode}}' "${LCLI}")" = 0 ] || fail "the list client exited non-zero on a stop"
+echo "ok: a list: no key in its log, and a stop ends every tunnel at once, with 0"
 
 echo "PASS: openvpn smoke (${IMAGE})"
