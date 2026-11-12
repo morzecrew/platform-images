@@ -577,12 +577,39 @@ amendments:
     md: >-
       #161 adds caddy-acmedns, upstream's Caddy with caddy-dns/acmedns built in, so
       dotdash's server and relays can take wildcard certificates, which keep their
-      hostnames out of the Certificate Transparency logs, through a DNS-01 check
-      delegated by CNAME to acme-dns. Only dotdash uses it, which meets neither
-      route, so the owner admitted it as with xray, mihomo and openvpn, and
-      images/README.md records it under "Admissions on record". It is not a variant
-      of caddy, which brings Coraza, CRS and a platform Caddyfile this use does not
-      want.
+      hostnames out of the Certificate Transparency logs, through a DNS-01 check delegated
+      by CNAME to acme-dns. Only dotdash uses it, which meets neither route, so the
+      owner admitted it as with xray, mihomo and openvpn, and images/README.md records
+      it under "Admissions on record". It is not a variant of caddy, which brings
+      Coraza, CRS and a platform Caddyfile this use does not want.
+  - id: A-18
+    at: '2026-11-12T21:27:18Z'
+    title: >-
+      caddy-acmedns has neither configuration channel, as recorded
+    changes:
+      - subject: D-12
+        field: text
+        before: >-
+          Configuration comes through two channels: curated `<PREFIX>_<NAME>` and
+          passthrough `<PREFIX>_CONF__<key>`. An upstream name is never intercepted.
+          caddy has no passthrough, so `CADDY_CONF__*` is reported, and its nine unprefixed
+          names work as aliases with a warning.
+        after: >-
+          Configuration comes through two channels: curated `<PREFIX>_<NAME>` and
+          passthrough `<PREFIX>_CONF__<key>`. An upstream name is never intercepted.
+          caddy has no passthrough, so `CADDY_CONF__*` is reported, and its nine unprefixed
+          names work as aliases with a warning. caddy-acmedns has neither and no entrypoint:
+          it is upstream's image with one module built in, configured by its Caddyfile
+          alone, which reads the environment through Caddy's own `{$VAR}` expansion.
+      - subject: D-12
+        field: fingerprint
+        after: 33ca9c3c7f669658/34b25846faafccd6
+    md: >-
+      CodeRabbit on #162: D-12 names two channels and caddy's way of having one, and
+      caddy-acmedns has neither. It is upstream's Caddy with one module and no
+      entrypoint, configured as upstream's image is, by its Caddyfile and Caddy's
+      own {$VAR} expansion, so the row records it as an exception rather than the
+      image growing channels nothing would use.
 editorial:
   - subject: D-5
     field: text

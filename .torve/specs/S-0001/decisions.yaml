@@ -165,7 +165,9 @@ decisions:
       Configuration comes through two channels: curated `<PREFIX>_<NAME>` and passthrough
       `<PREFIX>_CONF__<key>`. An upstream name is never intercepted. caddy has no
       passthrough, so `CADDY_CONF__*` is reported, and its nine unprefixed names work
-      as aliases with a warning.
+      as aliases with a warning. caddy-acmedns has neither and no entrypoint: it is
+      upstream's image with one module built in, configured by its Caddyfile alone,
+      which reads the environment through Caddy's own `{$VAR}` expansion.
     paths:
       - shared/rootfs/lib/envconf.sh
       - images/*/rootfs/entrypoint.sh
@@ -176,6 +178,7 @@ decisions:
     rationale: >-
       RFC 0001 rows 1 and 20 (LOCKED) and 22 (ASSUMED). Defended: D022, a conflict
       inside the RFC that the author decided at the plan gate.
+    fingerprint: 33ca9c3c7f669658/34b25846faafccd6
   - id: D-13
     grade: ASSUMED
     text: >-

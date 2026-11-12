@@ -39,7 +39,7 @@ A smoke script takes one image reference, exits non-zero on failure and runs und
 
 ### S-0001/D-12 — `ASSUMED` (Standing decisions)
 
-Configuration comes through two channels: curated `<PREFIX>_<NAME>` and passthrough `<PREFIX>_CONF__<key>`. An upstream name is never intercepted. caddy has no passthrough, so `CADDY_CONF__*` is reported, and its nine unprefixed names work as aliases with a warning.
+Configuration comes through two channels: curated `<PREFIX>_<NAME>` and passthrough `<PREFIX>_CONF__<key>`. An upstream name is never intercepted. caddy has no passthrough, so `CADDY_CONF__*` is reported, and its nine unprefixed names work as aliases with a warning. caddy-acmedns has neither and no entrypoint: it is upstream's image with one module built in, configured by its Caddyfile alone, which reads the environment through Caddy's own `{$VAR}` expansion.
 
 - Paths: `shared/rootfs/lib/envconf.sh` `images/*/rootfs/entrypoint.sh` `images/*/README.md`
 - Consequence: an operator configures every image the same way, and an upstream variable keeps its upstream meaning
