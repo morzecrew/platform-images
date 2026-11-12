@@ -95,11 +95,14 @@ services:
   `vpn:1080+k`, where a proxy beside this container sends what it is given
   into `tun<k>`. Other lines are skipped. A tunnel whose servers don't
   resolve doesn't start, and keeps its number.
-- No tunnel takes the default route: each openvpn ignores the server's
-  `redirect-gateway`, which would claim every destination for one tunnel. What
-  dials out binds to a tunnel's device (`SO_BINDTODEVICE`, Xray's
-  `sockopt.interface`), and the kernel sends a socket bound to a device out of
-  it, with a route there or not. IPv6 needs a route the server pushes.
+- No tunnel takes a route. What dials out binds to a tunnel's device
+  (`SO_BINDTODEVICE`, Xray's `sockopt.interface`), and the kernel sends a
+  socket bound to a device out of it, with an IPv4 route there or not. So each
+  openvpn ignores the IPv4 routes its server pushes, `redirect-gateway` and
+  `route` alike, which would claim destinations, the default among them, for
+  one tunnel. IPv6 has no such rule, so it needs a route the server pushes
+  (`route-ipv6`), which stays. A config's own `route` or `redirect-gateway`
+  still applies, and sends what binds to no device into that tunnel.
 - Reverse-path filtering must be off. The replies come from addresses no
   route leads back to, so the filter drops them. `/proc/sys` is read-only in a
   container, so the runtime sets it: `sysctls` as above. Otherwise the

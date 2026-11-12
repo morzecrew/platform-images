@@ -317,14 +317,17 @@ supervise() {
 
 # A list: an openvpn for each tunnel, on the device of its line, tun0 for the
 # first openvpn:// line whether or not it started, each with a supervisor of
-# its own. None takes the default route, which a server's redirect-gateway
-# would claim for its own tunnel alone. What dials out binds to a tunnel's
-# device (SO_BINDTODEVICE), and the kernel sends a socket bound to a device
-# out of that device, with a route there or not.
+# its own. What dials out binds to a tunnel's device (SO_BINDTODEVICE), and
+# the kernel sends a socket bound to a device out of that device, with an
+# IPv4 route there or not. So each ignores the IPv4 routes its server pushes,
+# redirect-gateway and plain route alike, which would claim destinations,
+# the default among them, for its own tunnel. IPv6 has no such rule, so a
+# pushed route-ipv6 stays.
 pids=""
 while read -r dev n f; do
 	[ -n "${dev}" ] || continue
-	supervise "openvpn on ${dev} (line ${n})" "${f}" --dev "${dev}" --dev-type tun --pull-filter ignore redirect-gateway &
+	supervise "openvpn on ${dev} (line ${n})" "${f}" --dev "${dev}" --dev-type tun \
+		--pull-filter ignore redirect-gateway --pull-filter ignore "route " &
 	pids="${pids} $!"
 done <<EOF
 ${tunnels}

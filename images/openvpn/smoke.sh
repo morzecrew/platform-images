@@ -144,7 +144,8 @@ smoke-pass
 	--sysctl net.ipv4.ip_forward=1 -v "${WORK}:/pki:ro" --entrypoint sh "${IMAGE}" -c "
 	ip addr add ${SRV_VPN}/32 dev eth0 && exec openvpn --dev tun --proto udp --port 1194 --multihome \
 		--topology subnet --server 10.8.0.0 255.255.255.0 --ca /pki/ca.crt --cert /pki/server.crt \
-		--key /pki/server.key --dh none --push 'redirect-gateway def1' --keepalive 5 15 --duplicate-cn --verb 3" >/dev/null
+		--key /pki/server.key --dh none --push 'redirect-gateway def1' --push 'route 203.0.113.0 255.255.255.0' \
+		--keepalive 5 15 --duplicate-cn --verb 3" >/dev/null
 "${ENGINE}" network connect --ip "${SRV_FAR}" "${FAR}" "${SRV}"
 
 # The target, on the far network alone, routing the tunnel's subnet back.
@@ -201,6 +202,9 @@ logged "Initialization Sequence Completed" || fail "the client never connected"
 [ "$(far)" = far-only ] || fail "the far target did not answer through the tunnel"
 in_client /usr/local/bin/openvpn-entrypoint healthcheck >/dev/null || fail "unhealthy with the tunnel up"
 no_way_out "tunnel up"
+# One tunnel takes the routes its server pushes, so a list's ignoring them
+# (section 10) is the list's own doing.
+[ -n "$(in_client ip -4 route show 203.0.113.0/24)" ] || fail "the route the server pushes is not in the one tunnel's table"
 echo "ok: with the server up, the target only the tunnel reaches answers, and the healthcheck passes"
 # Half of def1 gone: the healthcheck wants both halves in the tunnel.
 in_client ip route del 128.0.0.0/1
@@ -275,8 +279,8 @@ echo "ok: a stop ends openvpn and the entrypoint at once, with 0"
 
 # Two tunnels to the server, which takes one certificate twice (duplicate-cn),
 # and a third to an address where nothing answers. Each runs on the device of
-# its line, none takes the default route the server pushes, and what binds to
-# a tunnel's device leaves through it alone.
+# its line, none takes the routes the server pushes, the default or another,
+# and what binds to a tunnel's device leaves through it alone.
 LCLI="${TAG}-list"
 up="$(client_conf "remote vpn.smoke 1194" | enc)"
 {
@@ -301,6 +305,7 @@ logged "tunnels = tun0 (line 3), tun1 (line 4), tun2 (line 5)" || fail "the summ
 [ "$(in_client stat -c %a /dev/shm/openvpn)" = 700 ] || fail "the decoded configs are not in a directory root's alone"
 no_way_out "a list's tunnels up"
 [ -z "$(in_client ip -4 route show 0.0.0.0/1)" ] || fail "a tunnel took the default route its server pushed"
+[ -z "$(in_client ip -4 route show 203.0.113.0/24)" ] || fail "a tunnel took a route its server pushed"
 for dev in tun0 tun1; do
 	in_client ping -c 1 -W 3 -I "${dev}" "${TGT_IP}" >/dev/null 2>&1 || fail "the far target did not answer through ${dev}"
 done
