@@ -305,7 +305,7 @@ however many, is one secret in order of preference:
 socks5://alice:secret@proxy.example:1080            name=isp-a
 https://bob:secret@203.0.113.9:8443                 name=isp-b
 wireguard://<private key>@vpn.example:51820?publickey=<base64>&address=10.34.0.3/32,fd30:2::3/128 name=home group=upstream,ipv6
-openvpn                                             name=vpn
+openvpn://H4sIAAAAAAAAA…                            name=vpn
 socks5://carol:secret@[2001:db8::9]:1080            name=isp-c6 group=ipv6
 ```
 
@@ -336,7 +336,7 @@ static config routes to tags it never spells out:
 | `http://[user:pass@]host:port` | `http` |
 | `https://[user:pass@]host:port` | `http` over TLS |
 | `wireguard://<private key>@host:port?<query>` | `wireguard`, as from a wg-quick file |
-| a word, such as `openvpn` | the URL `XRAY_UPSTREAM_ALIASES` gives it |
+| a word, such as `openvpn`, alone or as the scheme of `openvpn://<anything>` | the URL `XRAY_UPSTREAM_ALIASES` gives it, its port moved up one for each earlier line naming the word |
 
 - **Tags.** A line's group is `upstream` unless `group=` names others, and a line
   in two groups becomes two outbounds. In each group the first line is tagged
@@ -360,7 +360,15 @@ static config routes to tags it never spells out:
   names hops the deployment defines, such as the SOCKS port of a tunnel
   beside the container (`openvpn=socks5://vpn:1080`). A host there may lack a
   dot, as a service name does. An alias holds no login, because the
-  environment is shown at start and by `docker inspect`.
+  environment is shown at start and by `docker inspect`. A line names the
+  word alone, or as its scheme, with what follows for the hop to read, such
+  as a tunnel's config, which this image never reads or shows. The k-th line
+  naming a word, counting from 0 in the file's order, dials the alias's port
+  plus k, so each tunnel of a sidecar such as the
+  [openvpn image](../openvpn/README.md#several-tunnels-from-an-upstreams-list)
+  has a port of its own. Pins change the outbounds' order, not the ports. A
+  word may not be a scheme a line already has (`socks`, `socks5`, `http`,
+  `https`, `wireguard`).
 - `name=` is 1 to 32 lowercase letters, digits and dashes, starting with a
   letter or a digit; a group is 1 to 16 lowercase letters and digits, starting
   with a letter, and appears once on a line.
@@ -380,7 +388,8 @@ the URL:
   `@`, a query key not listed above or one twice, a line break or `#` in a
   value, or settings `$wireguard` would refuse.
 - A pin no line is named, or two pins in one group; an alias that is not
-  `<word>=<url>`, a word twice, or a login in its URL.
+  `<word>=<url>`, a word twice, a word that is a scheme, or a login in its
+  URL; a line naming a word whose port would pass 65535.
 
 ## VLESS Encryption from one seed
 

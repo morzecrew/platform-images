@@ -744,6 +744,11 @@ func upstreamAliases(env string) (map[string]string, error) {
 		if _, dup := aliases[word]; dup {
 			return nil, fmt.Errorf("XRAY_UPSTREAM_ALIASES names %s twice", word)
 		}
+		// A word is also a scheme (openvpn://...), so it may not take one of
+		// the schemes a line already has.
+		if slices.Contains([]string{"socks", "socks5", "http", "https", "wireguard"}, word) {
+			return nil, fmt.Errorf("XRAY_UPSTREAM_ALIASES defines %s, which is a scheme of its own", word)
+		}
 		// The environment is printed at start and in docker inspect: a login
 		// belongs in the upstreams file, which is a secret.
 		if strings.Contains(u, "@") {
@@ -757,13 +762,14 @@ func upstreamAliases(env string) (map[string]string, error) {
 func parseUpstreams(s string, aliases map[string]string, pin string) ([]upstreamOutbound, []string, string, error) {
 	var lines []upstreamLine
 	names := map[string]int{}
+	counts := map[string]int{}
 	for i, raw := range strings.Split(s, "\n") {
 		n := i + 1
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		l, err := parseUpstreamLine(line, aliases)
+		l, err := parseUpstreamLine(line, aliases, counts)
 		if err != nil {
 			return nil, nil, "", fmt.Errorf("line %d: %v", n, err)
 		}
@@ -845,21 +851,28 @@ func parseUpstreams(s string, aliases map[string]string, pin string) ([]upstream
 	return outs, secrets, strings.Join(notes, ", "), nil
 }
 
-// One non-blank line: a URL or an alias word, then its options. Errors never
-// quote the URL, which may hold credentials.
-func parseUpstreamLine(line string, aliases map[string]string) (upstreamLine, error) {
+// One non-blank line: a URL or an alias word, then its options. An alias word
+// is the line, or its scheme (openvpn://<config>), whose rest is for the hop
+// the alias names, such as a tunnel's config, and is never read here: the k-th
+// line naming a word, k counting from 0 in the file's order (counts), dials
+// the alias's port plus k, so each of a sidecar's tunnels has a port of its
+// own. Errors never quote the URL, which may hold credentials.
+func parseUpstreamLine(line string, aliases map[string]string, counts map[string]int) (upstreamLine, error) {
 	fields := strings.Fields(line)
 	l := upstreamLine{groups: []string{"upstream"}}
-	u, alias := fields[0], false
-	if !strings.Contains(u, "://") {
+	u := fields[0]
+	word, _, isURL := strings.Cut(u, "://")
+	if !isURL {
 		if !upstreamWordRE.MatchString(u) {
 			return l, errors.New("does not start with a URL (socks5://, socks5+tls://, http://, https://, wireguard://) or a word XRAY_UPSTREAM_ALIASES defines")
 		}
-		a, ok := aliases[u]
-		if !ok {
+		if _, ok := aliases[u]; !ok {
 			return l, fmt.Errorf("%s is not a word XRAY_UPSTREAM_ALIASES defines", u)
 		}
-		u, alias = a, true
+	}
+	a, alias := aliases[word]
+	if alias {
+		u = a
 	}
 	seen := map[string]bool{}
 	for _, opt := range fields[1:] {
@@ -895,6 +908,12 @@ func parseUpstreamLine(line string, aliases map[string]string) (upstreamLine, er
 		p, err := parseProxyFrom(rest, alias)
 		if err != nil {
 			return l, err
+		}
+		if alias {
+			if p.Port += counts[word]; p.Port > 65535 {
+				return l, fmt.Errorf("is line %d naming %s, past port 65535", counts[word]+1, word)
+			}
+			counts[word]++
 		}
 		l.out = upstreamOutbound{Protocol: "socks", Settings: p}
 		if strings.HasPrefix(scheme, "http") {

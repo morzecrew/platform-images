@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -725,6 +726,33 @@ http://198.51.100.4:3128
 	}
 }
 
+func TestUpstreamsAliasPorts(t *testing.T) {
+	// The k-th line naming openvpn, bare or as a scheme, dials port 1080+k,
+	// in the file's order, whatever the pins do to the outbounds' order.
+	list := "openvpn://H4sIAAAA-tunnel_zero name=a\nsocks5://proxy.example:1080 name=p\nopenvpn name=b\nopenvpn://H4sIBBBB name=c group=ipv6\n"
+	aliases := map[string]string{"openvpn": "socks5://vpn:1080"}
+	outs, _, note, err := parseUpstreams(list, aliases, "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var have []string
+	for _, o := range outs {
+		p := o.Settings.(proxyServer)
+		have = append(have, fmt.Sprintf("%s %s:%d", o.Tag, p.Address, p.Port))
+	}
+	want := []string{"upstream-0 vpn:1081", "upstream-b1 vpn:1080", "upstream-b2 proxy.example:1080", "ipv6-0 vpn:1082"}
+	if !slices.Equal(have, want) {
+		t.Fatalf("outbounds\n got %v\nwant %v", have, want)
+	}
+	if strings.Contains(note, "H4sI") || !strings.Contains(note, "upstream-0 (b) socks vpn:1081") {
+		t.Errorf("the summary note %q", note)
+	}
+	_, _, _, err = parseUpstreams("x://a\nx://b\n", map[string]string{"x": "socks5://vpn:65535"}, "")
+	if err == nil || !strings.Contains(err.Error(), "line 2: is line 2 naming x, past port 65535") {
+		t.Errorf("err = %v", err)
+	}
+}
+
 func TestUpstreamsRefusals(t *testing.T) {
 	aliases := map[string]string{"openvpn": "socks5://vpn:1080"}
 	wg := "wireguard://" + wgPriv + "@vpn.example:51820?publickey=" + wgPub + "&address=10.34.0.3/32"
@@ -765,7 +793,7 @@ func TestUpstreamsRefusals(t *testing.T) {
 			}
 		})
 	}
-	for _, env := range []string{"openvpn", "openvpn=vpn:1080", "Open=socks5://vpn:1080", "a=socks5://x.example:1 a=socks5://y.example:1", "vpn=socks5://alice:secret@vpn:1080"} {
+	for _, env := range []string{"openvpn", "openvpn=vpn:1080", "Open=socks5://vpn:1080", "a=socks5://x.example:1 a=socks5://y.example:1", "vpn=socks5://alice:secret@vpn:1080", "http=socks5://vpn:1080"} {
 		if _, err := upstreamAliases(env); err == nil {
 			t.Errorf("XRAY_UPSTREAM_ALIASES=%q was taken", env)
 		}
