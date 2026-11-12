@@ -165,7 +165,9 @@ decisions:
       Configuration comes through two channels: curated `<PREFIX>_<NAME>` and passthrough
       `<PREFIX>_CONF__<key>`. An upstream name is never intercepted. caddy has no
       passthrough, so `CADDY_CONF__*` is reported, and its nine unprefixed names work
-      as aliases with a warning.
+      as aliases with a warning. caddy-acmedns has neither and no entrypoint: it is
+      upstream's image with one module built in, configured by its Caddyfile alone,
+      which reads the environment through Caddy's own `{$VAR}` expansion.
     paths:
       - shared/rootfs/lib/envconf.sh
       - images/*/rootfs/entrypoint.sh
@@ -176,6 +178,7 @@ decisions:
     rationale: >-
       RFC 0001 rows 1 and 20 (LOCKED) and 22 (ASSUMED). Defended: D022, a conflict
       inside the RFC that the author decided at the plan gate.
+    fingerprint: 33ca9c3c7f669658/34b25846faafccd6
   - id: D-13
     grade: ASSUMED
     text: >-
@@ -398,11 +401,11 @@ decisions:
     text: >-
       An image is admitted by route 1, hand-rolled in two or more projects, or route
       2, the same upstream run and diverged in two or more; a pair counts once. `xray`,
-      `mihomo` and `openvpn` are the images admitted on neither, by their owner's
-      calls on #125, #140 and #144, and their rows say so. Refusals are recorded under
-      "Admissions on record". An image unused for a year is deleted, its package frozen
-      by default and kept in `PACKAGES`. The annual workflow opens the review issue
-      on 8 January with a consumer scan.
+      `mihomo`, `openvpn` and `caddy-acmedns` are the images admitted on neither,
+      by their owner's calls on #125, #140, #144 and #161, and their rows say so.
+      Refusals are recorded under "Admissions on record". An image unused for a year
+      is deleted, its package frozen by default and kept in `PACKAGES`. The annual
+      workflow opens the review issue on 8 January with a consumer scan.
     paths:
       - images/README.md
       - .github/workflows/annual-image-review.yaml
@@ -413,5 +416,5 @@ decisions:
       RFC 0003 rows 1, 2, 3, 6, 9 and 10 (LOCKED) and 4, 5, 11 and 12 (ASSUMED). Defended:
       A38 (a missing row), R-35 and A48 (the scan searched names that never existed),
       A47.
-    fingerprint: dba2cfc2d7cb5cb4/482c6c960e0d6250
+    fingerprint: ce7f25ebc9d275b3/482c6c960e0d6250
 retired: [D-26]

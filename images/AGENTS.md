@@ -39,7 +39,7 @@ A smoke script takes one image reference, exits non-zero on failure and runs und
 
 ### S-0001/D-12 — `ASSUMED` (Standing decisions)
 
-Configuration comes through two channels: curated `<PREFIX>_<NAME>` and passthrough `<PREFIX>_CONF__<key>`. An upstream name is never intercepted. caddy has no passthrough, so `CADDY_CONF__*` is reported, and its nine unprefixed names work as aliases with a warning.
+Configuration comes through two channels: curated `<PREFIX>_<NAME>` and passthrough `<PREFIX>_CONF__<key>`. An upstream name is never intercepted. caddy has no passthrough, so `CADDY_CONF__*` is reported, and its nine unprefixed names work as aliases with a warning. caddy-acmedns has neither and no entrypoint: it is upstream's image with one module built in, configured by its Caddyfile alone, which reads the environment through Caddy's own `{$VAR}` expansion.
 
 - Paths: `shared/rootfs/lib/envconf.sh` `images/*/rootfs/entrypoint.sh` `images/*/README.md`
 - Consequence: an operator configures every image the same way, and an upstream variable keeps its upstream meaning
@@ -74,7 +74,7 @@ Versions are tracked only through `# renovate:` annotations directly above a `va
 
 ### S-0001/D-25 — `ASSUMED` (Standing decisions)
 
-An image is admitted by route 1, hand-rolled in two or more projects, or route 2, the same upstream run and diverged in two or more; a pair counts once. `xray`, `mihomo` and `openvpn` are the images admitted on neither, by their owner's calls on #125, #140 and #144, and their rows say so. Refusals are recorded under "Admissions on record". An image unused for a year is deleted, its package frozen by default and kept in `PACKAGES`. The annual workflow opens the review issue on 8 January with a consumer scan.
+An image is admitted by route 1, hand-rolled in two or more projects, or route 2, the same upstream run and diverged in two or more; a pair counts once. `xray`, `mihomo`, `openvpn` and `caddy-acmedns` are the images admitted on neither, by their owner's calls on #125, #140, #144 and #161, and their rows say so. Refusals are recorded under "Admissions on record". An image unused for a year is deleted, its package frozen by default and kept in `PACKAGES`. The annual workflow opens the review issue on 8 January with a consumer scan.
 
 - Paths: `images/README.md` `.github/workflows/annual-image-review.yaml` `.github/workflows/cleanup-images.yaml`
 - Consequence: an image enters and leaves by a rule, not by whoever needs it first
