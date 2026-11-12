@@ -75,6 +75,7 @@ of these. Everything else in the config stays as written.
 | `{"$vlessClients": "/abs/path"}` | a VLESS inbound's `clients` array, one client per line of the file (see below) |
 | `{"$proxy": "/abs/path"}` | a socks or http outbound's `settings`, split from the `[user:pass@]host:port` in the file (see below) |
 | `{"$wireguard": "/abs/path"}` | a wireguard outbound's `settings`, from the wg-quick client config in the file (see below) |
+| `{"$upstreams": "/abs/path"}` | an `outbounds` array, one socks, http or wireguard outbound per line of the file (see below) |
 
 ```json
 "settings": {
@@ -107,8 +108,8 @@ file, the JSON path and the referenced path, never a value.
   file (a directory counts: Compose leaves one where a secret's source file is
   missing), over 64 KiB, not UTF-8, or holding a NUL byte. These are the
   checks the shared `_FILE` contract makes.
-- An object holding `$file`, `$vlessDecryption`, `$vlessClients`, `$proxy` or
-  `$wireguard` and any other key, or a path that is not an absolute path in a string. A near
+- An object holding `$file`, `$vlessDecryption`, `$vlessClients`, `$proxy`,
+  `$wireguard` or `$upstreams` and any other key, or a path that is not an absolute path in a string. A near
   miss would otherwise reach Xray as a literal.
 - A seed file that is not exactly 128 hex characters.
 - A client list with a line it refuses (see below).
@@ -293,6 +294,94 @@ never a value: a key's base64 is the secret itself.
   does not parse, or carries a zone; an endpoint that is not `host:port`; an
   MTU outside 1280 to 65535; a keepalive that is neither `off` nor a number.
 
+## Any number of upstreams from one list
+
+`{"$upstreams": "/run/secrets/upstreams"}` resolves to an `outbounds` array,
+one outbound per line of the file, so every way out, whatever its kind and
+however many, is one secret in order of preference:
+
+```text
+# <url> [name=<name>] [group=<group>[,<group>]]
+socks5://alice:secret@proxy.example:1080            name=isp-a
+https://bob:secret@203.0.113.9:8443                 name=isp-b
+wireguard://<private key>@vpn.example:51820?publickey=<base64>&address=10.34.0.3/32,fd30:2::3/128 name=home group=upstream,ipv6
+openvpn                                             name=vpn
+socks5://carol:secret@[2001:db8::9]:1080            name=isp-c6 group=ipv6
+```
+
+It stands for an array, so it goes where an array goes. Put it in a file of its
+own: Xray's `-confdir` puts a later file's outbounds before the earlier ones'
+(unless its name holds `tail`) and keeps the earlier file's routing, so a
+static config routes to tags it never spells out:
+
+```json
+{"outbounds": {"$upstreams": "/run/secrets/upstreams"}}
+```
+
+```json
+{"outbounds": [
+  {"tag": "upstream-0", "protocol": "http", "settings": {"address": "203.0.113.9", "port": 8443, "user": "bob", "pass": "secret"}, "streamSettings": {"security": "tls"}},
+  {"tag": "upstream-b1", "protocol": "socks", "settings": {"address": "proxy.example", "port": 1080, "user": "alice", "pass": "secret"}},
+  {"tag": "upstream-b2", "protocol": "wireguard", "settings": {"secretKey": "<base64>", "address": ["10.34.0.3/32", "fd30:2::3/128"], "peers": [{"publicKey": "<base64>", "endpoint": "vpn.example:51820", "allowedIPs": ["0.0.0.0/0", "::/0"]}], "mtu": 1420, "noKernelTun": true}},
+  ...
+]}
+```
+
+(That is with `XRAY_UPSTREAM_PIN=isp-b`, which put `isp-b` first.)
+
+| A line's URL | Outbound |
+|---|---|
+| `socks5://[user:pass@]host:port`, or `socks://` | `socks` |
+| `socks5+tls://[user:pass@]host:port` | `socks` over TLS |
+| `http://[user:pass@]host:port` | `http` |
+| `https://[user:pass@]host:port` | `http` over TLS |
+| `wireguard://<private key>@host:port?<query>` | `wireguard`, as from a wg-quick file |
+| a word, such as `openvpn` | the URL `XRAY_UPSTREAM_ALIASES` gives it |
+
+- **Tags.** A line's group is `upstream` unless `group=` names others, and a line
+  in two groups becomes two outbounds. In each group the first line is tagged
+  `<group>-0` and each later one `<group>-b<n>`, so a balancer's selector takes
+  the first (`upstream-0`), the rest (`upstream-b`) or all (`upstream-`), with
+  no prefix catching another line.
+- **Order and pins.** Lines keep the file's order. `XRAY_UPSTREAM_PIN`, names
+  separated by commas, moves each named line to the front of its groups,
+  one per group, so the first can change with no edit to the secret.
+- **Proxies.** After the scheme, a proxy is the same `[user:pass@]host:port`
+  as [`$proxy`](#an-upstream-proxy-from-one-secret) takes, with the same
+  checks: the userinfo ends at the last `@`, nothing is percent-decoded, and
+  TLS takes the server name from the address.
+- **WireGuard.** The share link's form: the private key before the `@`,
+  percent-encoded or not, the peer's endpoint after it, and in the query
+  `publickey` and `address` (both required), `mtu`, `presharedkey`,
+  `keepalive` and `allowedips` (`0.0.0.0/0, ::/0` unless given). A `#name`
+  an app adds is dropped. The line becomes the wg-quick file it stands for and
+  passes [`$wireguard`](#a-wireguard-upstream-from-one-secret)'s checks.
+- **Aliases.** `XRAY_UPSTREAM_ALIASES`, `<word>=<url>` pairs separated by spaces,
+  names hops the deployment defines, such as the SOCKS port of a tunnel
+  beside the container (`openvpn=socks5://vpn:1080`). A host there may lack a
+  dot, as a service name does. An alias holds no login, because the
+  environment is shown at start and by `docker inspect`.
+- `name=` is 1 to 32 lowercase letters, digits and dashes, starting with a
+  letter or a digit; a group is 1 to 16 lowercase letters and digits, starting
+  with a letter, and appears once on a line.
+- The summary lists each outbound's tag, name, kind and endpoint, none of which
+  is secret. Users, passwords and WireGuard keys are redacted from `xray run
+  -test` output like every other resolved value.
+
+Each of these exits 78. The message names the file and the line, and never
+the URL:
+
+- No line, after blank lines and `#` comments.
+- A line that starts with neither a URL nor a word `XRAY_UPSTREAM_ALIASES`
+  defines; a scheme other than those above.
+- An option other than `name=` and `group=`, one twice, or a name or group
+  outside its pattern; a name on two lines.
+- A proxy `$proxy` would refuse; a `wireguard://` URL with no key before its
+  `@`, a query key not listed above or one twice, a line break or `#` in a
+  value, or settings `$wireguard` would refuse.
+- A pin no line is named, or two pins in one group; an alias that is not
+  `<word>=<url>`, a word twice, or a login in its URL.
+
 ## VLESS Encryption from one seed
 
 Both halves of an ML-KEM-768 VLESS Encryption key pair derive from one 64-byte
@@ -387,6 +476,8 @@ inbound. `http`, `https`, `socks5` and `socks5h` proxy URLs work.
 | `XRAY_HEALTHCHECK_PROXY` | unset | The loopback inbound the probe goes through. Unset means liveness only. |
 | `XRAY_HEALTHCHECK_TIMEOUT` | `10s` | A Go duration. Reading the body counts against it. |
 | `XRAY_HEALTHCHECK_EXPECT` | unset | A regular expression in [Go's RE2 syntax](https://github.com/google/re2/wiki/Syntax) the response body must match. Unset means any 2xx passes and the body is not read. Ignored, with a warning at start, while `XRAY_HEALTHCHECK_PROXY` is unset. |
+| `XRAY_UPSTREAM_ALIASES` | unset | `<word>=<url>` pairs, separated by spaces, that an [upstreams](#any-number-of-upstreams-from-one-list) line may name by its word. No login. |
+| `XRAY_UPSTREAM_PIN` | unset | Names of upstreams lines, separated by commas, each moved to the front of its groups. |
 
 A value set to the empty string takes the default. A bad URL, timeout or
 expression refuses at start (78), so it is found at deployment rather than as

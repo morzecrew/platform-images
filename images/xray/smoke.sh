@@ -28,6 +28,9 @@ PROBE_SOCKS_PORT=$((BASE + 10))
 PROBE_HTTP_PORT=$((BASE + 11))
 WG_PORT=$((BASE + 12))
 PROBE_WG_PORT=$((BASE + 13))
+PROBE_UP0_PORT=$((BASE + 14))
+PROBE_UP1_PORT=$((BASE + 15))
+PROBE_UP2_PORT=$((BASE + 16))
 HTTPD_PID=""
 TLSD_PID=""
 ALL_OUTPUT=""
@@ -138,7 +141,10 @@ config() {
 		    {"tag": "wg-peer", "listen": "127.0.0.1", "port": ${WG_PORT}, "protocol": "wireguard",
 		     "settings": {"secretKey": {"\$file": "/run/secrets/wg_peer_key"},
 		                  "peers": [{"publicKey": "${WG_CLIENT_PUB}", "allowedIPs": ["10.34.0.3/32"]}]}},
-		    {"tag": "probe-wg", "listen": "127.0.0.1", "port": ${PROBE_WG_PORT}, "protocol": "http"}
+		    {"tag": "probe-wg", "listen": "127.0.0.1", "port": ${PROBE_WG_PORT}, "protocol": "http"},
+		    {"tag": "probe-up0", "listen": "127.0.0.1", "port": ${PROBE_UP0_PORT}, "protocol": "http"},
+		    {"tag": "probe-up1", "listen": "127.0.0.1", "port": ${PROBE_UP1_PORT}, "protocol": "http"},
+		    {"tag": "probe-up2", "listen": "127.0.0.1", "port": ${PROBE_UP2_PORT}, "protocol": "http"}
 		  ],
 		  "outbounds": [
 		    {"tag": "direct", "protocol": "freedom", "settings": {"finalRules": [{"action": "allow"}]}},
@@ -168,6 +174,9 @@ config() {
 		    {"inboundTag": ["probe-http"], "outboundTag": "to-http"},
 		    {"inboundTag": ["probe-wg"], "outboundTag": "to-wg"},
 		    {"inboundTag": ["wg-peer"], "outboundTag": "to-target"},
+		    {"inboundTag": ["probe-up0"], "outboundTag": "upstream-0"},
+		    {"inboundTag": ["probe-up1"], "outboundTag": "upstream-b1"},
+		    {"inboundTag": ["probe-up2"], "outboundTag": "upstream-b2"},
 		    {"ip": ["geoip:private"], "outboundTag": "direct"},
 		    {"domain": ["geosite:private"], "outboundTag": "direct"}
 		  ]}
@@ -282,6 +291,18 @@ wg_conf "Endpoint = 127.0.0.1:${WG_PORT}
 " >"${WORK}/secrets/wg_conf"
 # Section 7 refuses this one: a client with nowhere to dial.
 wg_conf "" >"${WORK}/secrets/wg_no_endpoint"
+# One list of three ways out, the http one pinned first (XRAY_UPSTREAM_PIN), so
+# they are upstream-0 (http), upstream-b1 (socks) and upstream-b2 (wireguard).
+# The WireGuard line's private key is percent-encoded, as apps share it.
+WG_CLIENT_KEY_URL="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${WG_CLIENT_KEY}")"
+printf '%s\n' "# the ways out, in order" \
+	"socks5://${PROXY_USER}:${PROXY_PASS}@127.0.0.1:${UP_SOCKS_PORT} name=isp-socks" \
+	"http://${PROXY_USER}:${PROXY_PASS}@127.0.0.1:${UP_HTTP_PORT}    name=isp-http" \
+	"wireguard://${WG_CLIENT_KEY_URL}@127.0.0.1:${WG_PORT}?publickey=${WG_PEER_PUB}&address=10.34.0.3/32&allowedips=192.0.2.0/24 name=home" \
+	>"${WORK}/secrets/upstreams"
+# Section 7 refuses this one: a scheme Xray has no outbound for, with the
+# credentials in it, which an error must not quote.
+printf 'ss://%s:%s@127.0.0.1:8388\n' "${PROXY_USER}" "${PROXY_PASS}" >"${WORK}/secrets/upstreams_ss"
 chmod 0400 "${WORK}/secrets/"*
 mkdir "${WORK}/secrets/a_directory"
 touch "${WORK}/www/generate_204"
@@ -336,6 +357,9 @@ ALL_OUTPUT+="${out}"
 [ "${rc}" = 2 ] || fail "reality-password given the key itself: exited ${rc}, expected 2"
 expect_in "reality-password refuses the key itself as an argument (2)" "${out}" "not an absolute path"
 config "${WORK}/conf"
+# A second file whose outbounds are the list: Xray's -confdir merges them with
+# the first file's, so a static config can route to tags it never spells out.
+printf '{"outbounds": {"$upstreams": "/run/secrets/upstreams"}}\n' >"${WORK}/conf/20-upstreams.json"
 
 python3 -m http.server "${TARGET_PORT}" --bind 127.0.0.1 --directory "${WORK}/www" \
 	>"${WORK}/httpd.log" 2>&1 &
@@ -381,6 +405,7 @@ done
 	-e XRAY_HEALTHCHECK_URL="http://127.0.0.1:${TARGET_PORT}/generate_204" \
 	-e XRAY_CONF__loglevel=debug -e XRAY_SMOKE_TYPO=1 \
 	-e XRAY_LOCATION_CERT=/usr/local/bin \
+	-e XRAY_UPSTREAM_PIN=isp-http \
 	"${IMAGE}" >/dev/null
 
 logs=""
@@ -420,6 +445,8 @@ expect_in "summary shows where the http upstream is" "${logs}" \
 	"outbounds[5].settings <- \$proxy /run/secrets/proxy_http 127.0.0.1:${UP_HTTP_PORT}   (/etc/xray/10-xray.json)"
 expect_in "summary shows the WireGuard peer's endpoint" "${logs}" \
 	"outbounds[7].settings <- \$wireguard /run/secrets/wg_conf 127.0.0.1:${WG_PORT}   (/etc/xray/10-xray.json)"
+expect_in "summary lists the upstreams by tag, name and endpoint, the pinned one first" "${logs}" \
+	"outbounds <- \$upstreams /run/secrets/upstreams upstream-0 (isp-http) http 127.0.0.1:${UP_HTTP_PORT}, upstream-b1 (isp-socks) socks 127.0.0.1:${UP_SOCKS_PORT}, upstream-b2 (home) wireguard 127.0.0.1:${WG_PORT}   (/etc/xray/20-upstreams.json)"
 
 # --- 4. one client per device -------------------------------------------------
 
@@ -470,6 +497,12 @@ code="$(curl --noproxy '' -s -o /dev/null -w '%{http_code}' --max-time 10 \
 	-x "http://127.0.0.1:${PROBE_WG_PORT}" "http://192.0.2.1/generate_204" || true)"
 [ "${code}" = 200 ] || fail "the wireguard outbound did not get through its peer (${code})"
 echo "ok: a wireguard outbound from one wg-quick file reaches its peer and through it the target"
+[ "$(via "${PROBE_UP0_PORT}")" = 200 ] || fail "upstream-0, the pinned http line, did not get through its upstream"
+[ "$(via "${PROBE_UP1_PORT}")" = 200 ] || fail "upstream-b1, the socks line, did not get through its upstream"
+code="$(curl --noproxy '' -s -o /dev/null -w '%{http_code}' --max-time 10 \
+	-x "http://127.0.0.1:${PROBE_UP2_PORT}" "http://192.0.2.1/generate_204" || true)"
+[ "${code}" = 200 ] || fail "upstream-b2, the wireguard:// line, did not get through its peer (${code})"
+echo "ok: one \$upstreams list makes an http, a socks and a wireguard outbound, in a second file Xray merges, the pinned line first"
 logs="$("${ENGINE}" logs "${CTR}" 2>&1)"
 ALL_OUTPUT+="${logs}"
 
@@ -599,6 +632,13 @@ done
 config "${WORK}/wg_no_endpoint" "" "" "" "" '{"$wireguard": "/run/secrets/wg_no_endpoint"}'
 refuse "a wg-quick file whose peer has no Endpoint" \
 	"outbounds[7].settings: /run/secrets/wg_no_endpoint the [Peer] on line 7 has no Endpoint" "${WORK}/wg_no_endpoint"
+
+config "${WORK}/upstreams_ss"
+printf '{"outbounds": {"$upstreams": "/run/secrets/upstreams_ss"}}\n' >"${WORK}/upstreams_ss/20-upstreams.json"
+refuse "an upstreams line whose scheme Xray has no outbound for" \
+	"/etc/xray/20-upstreams.json: outbounds: /run/secrets/upstreams_ss line 1: its scheme is not socks5" "${WORK}/upstreams_ss"
+refuse "a pin no upstreams line is named" \
+	'XRAY_UPSTREAM_PIN names "nowhere", which no line has as its name' "${WORK}/conf" -e XRAY_UPSTREAM_PIN=nowhere
 
 # RE2 has no lookahead. Found at deployment, not as an unhealthy container.
 refuse "a healthcheck expression that does not compile" \

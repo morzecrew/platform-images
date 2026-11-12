@@ -273,7 +273,8 @@ decisions:
       their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
       path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
       "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}`, `{"$proxy": "<absolute
-      path>"}` or `{"$wireguard": "<absolute path>"}`, and substitute nothing else.
+      path>"}`, `{"$wireguard": "<absolute path>"}` or `{"$upstreams": "<absolute
+      path>"}`, and substitute nothing else.
     paths:
       - images/*/rootfs/entrypoint.sh
       - images/caddy/rootfs/Caddyfile
@@ -286,7 +287,7 @@ decisions:
     rationale: >-
       RFC 0001 row 5 (LOCKED). Held consistently, never defended. caddy's Dockerfile
       installs `gettext` (envsubst) "for hooks", which is in tension with it.
-    fingerprint: f2199db5ed32310a/9e62c124a404b61d
+    fingerprint: 77ed62dbb81e611c/9e62c124a404b61d
   - id: D-19
     grade: ASSUMED
     text: >-
