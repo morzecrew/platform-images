@@ -11,7 +11,8 @@
 #   solves DNS-01 through acmedns, and validates, the module provisioned from
 #   the file;
 # - the binary's file capability is upstream's, cap_net_bind_service=p, with
-#   no effective bit, which execve would refuse under cap_drop ALL;
+#   no effective bit: with one, execve refuses the binary wherever the
+#   capability is outside the bounding set, as under cap_drop ALL;
 # - it serves as upstream's image does, from /etc/caddy/Caddyfile with
 #   upstream's command, as a non-root user under a read-only root, with every
 #   capability dropped and no new privileges, as a hardened service runs it.
