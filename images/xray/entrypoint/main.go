@@ -881,7 +881,7 @@ func parseUpstreamLine(line string, aliases map[string]string) (upstreamLine, er
 					return l, errors.New("a group is 1 to 16 lowercase letters and digits, starting with a letter")
 				}
 				if slices.Contains(l.groups[:i], g) {
-					return l, fmt.Errorf("group=%s lists %s twice", v, g)
+					return l, fmt.Errorf("group= lists %s twice", g)
 				}
 			}
 		default:
