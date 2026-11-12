@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.28
+# syntax=docker/dockerfile:1.29
 
 # Stable releases only. Upstream's one prerelease, Prerelease-Alpha, is marked
 # as one on GitHub, and its tag is not a version.

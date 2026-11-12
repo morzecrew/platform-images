@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.28
+# syntax=docker/dockerfile:1.29
 
 # renovate: datasource=docker depName=al3xos/python-distroless extractVersion=^(?<version>.+)-debian13$
 ARG PYTHON_VERSION=3.14.10
