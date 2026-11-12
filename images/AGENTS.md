@@ -74,7 +74,7 @@ Versions are tracked only through `# renovate:` annotations directly above a `va
 
 ### S-0001/D-25 — `ASSUMED` (Standing decisions)
 
-An image is admitted by route 1, hand-rolled in two or more projects, or route 2, the same upstream run and diverged in two or more; a pair counts once. `xray`, `mihomo` and `openvpn` are the images admitted on neither, by their owner's calls on #125, #140 and #144, and their rows say so. Refusals are recorded under "Admissions on record". An image unused for a year is deleted, its package frozen by default and kept in `PACKAGES`. The annual workflow opens the review issue on 8 January with a consumer scan.
+An image is admitted by route 1, hand-rolled in two or more projects, or route 2, the same upstream run and diverged in two or more; a pair counts once. `xray`, `mihomo`, `openvpn` and `caddy-acmedns` are the images admitted on neither, by their owner's calls on #125, #140, #144 and #161, and their rows say so. Refusals are recorded under "Admissions on record". An image unused for a year is deleted, its package frozen by default and kept in `PACKAGES`. The annual workflow opens the review issue on 8 January with a consumer scan.
 
 - Paths: `images/README.md` `.github/workflows/annual-image-review.yaml` `.github/workflows/cleanup-images.yaml`
 - Consequence: an image enters and leaves by a rule, not by whoever needs it first
