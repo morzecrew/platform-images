@@ -361,8 +361,9 @@ static config routes to tags it never spells out:
   beside the container (`openvpn=socks5://vpn:1080`). A host there may lack a
   dot, as a service name does. An alias holds no login, because the
   environment is shown at start and by `docker inspect`.
-- `name=` is 1 to 32 lowercase letters, digits and dashes; a group is 1 to 16
-  lowercase letters and digits.
+- `name=` is 1 to 32 lowercase letters, digits and dashes, starting with a
+  letter or a digit; a group is 1 to 16 lowercase letters and digits, starting
+  with a letter, and appears once on a line.
 - The summary lists each outbound's tag, name, kind and endpoint, none of which
   is secret. Users, passwords and WireGuard keys are redacted from `xray run
   -test` output like every other resolved value.

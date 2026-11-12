@@ -793,6 +793,10 @@ func parseUpstreams(s string, aliases map[string]string, pin string) ([]upstream
 	}
 	pinned := map[string]string{}
 	for _, p := range strings.FieldsFunc(pin, func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+		if !upstreamNameRE.MatchString(p) {
+			// The value may be a URL pasted in by mistake, login and all.
+			return nil, nil, "", errors.New("XRAY_UPSTREAM_PIN holds something that is not a line name")
+		}
 		at, ok := names[p]
 		if !ok {
 			return nil, nil, "", fmt.Errorf("XRAY_UPSTREAM_PIN names %q, which no line has as its name", p)
@@ -872,9 +876,12 @@ func parseUpstreamLine(line string, aliases map[string]string) (upstreamLine, er
 			l.name = v
 		case "group":
 			l.groups = strings.Split(v, ",")
-			for _, g := range l.groups {
+			for i, g := range l.groups {
 				if !upstreamGroupRE.MatchString(g) {
 					return l, errors.New("a group is 1 to 16 lowercase letters and digits, starting with a letter")
+				}
+				if slices.Contains(l.groups[:i], g) {
+					return l, fmt.Errorf("group=%s lists %s twice", v, g)
 				}
 			}
 		default:
