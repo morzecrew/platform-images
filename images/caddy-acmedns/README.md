@@ -11,7 +11,7 @@ whatever hosts its DNS.
 | Image | `ghcr.io/morzecrew/caddy-acmedns:<caddy version>` |
 | Base | upstream's `caddy:<version>-alpine`, unchanged but for the binary |
 | Modules | upstream's standard set and `dns.providers.acmedns`, nothing else |
-| Runs as | upstream's default, root; it serves as any user under a read-only root, every capability dropped |
+| Runs as | upstream's default, root; it serves as any user under a read-only root, every capability dropped, on ports that user may bind. Ports 80 and 443 then need `net.ipv4.ip_unprivileged_port_start` lowered, as dotdash sets it to 0, or `NET_BIND_SERVICE` granted |
 | Capability | `cap_net_bind_service=p` on the binary, as upstream's: no effective bit, so it starts under `cap_drop: ALL` |
 | Config | `/etc/caddy/Caddyfile`, with upstream's command |
 
