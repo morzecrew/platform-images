@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.28
+# syntax=docker/dockerfile:1.29
 
 # Stable releases only: upstream publishes its prereleases under the same
 # version form, as image tags too, so the version comes from GitHub releases,

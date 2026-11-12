@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.28
+# syntax=docker/dockerfile:1.29
 
 # renovate: datasource=docker depName=valkey/valkey extractVersion=^(?<version>\d+\.\d+)\.\d+-alpine$
 ARG VALKEY_VERSION=9.1

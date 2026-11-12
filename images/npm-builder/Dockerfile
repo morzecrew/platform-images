@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.28
+# syntax=docker/dockerfile:1.29
 
 # renovate: datasource=docker depName=node extractVersion=^(?<version>\d+)-trixie$
 ARG NODE_VERSION=24

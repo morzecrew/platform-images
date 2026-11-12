@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.28
+# syntax=docker/dockerfile:1.29
 
 # The Alpine release whose openvpn package this image ships. The base floats
 # within it, so the weekly rebuild brings musl, OpenSSL and the CA bundle

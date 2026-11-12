@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.28
+# syntax=docker/dockerfile:1.29
 
 # renovate: datasource=docker depName=rustfs/rustfs versioning=docker
 ARG RUSTFS_VERSION=1.0.5
