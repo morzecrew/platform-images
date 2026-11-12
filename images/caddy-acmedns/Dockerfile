@@ -28,3 +28,9 @@ RUN xcaddy build --with "github.com/caddy-dns/acmedns@${ACMEDNS_VERSION}"
 FROM caddy:${CADDY_VERSION}-alpine
 
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
+
+# The builder leaves the binary cap_net_bind_service=ep. With the effective
+# bit set, execve refuses it where the capability is not granted, as under
+# cap_drop ALL ("operation not permitted", exit 255). Upstream's image gives
+# it +p alone: a low port where the capability is granted, a start anywhere.
+RUN setcap cap_net_bind_service=+p /usr/bin/caddy

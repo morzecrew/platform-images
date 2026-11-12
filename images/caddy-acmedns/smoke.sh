@@ -10,8 +10,12 @@
 #   with the credentials in a mounted JSON file, adapts to an issuer that
 #   solves DNS-01 through acmedns, and validates, the module provisioned from
 #   the file;
+# - the binary's file capability is upstream's, cap_net_bind_service=p, with
+#   no effective bit: with one, execve refuses the binary wherever the
+#   capability is outside the bounding set, as under cap_drop ALL;
 # - it serves as upstream's image does, from /etc/caddy/Caddyfile with
-#   upstream's command, as a non-root user under a read-only root.
+#   upstream's command, as a non-root user under a read-only root, with every
+#   capability dropped and no new privileges, as a hardened service runs it.
 set -euo pipefail
 IMAGE="${1:?usage: smoke.sh <image-ref>}"
 ENGINE="${ENGINE:-podman}"
@@ -68,12 +72,17 @@ run "${mounts[@]}" "${IMAGE}" caddy validate --config /etc/caddy/Caddyfile --ada
 	fail "a Caddyfile handing DNS-01 to acmedns does not validate"
 echo "ok: a wildcard site hands its DNS-01 check to acmedns, credentials from a file"
 
+caps=$(run "${IMAGE}" getcap /usr/bin/caddy | awk '{ print $2 }')
+[ "${caps}" = "cap_net_bind_service=p" ] || fail "the binary's file capability is ${caps:-none}, not upstream's cap_net_bind_service=p"
+echo "ok: the binary's file capability is upstream's, cap_net_bind_service=p"
+
 cat >"${WORK}/Caddyfile" <<'EOF'
 :8080 {
 	respond "ok"
 }
 EOF
 "${ENGINE}" run -d --name "${CTR}" --user 65532:65532 --read-only \
+	--cap-drop ALL --security-opt no-new-privileges \
 	--tmpfs /config --tmpfs /data -p 127.0.0.1::8080 \
 	-v "${WORK}/Caddyfile:/etc/caddy/Caddyfile:ro" "${IMAGE}" >/dev/null
 port=$("${ENGINE}" port "${CTR}" 8080 | sed -n 's/.*://p' | head -n 1)
@@ -83,5 +92,5 @@ for _ in $(seq 1 20); do
 	[ "${body}" = ok ] && break
 	sleep 1
 done
-[ "${body}" = ok ] || { "${ENGINE}" logs "${CTR}" 2>&1 | tail -10 >&2; fail "it does not serve upstream's way, as uid 65532, read-only"; }
-echo "ok: it serves from /etc/caddy/Caddyfile with upstream's command, as uid 65532, read-only"
+[ "${body}" = ok ] || { "${ENGINE}" logs "${CTR}" 2>&1 | tail -10 >&2; fail "it does not serve upstream's way, as uid 65532, read-only, with no capabilities"; }
+echo "ok: it serves from /etc/caddy/Caddyfile with upstream's command, as uid 65532, read-only, with no capabilities"
