@@ -11,7 +11,8 @@ whatever hosts its DNS.
 | Image | `ghcr.io/morzecrew/caddy-acmedns:<caddy version>` |
 | Base | upstream's `caddy:<version>-alpine`, unchanged but for the binary |
 | Modules | upstream's standard set and `dns.providers.acmedns`, nothing else |
-| Runs as | upstream's default, root; it serves as any user under a read-only root |
+| Runs as | upstream's default, root; it serves as any user under a read-only root, every capability dropped |
+| Capability | `cap_net_bind_service=p` on the binary, as upstream's: no effective bit, so it starts under `cap_drop: ALL` |
 | Config | `/etc/caddy/Caddyfile`, with upstream's command |
 
 It isn't a variant of [`caddy`](../caddy), which adds Coraza, the OWASP CRS
@@ -81,6 +82,8 @@ annotation. A module release without a Caddy release rebuilds the same tag.
   `caddy`'s is here;
 - a wildcard site that hands its check to `acmedns`, with credentials from a
   mounted file, adapts and validates;
-- the image serves upstream's way as uid 65532 under a read-only root.
+- the binary's file capability is upstream's `cap_net_bind_service=p`;
+- the image serves upstream's way as uid 65532 under a read-only root, with
+  every capability dropped and no new privileges.
 
 No certificate is issued, since that needs a CA and DNS.
