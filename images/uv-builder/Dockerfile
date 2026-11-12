@@ -4,7 +4,7 @@
 ARG PYTHON_VERSION=3.14.10
 ARG DEBIAN_SUITE=trixie
 # renovate: datasource=docker depName=ghcr.io/astral-sh/uv versioning=docker
-ARG UV_VERSION=0.13.7
+ARG UV_VERSION=0.13.8
 
 FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
 
