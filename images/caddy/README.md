@@ -34,7 +34,7 @@ Image: `ghcr.io/morzecrew/caddy:2.11.7`.
 
 ## Configuration
 
-The entrypoint resolves the variables below, prints what it decided, runs `caddy adapt` on `/etc/caddy/Caddyfile`, which it never rewrites, then execs the main command.
+The entrypoint resolves the variables below, prints what it decided, runs `caddy adapt` on `/etc/caddy/Caddyfile`, which it never rewrites, then execs the main command. A Caddyfile of your own mounted in its place that is not formatted logs `Caddyfile input is not formatted` on every start: run `caddy fmt --overwrite` on it yourself.
 
 ### Environment variables
 
