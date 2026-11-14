@@ -214,8 +214,11 @@ trap - EXIT
 # certificates. The summary above says `on`; the Caddyfile gets an empty line.
 [ "${CADDY_AUTO_HTTPS}" != on ] || export CADDY_AUTO_HTTPS=
 
+# No `caddy fmt --overwrite`: the baked Caddyfile is formatted, a mounted one is
+# the operator's to keep, and the write failed the start wherever the file
+# was not writable: mounted read-only, or owned by caddy under a root that
+# holds no CAP_DAC_OVERRIDE, as with cap_drop ALL.
 echo "Validating Caddy config..."
-caddy fmt --overwrite /etc/caddy/Caddyfile
 config=$(caddy adapt --config /etc/caddy/Caddyfile --adapter caddyfile)
 
 # Every WAF `Include` in the adapted config, fragments included, one per line.

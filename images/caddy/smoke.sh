@@ -515,4 +515,18 @@ refuse "a blank skip path" -e "CADDY_WAF_SKIP_PATHS=   "
 expect_in "refusal says blank" "$(cat "${REFUSE_OUT}")" "CADDY_WAF_SKIP_PATHS is blank"
 echo "waf: a GET to a skip path passes, everything else is inspected, and a bad entry refuses"
 
+# --- 16. it starts with every capability dropped (#166) ---------------------
+
+# With the effective bit on the binary, execve refuses it wherever the
+# capability is outside the bounding set, as under cap_drop ALL. Root holding
+# no CAP_DAC_OVERRIDE also cannot write the caddy-owned Caddyfile, which the
+# entrypoint once rewrote on every start.
+caps=$("${ENGINE}" run --rm --entrypoint getcap "${IMAGE}" /usr/bin/caddy | awk '{ print $2 }')
+[ "${caps}" = "cap_net_bind_service=p" ] ||
+	{ echo "FAIL: the binary's file capability is ${caps:-none}, not upstream's cap_net_bind_service=p"; exit 1; }
+echo "capabilities: the binary's file capability is upstream's, cap_net_bind_service=p"
+start 18080:8080 --cap-drop ALL --security-opt no-new-privileges
+wait_health "http://127.0.0.1:18080/__platform_healthz"
+echo "capabilities: it serves as root with every capability dropped and no new privileges"
+
 echo "PASS: caddy"
