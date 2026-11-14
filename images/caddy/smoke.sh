@@ -535,4 +535,13 @@ start 18080:8080 --cap-drop ALL --security-opt no-new-privileges
 wait_health "http://127.0.0.1:18080/__platform_healthz"
 echo "capabilities: it serves as root with every capability dropped and no new privileges"
 
+# --- 17. the baked Caddyfile is formatted -------------------------------------
+
+# The entrypoint no longer runs `caddy fmt --overwrite` (#166), so an
+# unformatted Caddyfile here would put "Caddyfile input is not formatted" in
+# every consumer's log on every start.
+"${ENGINE}" run --rm --entrypoint sh "${IMAGE}" -c 'caddy fmt /etc/caddy/Caddyfile | cmp -s - /etc/caddy/Caddyfile' ||
+	{ echo "FAIL: /etc/caddy/Caddyfile is not as caddy fmt writes it"; exit 1; }
+echo "format: the baked Caddyfile is as caddy fmt writes it"
+
 echo "PASS: caddy"
