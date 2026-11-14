@@ -23,7 +23,12 @@ PW="smoke-pgbouncer-pw"
 WORK="$(mktemp -d)"
 
 cleanup() {
-	"${ENGINE}" rm -f "${CTR}" "${PGSIDE}" >/dev/null 2>&1 || true
+	# One name a call: given a name that does not exist, podman 4.9 removes
+	# none of the others and still exits 0.
+	local ctr
+	for ctr in "${CTR}" "${PGSIDE}"; do
+		"${ENGINE}" rm -f "${ctr}" >/dev/null 2>&1 || true
+	done
 	"${ENGINE}" network rm "${NET}" >/dev/null 2>&1 || true
 	[ -z "${SECVOL}" ] || "${ENGINE}" volume rm -f "${SECVOL}" >/dev/null 2>&1 || true
 	rm -rf "${WORK}"

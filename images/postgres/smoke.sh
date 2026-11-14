@@ -6,7 +6,14 @@ IMAGE="${1:?usage: smoke.sh <image-ref>}"
 ENGINE="${ENGINE:-podman}"
 CTR="smoke-postgres-$$"
 MANIFEST_PATH=/usr/local/share/postgres-extensions/extensions.manifest
-cleanup() { "${ENGINE}" rm -f "${CTR}" >/dev/null 2>&1 || true; }
+cleanup() {
+	# One name a call: given a name that does not exist, podman 4.9 removes
+	# none of the others and still exits 0. "${CTR}-r" is the refusals'.
+	local ctr
+	for ctr in "${CTR}" "${CTR}-r"; do
+		"${ENGINE}" rm -f "${ctr}" >/dev/null 2>&1 || true
+	done
+}
 trap cleanup EXIT
 
 # Expectations are derived from the image, not hard-coded: PG_EXTENSIONS is a
@@ -188,7 +195,7 @@ expect_in "glibc takes the trim threshold" "${applied}" "glibc.malloc.trim_thres
 # --- refusals ---------------------------------------------------------------
 
 REFUSE_OUT="$(mktemp)"
-trap '"${ENGINE}" rm -f "${CTR}" "${CTR}-r" >/dev/null 2>&1 || true; rm -f "${REFUSE_OUT}"' EXIT
+trap 'cleanup; rm -f "${REFUSE_OUT}"' EXIT
 
 # Bounded twice: a refusal that stops refusing starts a server that runs
 # forever, and plain `timeout` waits after SIGTERM for a process that may not
@@ -346,7 +353,7 @@ echo "ok: a guessed name warns and upstream's names do not"
 # work_mem is set by the baked file; a mounted fragment and the environment both
 # override it. The env value must win, and each layer must be attributed.
 WORKDIR="$(mktemp -d)"
-trap '"${ENGINE}" rm -f "${CTR}" "${CTR}-r" >/dev/null 2>&1 || true; rm -rf "${REFUSE_OUT}" "${ALT_ALLOWLIST}" "${WORKDIR}"' EXIT
+trap 'cleanup; rm -rf "${REFUSE_OUT}" "${ALT_ALLOWLIST}" "${WORKDIR}"' EXIT
 # Two keys on purpose. `work_mem` is contested by all three layers, so the
 # summary must collapse it to the env row -- which means it cannot also be the
 # key that proves mounted attribution works. `temp_buffers` is set by this
