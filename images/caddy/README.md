@@ -25,7 +25,7 @@ Image: `ghcr.io/morzecrew/caddy:2.11.7`.
 ## Process and layout
 
 - **User:** The image defines a **`caddy` account** and `chown`s `/etc/caddy`, `/docker-entrypoint.d`, `/srv`, `/config`, and `/data` so you can run the process **non-root** when you want (`docker run --user caddy`, Kubernetes `securityContext.runAsUser`, etc.). There is **no** `USER` in the Dockerfile, so the **default** is **root**—pick root or `caddy` to match your platform and volume permissions.
-- **Capabilities:** the binary carries `cap_net_bind_service=p`, as upstream's does, with no effective bit, so it starts with every capability dropped (`cap_drop: ALL`, with or without `no-new-privileges`), as root or as `caddy`. The default `:8080` needs no capability. A port below 1024 then needs `net.ipv4.ip_unprivileged_port_start` lowered, as dotdash sets it to 0, or `NET_BIND_SERVICE` granted.
+- **Capabilities:** the binary carries `cap_net_bind_service=p`, as upstream's does, with no effective bit, so it starts with every capability dropped (`cap_drop: ALL`, with or without `no-new-privileges`), as root or as `caddy`. The default `:8080` needs no capability. A port below 1024 then needs `net.ipv4.ip_unprivileged_port_start` lowered, as dotdash sets it to 0, or `NET_BIND_SERVICE` granted. As `caddy` under `no-new-privileges`, only the sysctl works: no_new_privs stops execve adding a file capability, effective bit or not.
 - Listens on **`CADDY_EDGE_ADDRESS`** (default **`:8080`**); image `EXPOSE 8080`.
 - Writable locations (typical volume mounts): **`/config`**, **`/data`**, **`/srv`** (e.g. static assets).
 - **`/docker-entrypoint.d/*.sh`** — optional shell hooks sourced in lexical order before config validation (same idea as other official images).
