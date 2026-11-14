@@ -24,7 +24,12 @@ ALL_OUTPUT=""
 LAST=""
 
 cleanup() {
-	"${ENGINE}" rm -f "${CTR}" "${CTR}-refusal" >/dev/null 2>&1 || true
+	# One name a call: given a name that does not exist, podman 4.9 removes
+	# none of the others and still exits 0.
+	local ctr
+	for ctr in "${CTR}" "${CTR}-refusal"; do
+		"${ENGINE}" rm -f "${ctr}" >/dev/null 2>&1 || true
+	done
 	[ -z "${HTTPD_PID}" ] || kill "${HTTPD_PID}" 2>/dev/null || true
 	rm -rf "${WORK}"
 }

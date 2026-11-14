@@ -29,7 +29,12 @@ READ_ONLY=(--read-only)
 [ "${ENGINE##*/}" != podman ] || READ_ONLY+=(--read-only-tmpfs=false --tmpfs /dev/shm:rw,size=1m)
 
 cleanup() {
-	"${ENGINE}" rm -f "${TAG}-client" "${TAG}-list" "${SRV}" "${TGT}" >/dev/null 2>&1 || true
+	# One name a call: given a name that does not exist, podman 4.9 removes
+	# none of the others and still exits 0.
+	local name
+	for name in "${TAG}-client" "${TAG}-list" "${SRV}" "${TGT}"; do
+		"${ENGINE}" rm -f "${name}" >/dev/null 2>&1 || true
+	done
 	"${ENGINE}" network rm "${RIG}" "${FAR}" >/dev/null 2>&1 || true
 	rm -rf "${WORK}"
 }
