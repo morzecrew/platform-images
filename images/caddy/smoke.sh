@@ -9,7 +9,13 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="$(mktemp -d)"
 REFUSE_OUT="${WORK}/refuse.out"
 cleanup() {
-	"${ENGINE}" rm -f "${CTR}" "${CTR}-refuse" >/dev/null 2>&1 || true
+	# One name a call: given a name that does not exist, podman 4.9 removes
+	# none of the others and still exits 0, which left 18080 bound for the
+	# handoff test that follows in CI.
+	local ctr
+	for ctr in "${CTR}" "${CTR}-refuse"; do
+		"${ENGINE}" rm -f "${ctr}" >/dev/null 2>&1 || true
+	done
 	rm -rf "${WORK}"
 }
 trap cleanup EXIT
