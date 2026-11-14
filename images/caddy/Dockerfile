@@ -72,6 +72,12 @@ RUN apk add --no-cache gettext
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 COPY --from=crs /opt/coraza /opt/coraza
 
+# The builder leaves the binary cap_net_bind_service=ep. With the effective
+# bit set, execve refuses it where the capability is not granted, as under
+# cap_drop ALL ("operation not permitted", exit 255). Upstream's image gives
+# it +p alone: a low port where the capability is granted, a start anywhere.
+RUN setcap cap_net_bind_service=+p /usr/bin/caddy
+
 # Named bake context, not a copy under images/caddy/ (S-0001/D-17).
 COPY --from=shared rootfs/lib/envconf.sh /usr/local/lib/envconf.sh
 
