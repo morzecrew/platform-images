@@ -53,8 +53,13 @@ site.example.net {
 `tls sni` takes several names and wildcards (`*.example.net`); give each
 backend its own `@matcher` and `route` for its own port. The backend sees
 connections from the edge's address, not the client's. A backend that reads
-the PROXY protocol can have it with `proxy { proxy_protocol v2 upstream
-127.0.0.1:9443 }`.
+the PROXY protocol can have it, in the place of the plain `proxy` line:
+
+```caddyfile
+proxy 127.0.0.1:9443 {
+	proxy_protocol v2
+}
+```
 
 Don't pass through a name the edge serves itself, and don't point a
 backend's fallback for unauthenticated connections at one of the edge's own
