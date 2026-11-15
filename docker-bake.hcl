@@ -46,6 +46,7 @@ variable "DESCRIPTIONS" {
     "mihomo"            = "mihomo, a client proxy, non-root on distroless: secrets as files referenced from its JSON config, pinned geodata, and a healthcheck that probes egress."
     "openvpn"           = "OpenVPN client whose kill switch holds from the first packet: default routes swapped for host routes to its servers before openvpn starts."
     "caddy-acmedns"     = "Upstream's Caddy with the acme-dns DNS module, for certificates, wildcards included, through a DNS-01 check delegated by one CNAME."
+    "caddy-l4"          = "Upstream's Caddy with the layer4 module, to pass chosen TLS server names through untouched while the HTTP app serves the rest."
   }
 }
 
@@ -562,12 +563,28 @@ target "caddy-acmedns" {
   }
 }
 
+# Upstream's Caddy with mholt/caddy-l4 built in, as a listener wrapper that
+# passes chosen TLS server names through to a backend untouched (#170). It
+# shares CADDY_VERSION with caddy; the module's version is its own argument.
+target "caddy-l4" {
+  inherits   = ["_attested"]
+  context    = "./images/caddy-l4"
+  dockerfile = "Dockerfile"
+  tags       = tag("caddy-l4", CADDY_VERSION)
+  labels     = label("caddy-l4", CADDY_VERSION)
+  args = {
+    CADDY_VERSION = CADDY_VERSION
+    # renovate: datasource=github-releases depName=mholt/caddy-l4
+    L4_VERSION    = "v0.1.3"
+  }
+}
+
 # ....................... #
 
 group "default" {
   targets = [
     "flyway", "caddy", "postgres", "postgres-pgvector", "postgres-cron",
     "uv-builder", "npm-builder", "python-distroless", "valkey", "rustfs", "pgbouncer",
-    "xray", "mihomo", "openvpn", "caddy-acmedns",
+    "xray", "mihomo", "openvpn", "caddy-acmedns", "caddy-l4",
   ]
 }
