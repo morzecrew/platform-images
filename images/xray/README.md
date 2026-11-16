@@ -76,6 +76,7 @@ of these. Everything else in the config stays as written.
 | `{"$proxy": "/abs/path"}` | a socks or http outbound's `settings`, split from the `[user:pass@]host:port` in the file (see below) |
 | `{"$wireguard": "/abs/path"}` | a wireguard outbound's `settings`, from the wg-quick client config in the file (see below) |
 | `{"$upstreams": "/abs/path"}` | an `outbounds` array, one socks, http or wireguard outbound per line of the file (see below) |
+| `{"$subscription": "/abs/path"}` | the `outbounds` array of the Xray config the URL in the file serves, kept current (see below) |
 
 ```json
 "settings": {
@@ -97,7 +98,9 @@ The resolved files are written to `XRAY_RUNTIME_DIR` under the same names, at
 mode 0600 in a 0700 directory. The directory is emptied on every start, so a
 source file removed since the last start is not merged in again. The source
 directory is never written. The entrypoint then runs `xray run -test` on the
-result and execs `xray run -confdir $XRAY_RUNTIME_DIR` as PID 1.
+result and execs `xray run -confdir $XRAY_RUNTIME_DIR` as PID 1, or, when a
+config holds a [`$subscription`](#a-subscriptions-outbounds), runs it as its
+child and keeps the subscription current.
 
 ### Refusals
 
@@ -391,6 +394,43 @@ the URL:
   `<word>=<url>`, a word twice, a word that is a scheme, or a login in its
   URL; a line naming a word whose port would pass 65535.
 
+## A subscription's outbounds
+
+`{"$subscription": "/run/secrets/subscription_url"}` resolves to the
+`outbounds` array of the Xray config the `http` or `https` URL in the file
+serves, as an app's "custom config" subscription does. The rest of what that
+config holds (its inbounds, routing, DNS) is not used: the local config keeps
+those, and routes to the subscription's outbounds by tag, through a balancer
+whose selector is their prefix. Put it in a file of its own, as
+[`$upstreams`](#any-number-of-upstreams-from-one-list):
+
+```json
+{"outbounds": {"$subscription": "/run/secrets/subscription_url"}}
+```
+
+The URL is fetched at start, and again every `XRAY_SUBSCRIPTION_INTERVAL`,
+through `XRAY_SUBSCRIPTION_PROXY` when it is set (an inbound of this Xray, so
+the subscription comes through the tunnel where only the tunnel gets through)
+and directly when that fails. When the outbounds changed, the whole source is
+resolved again and tested with `xray run -test` in a directory beside the
+running config. Xray restarts on it only if it passes; otherwise it keeps the
+config it runs, and says so. With a subscription, the entrypoint stays as
+Xray's parent: it passes `SIGTERM` and `SIGINT` on, and Xray's own exit ends
+the container with Xray's status.
+
+- **At start, unreachable.** The copy in `XRAY_SUBSCRIPTION_CACHE`, the last
+  outbounds `xray run -test` passed, kept as `<file name>.json` there. With no
+  cache, the array is empty, so Xray starts on the rest of the config alone,
+  and the URL is tried every 30 seconds until it answers. A local config whose
+  first outbound blocks fails closed until then.
+- **What is accepted.** A `200` with at most 4 MiB of JSON, an object whose
+  `outbounds` array holds at least one object with a `protocol`. Anything else
+  keeps what Xray has.
+- **Nothing shown.** The URL's path is the credential: errors and the summary
+  name the file, never the URL. Every string in the outbounds, but their
+  `protocol`, `network`, `security`, `flow`, `fingerprint`, `mode`, `tag` and
+  `type`, is redacted from Xray's output.
+
 ## VLESS Encryption from one seed
 
 Both halves of an ML-KEM-768 VLESS Encryption key pair derive from one 64-byte
@@ -487,6 +527,9 @@ inbound. `http`, `https`, `socks5` and `socks5h` proxy URLs work.
 | `XRAY_HEALTHCHECK_EXPECT` | unset | A regular expression in [Go's RE2 syntax](https://github.com/google/re2/wiki/Syntax) the response body must match. Unset means any 2xx passes and the body is not read. Ignored, with a warning at start, while `XRAY_HEALTHCHECK_PROXY` is unset. |
 | `XRAY_UPSTREAM_ALIASES` | unset | `<word>=<url>` pairs, separated by spaces, that an [upstreams](#any-number-of-upstreams-from-one-list) line may name by its word. No login. |
 | `XRAY_UPSTREAM_PIN` | unset | Names of upstreams lines, separated by commas, each moved to the front of its groups. |
+| `XRAY_SUBSCRIPTION_INTERVAL` | `1h` | How often a [subscription](#a-subscriptions-outbounds) is fetched again. A Go duration, 1s or more. |
+| `XRAY_SUBSCRIPTION_PROXY` | unset | A `socks5://`, `socks5h://` or `http://` inbound of this Xray a subscription is fetched through, directly when that fails. No login. Unset means directly. |
+| `XRAY_SUBSCRIPTION_CACHE` | unset | A writable directory where each subscription's last accepted outbounds are kept, for a start while its URL is unreachable. Unset means none. |
 
 A value set to the empty string takes the default. A bad URL, timeout or
 expression refuses at start (78), so it is found at deployment rather than as

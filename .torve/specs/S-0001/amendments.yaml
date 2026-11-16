@@ -675,6 +675,46 @@ amendments:
     md: >-
       caddy-l4 is configured as caddy-acmedns is, by its Caddyfile alone, with no
       entrypoint and neither channel, so D-12 names it beside caddy-acmedns.
+  - id: A-21
+    at: '2026-11-16T17:37:46Z'
+    title: >-
+      xray keeps an Xray subscription's outbounds current ($subscription)
+    changes:
+      - subject: D-18
+        field: text
+        before: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's and mihomo's servers have none,
+          so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
+          path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}`, `{"$proxy":
+          "<absolute path>"}`, `{"$wireguard": "<absolute path>"}` or `{"$upstreams":
+          "<absolute path>"}`, and substitute nothing else.
+        after: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's and mihomo's servers have none,
+          so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
+          path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}`, `{"$proxy":
+          "<absolute path>"}`, `{"$wireguard": "<absolute path>"}`, `{"$upstreams":
+          "<absolute path>"}` or `{"$subscription": "<absolute path>"}`, and substitute
+          nothing else.
+      - subject: D-18
+        field: fingerprint
+        before: 77ed62dbb81e611c/9e62c124a404b61d
+        after: 1269c5077df845f0/9e62c124a404b61d
+    md: >-
+      dotdash's device client moves from mihomo to Xray and keeps its subscription,
+      refreshed hourly, which Xray cannot fetch or turn into a config itself. dotdash
+      serves each device's Xray config beside its links, so `$subscription` takes
+      that config's outbounds rather than parsing share links. It is fetched at
+      start and every `XRAY_SUBSCRIPTION_INTERVAL`, through `XRAY_SUBSCRIPTION_PROXY`
+      first and directly otherwise; a changed one is resolved and tested beside the
+      running config, and Xray restarts on it only if it passes, so the entrypoint
+      stays Xray's parent instead of exec'ing it. The last accepted outbounds are
+      kept in `XRAY_SUBSCRIPTION_CACHE` for a start while the URL is unreachable,
+      and with none Xray starts on the local config alone. Errors name the file,
+      never the URL, whose path is the credential.
 editorial:
   - subject: D-5
     field: text

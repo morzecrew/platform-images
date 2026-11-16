@@ -1,6 +1,8 @@
 // xray-entrypoint starts Xray on a config whose secrets are files.
 //
 //	xray-entrypoint [run [xray run flags...]]  resolve, test, then exec xray
+//	                                           (or, with $subscription, run it
+//	                                           and keep the subscription current)
 //	xray-entrypoint healthcheck                probe egress through Xray
 //	xray-entrypoint vless-encryption <seed>    print the client's VLESS encryption
 //	xray-entrypoint reality-password <key>     print the client's REALITY password
@@ -17,7 +19,10 @@
 // {"$wireguard": "/absolute/path"} with a wireguard outbound's settings, from
 // the wg-quick client config in that file, or exactly
 // {"$upstreams": "/absolute/path"} with an outbounds array, one outbound per
-// line of that file, and changes nothing else. The contract is in images/xray/README.md.
+// line of that file, or exactly {"$subscription": "/absolute/path"} with the
+// outbounds of the Xray config the URL in that file serves, fetched again
+// every XRAY_SUBSCRIPTION_INTERVAL (subscription.go), and changes nothing
+// else. The contract is in images/xray/README.md.
 package main
 
 import (
@@ -57,6 +62,9 @@ var img = &envconf.Image{
 		{Name: "XRAY_HEALTHCHECK_EXPECT", Default: ""},
 		{Name: "XRAY_UPSTREAM_ALIASES", Default: ""},
 		{Name: "XRAY_UPSTREAM_PIN", Default: ""},
+		{Name: "XRAY_SUBSCRIPTION_INTERVAL", Default: "1h"},
+		{Name: "XRAY_SUBSCRIPTION_PROXY", Default: ""},
+		{Name: "XRAY_SUBSCRIPTION_CACHE", Default: ""},
 	},
 	Upstream: map[string]bool{
 		"XRAY_LOCATION_ASSET": true, "XRAY_LOCATION_CERT": true,
@@ -104,6 +112,10 @@ func start(extra []string) error {
 	if _, err := img.HealthSettings(); err != nil {
 		return err
 	}
+	subSet, err := subscriptionSettings()
+	if err != nil {
+		return err
+	}
 	configs, err := resolveDir(src)
 	if err != nil {
 		return err
@@ -116,6 +128,10 @@ func start(extra []string) error {
 		return err
 	}
 	img.Summary(os.Stderr, version, configs)
+	if len(subs) > 0 {
+		writeCaches()
+		return supervise(src, run, extra, subSet)
+	}
 	img.Exec(append([]string{"run", "-confdir", run}, extra...)...)
 	return nil
 }
@@ -129,6 +145,7 @@ var references = []envconf.Reference{
 	{Key: "$proxy", Resolve: proxy},
 	{Key: "$wireguard", Resolve: wireguard},
 	{Key: "$upstreams", Resolve: upstreams},
+	{Key: "$subscription", Resolve: subscription},
 }
 
 func resolveDir(dir string) ([]*envconf.Config, error) {
