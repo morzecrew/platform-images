@@ -73,6 +73,18 @@ func TestFetchRefusesWithoutTheURL(t *testing.T) {
 			t.Errorf("%d %.20q: %v, want %q", c.status, c.body, err, c.want)
 		}
 	}
+	// A redirect is not followed, nor its Location quoted, parsable or not.
+	for _, loc := range []string{"/0123456789abcdef/%zz", "/0123456789abcdef.json"} {
+		redir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Location", loc)
+			w.WriteHeader(http.StatusFound)
+		}))
+		_, err := fetch(redir.URL+"/x", nil)
+		redir.Close()
+		if err == nil || err.Error() != "answered 302 Found" {
+			t.Errorf("a redirect to %s: %v", loc, err)
+		}
+	}
 	srv, u, _ := subServer(t, 200, subConfig)
 	srv.Close()
 	_, err := fetch(u, nil)
@@ -173,6 +185,13 @@ func TestSubscriptionURLAndSettings(t *testing.T) {
 		_, err := subscriptionSettings()
 		if (c.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), c.want)) {
 			t.Errorf("%s %s: %v", c.interval, c.proxy, err)
+		}
+	}
+	t.Setenv("XRAY_SUBSCRIPTION_PROXY", "")
+	for _, c := range []string{"/etc/xray", "/run", "/run/xray/cache"} {
+		t.Setenv("XRAY_SUBSCRIPTION_CACHE", c)
+		if _, err := subscriptionSettings(); err == nil || !strings.Contains(err.Error(), "overlaps") {
+			t.Errorf("cache %s: %v", c, err)
 		}
 	}
 }

@@ -715,6 +715,8 @@ refuse "a pin no upstreams line is named" \
 
 refuse "a subscription proxy with a login, which the environment would show" \
 	"XRAY_SUBSCRIPTION_PROXY holds a login" "${WORK}/conf" -e XRAY_SUBSCRIPTION_PROXY=socks5://u:p@127.0.0.1:1
+refuse "a subscription cache in the source directory, whose files it would replace" \
+	"XRAY_SUBSCRIPTION_CACHE (/etc/xray) overlaps" "${WORK}/conf" -e XRAY_SUBSCRIPTION_CACHE=/etc/xray
 
 # RE2 has no lookahead. Found at deployment, not as an unhealthy container.
 refuse "a healthcheck expression that does not compile" \

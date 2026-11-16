@@ -7,6 +7,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -112,25 +113,24 @@ func get(name, u string, proxy *url.URL) ([]byte, error) {
 
 // fetch GETs the URL, through proxy when it is set, and returns the outbounds
 // array of the config it serves, re-encoded, so two fetches of one config
-// compare equal.
+// compare equal. One round trip, no redirect followed: an http.Client's
+// errors quote the URL, and a Location header it cannot parse, whatever that
+// holds.
 func fetch(u string, proxy *url.URL) ([]byte, error) {
 	tr := &http.Transport{Proxy: nil, ForceAttemptHTTP2: true}
 	if proxy != nil {
 		tr.Proxy = http.ProxyURL(proxy)
 	}
 	defer tr.CloseIdleConnections()
-	req, err := http.NewRequest(http.MethodGet, u, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), subTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, errors.New("does not hold a URL Go can request")
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := (&http.Client{Transport: tr, Timeout: subTimeout}).Do(req)
+	resp, err := tr.RoundTrip(req)
 	if err != nil {
-		// A *url.Error quotes the URL.
-		var ue *url.Error
-		if errors.As(err, &ue) {
-			err = ue.Err
-		}
 		return nil, fmt.Errorf("could not be fetched (%v)", err)
 	}
 	defer resp.Body.Close()
@@ -267,6 +267,10 @@ func subscriptionSettings() (subSettings, error) {
 			return s, errors.New("XRAY_SUBSCRIPTION_PROXY holds a login, which the environment would show: point it at an inbound that asks for none")
 		}
 		s.proxy = u
+	}
+	if c := img.Get("XRAY_SUBSCRIPTION_CACHE"); c != "" &&
+		(envconf.Overlap(c, img.Get("XRAY_SOURCE_DIR")) || envconf.Overlap(c, img.Get("XRAY_RUNTIME_DIR"))) {
+		return s, fmt.Errorf("XRAY_SUBSCRIPTION_CACHE (%s) overlaps XRAY_SOURCE_DIR or XRAY_RUNTIME_DIR, whose files it would replace: point it at a directory of its own", c)
 	}
 	return s, nil
 }

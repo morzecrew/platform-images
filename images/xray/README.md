@@ -425,8 +425,8 @@ the container with Xray's status.
   and the URL is tried every 30 seconds until it answers. A local config whose
   first outbound blocks fails closed until then.
 - **What is accepted.** A `200` with at most 4 MiB of JSON, an object whose
-  `outbounds` array holds at least one object with a `protocol`. Anything else
-  keeps what Xray has.
+  `outbounds` array holds at least one object with a `protocol`. A redirect is
+  not followed. Anything else keeps what Xray has.
 - **Nothing shown.** The URL's path is the credential: errors and the summary
   name the file, never the URL. Every string in the outbounds, but their
   `protocol`, `network`, `security`, `flow`, `fingerprint`, `mode`, `tag` and
@@ -531,7 +531,7 @@ inbound. `http`, `https`, `socks5` and `socks5h` proxy URLs work.
 | `XRAY_UPSTREAM_PIN` | unset | Names of upstreams lines, separated by commas, each moved to the front of its groups. |
 | `XRAY_SUBSCRIPTION_INTERVAL` | `1h` | How often a [subscription](#a-subscriptions-outbounds) is fetched again. A Go duration, 1s or more. |
 | `XRAY_SUBSCRIPTION_PROXY` | unset | A `socks5://`, `socks5h://` or `http://` inbound of this Xray a subscription is fetched through, directly when that fails. No login. Unset means directly. |
-| `XRAY_SUBSCRIPTION_CACHE` | unset | A writable directory where each subscription's last accepted outbounds are kept, for a start while its URL is unreachable. Unset means none. |
+| `XRAY_SUBSCRIPTION_CACHE` | unset | A writable directory, outside `XRAY_SOURCE_DIR` and `XRAY_RUNTIME_DIR`, where each subscription's last accepted outbounds are kept, for a start while its URL is unreachable. Unset means none. |
 
 A value set to the empty string takes the default. A bad URL, timeout or
 expression refuses at start (78), so it is found at deployment rather than as
