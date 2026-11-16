@@ -707,14 +707,50 @@ amendments:
       dotdash's device client moves from mihomo to Xray and keeps its subscription,
       refreshed hourly, which Xray cannot fetch or turn into a config itself. dotdash
       serves each device's Xray config beside its links, so `$subscription` takes
-      that config's outbounds rather than parsing share links. It is fetched at
-      start and every `XRAY_SUBSCRIPTION_INTERVAL`, through `XRAY_SUBSCRIPTION_PROXY`
-      first and directly otherwise; a changed one is resolved and tested beside the
-      running config, and Xray restarts on it only if it passes, so the entrypoint
-      stays Xray's parent instead of exec'ing it. The last accepted outbounds are
-      kept in `XRAY_SUBSCRIPTION_CACHE` for a start while the URL is unreachable,
-      and with none Xray starts on the local config alone. Errors name the file,
-      never the URL, whose path is the credential.
+      that config's outbounds rather than parsing share links. It is fetched at start
+      and every `XRAY_SUBSCRIPTION_INTERVAL`, through `XRAY_SUBSCRIPTION_PROXY` first
+      and directly otherwise; a changed one is resolved and tested beside the running
+      config, and Xray restarts on it only if it passes, so the entrypoint stays Xray's
+      parent instead of exec'ing it. The last accepted outbounds are kept in `XRAY_SUBSCRIPTION_CACHE`
+      for a start while the URL is unreachable, and with none Xray starts on the local
+      config alone. Errors name the file, never the URL, whose path is the credential.
+  - id: A-22
+    at: '2026-11-16T23:47:11Z'
+    title: >-
+      xray gives a Hysteria2 inbound its users from the VLESS clients file ($hysteriaUsers)
+    changes:
+      - subject: D-18
+        field: text
+        before: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's and mihomo's servers have none,
+          so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
+          path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}`, `{"$proxy":
+          "<absolute path>"}`, `{"$wireguard": "<absolute path>"}`, `{"$upstreams":
+          "<absolute path>"}` or `{"$subscription": "<absolute path>"}`, and substitute
+          nothing else.
+        after: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's and mihomo's servers have none,
+          so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
+          path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}`, `{"$hysteriaUsers":
+          "<absolute path>"}`, `{"$proxy": "<absolute path>"}`, `{"$wireguard": "<absolute
+          path>"}`, `{"$upstreams": "<absolute path>"}` or `{"$subscription": "<absolute
+          path>"}`, and substitute nothing else.
+      - subject: D-18
+        field: fingerprint
+        before: 1269c5077df845f0/9e62c124a404b61d
+        after: c6c1ec0cfb07a507/9e62c124a404b61d
+    md: >-
+      dotdash adds Hysteria2, which Xray runs natively, beside its VLESS inbounds,
+      and each device's Hysteria2 login is the UUID its VLESS links carry, so one
+      file still adds and revokes a device everywhere. A Hysteria2 inbound's
+      `users` take an `auth` where VLESS clients take an `id`, and a template can't
+      read the file, so `$hysteriaUsers` reads the same file as `$vlessClients`,
+      through the same parser and refusals, and writes each client as `{"auth":
+      <uuid>, "email": <name>}`.
 editorial:
   - subject: D-5
     field: text
