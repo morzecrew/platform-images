@@ -44,6 +44,7 @@ cleanup() {
 	done
 	[ -z "${HTTPD_PID}" ] || kill "${HTTPD_PID}" 2>/dev/null || true
 	[ -z "${TLSD_PID}" ] || kill "${TLSD_PID}" 2>/dev/null || true
+	"${ENGINE}" volume rm -f "${CTR}-state" >/dev/null 2>&1 || true
 	rm -rf "${WORK}"
 }
 trap cleanup EXIT
@@ -561,8 +562,7 @@ SECRETS+=("${SUB_TOKEN}")
 serve() { printf '{"outbounds": [%s]}\n' "$1" >"${WORK}/www/${SUB_TOKEN}.json"; }
 serve '{"tag": "sub-a", "protocol": "freedom", "settings": {"redirect": "127.0.0.1:'"${TARGET_PORT}"'", "finalRules": [{"action": "allow"}]}}'
 printf 'http://127.0.0.1:%s/%s.json\n' "${TARGET_PORT}" "${SUB_TOKEN}" >"${WORK}/secrets/subscription_url"
-mkdir -p "${WORK}/sub" "${WORK}/subcache"
-chmod 0777 "${WORK}/subcache"
+mkdir -p "${WORK}/sub"
 cat >"${WORK}/sub/10-local.json" <<EOF
 {"inbounds": [{"listen": "127.0.0.1", "port": ${PROBE_PORT}, "protocol": "http"}],
  "outbounds": [{"tag": "block", "protocol": "blackhole"}],
@@ -572,10 +572,11 @@ EOF
 printf '{"outbounds": {"$subscription": "/run/secrets/subscription_url"}}\n' >"${WORK}/sub/20-sub.json"
 
 # run_sub <log needle>: the container on the subscription config, until the needle is in its log.
+# The cache is a new named volume on the image's /var/lib/xray, which 65532 can write to.
 run_sub() {
 	"${ENGINE}" run -d --name "${CTR}" "${RUN_ARGS[@]}" --read-only --tmpfs /run/xray:rw,mode=1777 \
-		-v "${WORK}/sub:/etc/xray:ro" -v "${WORK}/secrets:/run/secrets:ro" -v "${WORK}/subcache:/cache" \
-		-e XRAY_SUBSCRIPTION_INTERVAL=2s -e XRAY_SUBSCRIPTION_CACHE=/cache "${IMAGE}" >/dev/null
+		-v "${WORK}/sub:/etc/xray:ro" -v "${WORK}/secrets:/run/secrets:ro" -v "${CTR}-state:/var/lib/xray" \
+		-e XRAY_SUBSCRIPTION_INTERVAL=2s -e XRAY_SUBSCRIPTION_CACHE=/var/lib/xray "${IMAGE}" >/dev/null
 	wait_sub "$1"
 }
 wait_sub() {
