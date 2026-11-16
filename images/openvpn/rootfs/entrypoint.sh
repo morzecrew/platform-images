@@ -194,12 +194,14 @@ if [ -n "${LIST}" ]; then
 	rm -rf "${TUNNELS}"
 	(umask 077 && mkdir -p "${TUNNELS}")
 	# "<line number> <what follows openvpn://>" for each line naming openvpn,
-	# as the xray image counts them, and "-" when nothing follows. A line's URL
-	# follows its "|" when it has one ("name=a | openvpn://..."), else leads it.
+	# as the xray image counts them, and "-" when nothing follows. A line
+	# whose first word is a tag or "|" ends in "| <url>" ("name=a |
+	# openvpn://..."), as the xray image reads it; any other leads with its URL.
 	lines="$(tr -d '\r' <"${LIST}" | awk '
 		{ sub(/^[ \t]+/, "") }
 		/^#/ || NF == 0 { next }
-		{ u = $1; for (i = 1; i < NF; i++) if ($i == "|") { u = $(i + 1); break } }
+		{ u = $1 }
+		$1 == "|" || $1 ~ /^(name|group)=/ { u = (NF > 1 && $(NF - 1) == "|") ? $NF : "" }
 		u == "openvpn" || u == "openvpn://" { print NR, "-"; next }
 		u ~ /^openvpn:\/\// { print NR, substr(u, 11) }
 	')"
