@@ -176,3 +176,30 @@ func TestSubscriptionURLAndSettings(t *testing.T) {
 		}
 	}
 }
+
+func TestSubscriptionStartsThroughTheProxy(t *testing.T) {
+	subs = map[string][]byte{}
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(subConfig))
+	}))
+	defer proxy.Close()
+	subProxy, _ = url.Parse(proxy.URL)
+	defer func() { subProxy = nil }()
+	// Only the proxy knows the name.
+	res, err := subscription(urlFile(t, "http://sub.invalid/0123"))
+	if outs, _ := res.Value.([]any); err != nil || len(outs) != 2 {
+		t.Fatalf("at start through the proxy: %v, %v", res.Value, err)
+	}
+}
+
+func TestSubscriptionsSharingAFileNameAreRefusedWithACache(t *testing.T) {
+	subs = map[string][]byte{}
+	t.Setenv("XRAY_SUBSCRIPTION_CACHE", t.TempDir())
+	_, u, _ := subServer(t, 200, subConfig)
+	if _, err := subscription(urlFile(t, u)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := subscription(urlFile(t, u)); err == nil || !strings.Contains(err.Error(), "rename one") {
+		t.Fatalf("a second subscription_url: %v", err)
+	}
+}

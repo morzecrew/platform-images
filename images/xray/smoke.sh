@@ -593,6 +593,8 @@ expect_in "the summary names the subscription and its outbounds, not the URL" "$
 	"outbounds <- \$subscription /run/secrets/subscription_url 1 outbound(s)"
 [ "$(via "${PROBE_PORT}")" = 200 ] || fail "the subscription's freedom outbound did not reach the target"
 echo "ok: a \$subscription's outbound carries the balancer's traffic"
+out="$(hc -e XRAY_HEALTHCHECK_PROXY=)" || fail "liveness under the entrypoint: ${out}"
+echo "ok: liveness passes with Xray the entrypoint's child"
 
 serve '{"tag": "sub-b", "protocol": "blackhole"}'
 wait_sub "1 outbound(s); restarting Xray on it"
@@ -603,6 +605,7 @@ echo "ok: a changed subscription restarts Xray on its outbounds"
 serve '{"tag": "sub-c", "protocol": "nonsense"}'
 wait_sub "Xray keeps the config it runs"
 [ "$(via "${PROBE_PORT}")" != 200 ] || fail "a refused subscription changed what Xray runs"
+[ "$("${ENGINE}" inspect -f '{{.State.Running}}' "${CTR}")" = true ] || fail "Xray stopped after a refused subscription"
 echo "ok: a subscription xray run -test refuses leaves Xray on the config it runs"
 ALL_OUTPUT+="$("${ENGINE}" logs "${CTR}" 2>&1)"
 "${ENGINE}" rm -f "${CTR}" >/dev/null

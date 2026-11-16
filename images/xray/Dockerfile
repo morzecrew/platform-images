@@ -48,7 +48,8 @@ COPY --from=entrypoint --chown=65532:65532 --chmod=0700 /out/run/xray /run/xray
 ENV XRAY_SOURCE_DIR=/etc/xray \
     XRAY_RUNTIME_DIR=/run/xray \
     XRAY_HEALTHCHECK_URL=https://www.gstatic.com/generate_204 \
-    XRAY_HEALTHCHECK_TIMEOUT=10s
+    XRAY_HEALTHCHECK_TIMEOUT=10s \
+    XRAY_SUBSCRIPTION_INTERVAL=1h
 
 USER 65532:65532
 

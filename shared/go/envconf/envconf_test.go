@@ -330,12 +330,12 @@ func TestExpectWithoutProxyIsReported(t *testing.T) {
 	}
 }
 
-// Under go test, PID 1 is never the server, so liveness fails, and says why.
+// Under go test, the server never runs, so liveness fails, and says why.
 func TestLivenessWithoutProxy(t *testing.T) {
 	t.Setenv("DEMO_HEALTHCHECK_PROXY", "")
 	var rc int
 	out := stderr(t, func() { rc = demo.Healthcheck("/nonexistent", "*.json") })
-	if rc != 1 || !strings.Contains(out, "healthcheck: PID 1 is not Demo") {
+	if rc != 1 || !strings.Contains(out, "healthcheck: Demo is not running") {
 		t.Errorf("rc = %d, stderr %q", rc, out)
 	}
 }

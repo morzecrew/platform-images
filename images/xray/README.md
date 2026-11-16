@@ -419,7 +419,8 @@ Xray's parent: it passes `SIGTERM` and `SIGINT` on, and Xray's own exit ends
 the container with Xray's status.
 
 - **At start, unreachable.** The copy in `XRAY_SUBSCRIPTION_CACHE`, the last
-  outbounds `xray run -test` passed, kept as `<file name>.json` there. With no
+  outbounds `xray run -test` passed, kept as `<file name>.json` there (two
+  subscriptions whose files share a name are refused). With no
   cache, the array is empty, so Xray starts on the rest of the config alone,
   and the URL is tried every 30 seconds until it answers. A local config whose
   first outbound blocks fails closed until then.
@@ -509,8 +510,9 @@ inbound. `http`, `https`, `socks5` and `socks5h` proxy URLs work.
   Anchor it: unanchored, `203\.0\.113\.7` also matches `203.0.113.71`. This
   fits a static exit IP. A rotating pool needs an ASN or country check, which
   the image does not make.
-- With `XRAY_HEALTHCHECK_PROXY` unset, the check passes if PID 1 is Xray and
-  the runtime config exists. It says on stderr that egress was not probed.
+- With `XRAY_HEALTHCHECK_PROXY` unset, the check passes if Xray runs (as PID 1,
+  or under the entrypoint with a subscription) and the runtime config exists.
+  It says on stderr that egress was not probed.
 - The image bakes no `HEALTHCHECK`, because the probe needs an inbound only
   your config can declare. Add the `healthcheck:` block shown under
   [Usage](#usage).

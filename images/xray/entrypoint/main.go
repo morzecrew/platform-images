@@ -116,6 +116,7 @@ func start(extra []string) error {
 	if err != nil {
 		return err
 	}
+	subProxy = subSet.proxy
 	configs, err := resolveDir(src)
 	if err != nil {
 		return err

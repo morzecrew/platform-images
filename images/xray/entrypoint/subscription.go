@@ -38,6 +38,10 @@ const (
 // which is at start.
 var subs = map[string][]byte{}
 
+// XRAY_SUBSCRIPTION_PROXY, set by start before anything is resolved, so the
+// first fetch goes the way every later one does.
+var subProxy *url.URL
+
 // The keys whose values are an outbound's structure, shown in Xray's
 // messages; every other string a subscription's outbounds hold is redacted.
 var subPlain = map[string]bool{"protocol": true, "network": true, "security": true, "flow": true,
@@ -53,9 +57,16 @@ func subscription(name string) (envconf.Resolution, error) {
 	if err != nil {
 		return envconf.Resolution{}, err
 	}
+	if p := cacheFile(name); p != "" {
+		for other := range subs {
+			if other != name && cacheFile(other) == p {
+				return envconf.Resolution{}, fmt.Errorf("has the file name of %s, and XRAY_SUBSCRIPTION_CACHE keeps one copy per file name: rename one of them", other)
+			}
+		}
+	}
 	body, seen := subs[name]
 	if !seen {
-		if body, err = fetch(u, nil); err != nil {
+		if body, err = get(name, u, subProxy); err != nil {
 			fmt.Fprintf(os.Stderr, "subscription: %s: %v\n", name, err)
 			if body = readCache(name); body != nil {
 				fmt.Fprintf(os.Stderr, "subscription: %s: starting on the copy in XRAY_SUBSCRIPTION_CACHE\n", name)
@@ -84,6 +95,19 @@ func subscriptionURL(name string) (string, error) {
 		return "", errors.New("does not hold an http or https URL")
 	}
 	return s, nil
+}
+
+// get fetches through proxy first when it is set, and directly when that
+// fails.
+func get(name, u string, proxy *url.URL) ([]byte, error) {
+	if proxy != nil {
+		b, err := fetch(u, proxy)
+		if err == nil {
+			return b, nil
+		}
+		fmt.Fprintf(os.Stderr, "subscription: %s: through XRAY_SUBSCRIPTION_PROXY: %v\n", name, err)
+	}
+	return fetch(u, nil)
 }
 
 // fetch GETs the URL, through proxy when it is set, and returns the outbounds
@@ -252,8 +276,8 @@ func subscriptionSettings() (subSettings, error) {
 // through XRAY_SUBSCRIPTION_PROXY first when set, directly when that fails.
 // When one changed, the whole source is resolved again and tested in a
 // directory beside the running config; Xray restarts on it only if it passes,
-// and the cache is written only then. A signal goes on to Xray, and Xray's own
-// exit ends the container with its status.
+// and the cache is written only then. A signal goes on to Xray, a refresh
+// under way or not, and Xray's exit ends the container with its status.
 func supervise(src, run string, extra []string, s subSettings) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
@@ -262,17 +286,24 @@ func supervise(src, run string, extra []string, s subSettings) error {
 		return err
 	}
 	timer := time.NewTimer(next(s))
+	// Set while a refresh runs, in the background so a signal is not held up
+	// by a fetch. Till it answers, subs is the refresh's alone.
+	var refreshed chan bool
 	for {
 		select {
 		case sig := <-sigs:
 			_ = cmd.Process.Signal(sig)
 			<-done
-			os.Exit(0)
+			os.Exit(exitCode(cmd.ProcessState))
 		case err := <-done:
 			fmt.Fprintf(os.Stderr, "xray-entrypoint: Xray exited (%v)\n", err)
-			os.Exit(cmd.ProcessState.ExitCode())
+			os.Exit(exitCode(cmd.ProcessState))
 		case <-timer.C:
-			if refresh(src, run, extra, s) {
+			refreshed = make(chan bool, 1)
+			go func(c chan bool) { c <- refresh(src, run, extra, s) }(refreshed)
+		case restart := <-refreshed:
+			refreshed = nil
+			if restart {
 				stop(cmd, done)
 				if cmd, done, err = launch(run, extra); err != nil {
 					return err
@@ -281,6 +312,14 @@ func supervise(src, run string, extra []string, s subSettings) error {
 			timer.Reset(next(s))
 		}
 	}
+}
+
+// exitCode is Xray's exit status as a shell gives it: 128+n after signal n.
+func exitCode(ps *os.ProcessState) int {
+	if ws, ok := ps.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+		return 128 + int(ws.Signal())
+	}
+	return ps.ExitCode()
 }
 
 func next(s subSettings) time.Duration {
@@ -304,17 +343,10 @@ func refresh(src, run string, extra []string, s subSettings) bool {
 			fmt.Fprintf(os.Stderr, "subscription: %s %v\n", name, err)
 			continue
 		}
-		var b []byte
-		if s.proxy != nil {
-			if b, err = fetch(u, s.proxy); err != nil {
-				fmt.Fprintf(os.Stderr, "subscription: %s: through XRAY_SUBSCRIPTION_PROXY: %v\n", name, err)
-			}
-		}
-		if b == nil {
-			if b, err = fetch(u, nil); err != nil {
-				fmt.Fprintf(os.Stderr, "subscription: %s: %v; Xray keeps what it has\n", name, err)
-				continue
-			}
+		b, err := get(name, u, s.proxy)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "subscription: %s: %v; Xray keeps what it has\n", name, err)
+			continue
 		}
 		if !bytes.Equal(b, subs[name]) {
 			subs[name], changed = b, true
