@@ -132,13 +132,23 @@ func fetch(u string, proxy *url.URL) (_ []byte, err error) {
 		return nil, errors.New("does not hold a URL Go can request")
 	}
 	req.Header.Set("Accept", "application/json")
-	if p := strings.Trim(req.URL.EscapedPath(), "/"); p != "" {
-		defer func() {
-			if err != nil {
-				err = errors.New(strings.ReplaceAll(err.Error(), p, "…"))
+	// Each part of the path and query, as sent and decoded, whichever of them
+	// holds the credential and however much of it an error quotes.
+	parts := strings.FieldsFunc(req.URL.EscapedPath()+"/"+req.URL.Path+"?"+req.URL.RawQuery,
+		func(r rune) bool { return strings.ContainsRune("/?&=", r) })
+	slices.SortFunc(parts, func(a, b string) int { return len(b) - len(a) }) // a part inside another goes after it
+	defer func() {
+		if err == nil {
+			return
+		}
+		msg := err.Error()
+		for _, p := range parts {
+			if len(p) >= 4 {
+				msg = strings.ReplaceAll(msg, p, "…")
 			}
-		}()
-	}
+		}
+		err = errors.New(msg)
+	}()
 	resp, err := tr.RoundTrip(req)
 	if err != nil {
 		return nil, fmt.Errorf("could not be fetched (%v)", err)

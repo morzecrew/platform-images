@@ -90,7 +90,7 @@ func TestFetchRefusesWithoutTheURL(t *testing.T) {
 	// malformed that Go quotes it.
 	for _, answer := range []string{
 		"HTTP/1.1 302 /0123456789abcdef/%zz\r\nContent-Length: 0\r\n\r\n",
-		"/0123456789abcdef/\r\n\r\n",
+		"/0123456789abcdef/%zz?fedcba9876543210\r\n\r\n",
 	} {
 		ln, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
@@ -103,9 +103,9 @@ func TestFetchRefusesWithoutTheURL(t *testing.T) {
 				c.Close()
 			}
 		}()
-		_, err = fetch("http://"+ln.Addr().String()+"/0123456789abcdef/", nil)
+		_, err = fetch("http://"+ln.Addr().String()+"/sub/0123456789abcdef?key=fedcba9876543210", nil)
 		ln.Close()
-		if err == nil || strings.Contains(err.Error(), "0123456789abcdef") {
+		if err == nil || strings.Contains(err.Error(), "0123456789abcdef") || strings.Contains(err.Error(), "fedcba9876543210") {
 			t.Errorf("answered %.20q: %v", answer, err)
 		}
 	}
