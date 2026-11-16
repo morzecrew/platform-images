@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -83,6 +84,29 @@ func TestFetchRefusesWithoutTheURL(t *testing.T) {
 		redir.Close()
 		if err == nil || err.Error() != "answered 302 Found" {
 			t.Errorf("a redirect to %s: %v", loc, err)
+		}
+	}
+	// Nor what a server puts in its reason phrase, or in a response so
+	// malformed that Go quotes it.
+	for _, answer := range []string{
+		"HTTP/1.1 302 /0123456789abcdef/%zz\r\nContent-Length: 0\r\n\r\n",
+		"/0123456789abcdef/\r\n\r\n",
+	} {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		go func() {
+			if c, err := ln.Accept(); err == nil {
+				_, _ = c.Read(make([]byte, 4096))
+				_, _ = c.Write([]byte(answer))
+				c.Close()
+			}
+		}()
+		_, err = fetch("http://"+ln.Addr().String()+"/0123456789abcdef/", nil)
+		ln.Close()
+		if err == nil || strings.Contains(err.Error(), "0123456789abcdef") {
+			t.Errorf("answered %.20q: %v", answer, err)
 		}
 	}
 	srv, u, _ := subServer(t, 200, subConfig)

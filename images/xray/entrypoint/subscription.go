@@ -20,6 +20,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -115,8 +116,10 @@ func get(name, u string, proxy *url.URL) ([]byte, error) {
 // array of the config it serves, re-encoded, so two fetches of one config
 // compare equal. One round trip, no redirect followed: an http.Client's
 // errors quote the URL, and a Location header it cannot parse, whatever that
-// holds.
-func fetch(u string, proxy *url.URL) ([]byte, error) {
+// holds. What else a server or proxy can put in an error, a reason phrase or
+// a malformed response quoted back, is left out or scrubbed of the URL's
+// path, the credential.
+func fetch(u string, proxy *url.URL) (_ []byte, err error) {
 	tr := &http.Transport{Proxy: nil, ForceAttemptHTTP2: true}
 	if proxy != nil {
 		tr.Proxy = http.ProxyURL(proxy)
@@ -129,13 +132,20 @@ func fetch(u string, proxy *url.URL) ([]byte, error) {
 		return nil, errors.New("does not hold a URL Go can request")
 	}
 	req.Header.Set("Accept", "application/json")
+	if p := strings.Trim(req.URL.EscapedPath(), "/"); p != "" {
+		defer func() {
+			if err != nil {
+				err = errors.New(strings.ReplaceAll(err.Error(), p, "…"))
+			}
+		}()
+	}
 	resp, err := tr.RoundTrip(req)
 	if err != nil {
 		return nil, fmt.Errorf("could not be fetched (%v)", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("answered %s", resp.Status)
+		return nil, fmt.Errorf("answered %d %s", resp.StatusCode, http.StatusText(resp.StatusCode))
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, subMax+1))
 	switch {
