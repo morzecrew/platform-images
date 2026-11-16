@@ -726,7 +726,8 @@ var (
 )
 
 // upstreams resolves {"$upstreams": path}: an outbounds array, one outbound per
-// line of the file, "<url> [name=<name>] [group=<group>[,<group>]]", so any
+// line of the file, "[name=<name>] [group=<group>[,<group>]] | <url>" or the
+// bare URL (tags after the URL, the older form, are still read), so any
 // number of proxies and WireGuard exits is one secret, in order. In each group,
 // default "upstream", the first line is tagged "<group>-0" and each later one
 // "<group>-b<n>", so a balancer selects the first ("<group>-0"), the rest
@@ -869,7 +870,9 @@ func parseUpstreams(s string, aliases map[string]string, pin string) ([]upstream
 	return outs, secrets, strings.Join(notes, ", "), nil
 }
 
-// One non-blank line: a URL or an alias word, then its options. An alias word
+// One non-blank line: its tags, a "|" and a URL or an alias word; the URL or
+// word alone; or, the older form, the URL or word with its tags after it. A
+// line whose first word is a tag or "|" is the first form. An alias word
 // is the line, or its scheme (openvpn://<config>), whose rest is for the hop
 // the alias names, such as a tunnel's config, and is never read here: the k-th
 // line naming a word, k counting from 0 in the file's order (counts), dials
@@ -878,7 +881,14 @@ func parseUpstreams(s string, aliases map[string]string, pin string) ([]upstream
 func parseUpstreamLine(line string, aliases map[string]string, counts map[string]int) (upstreamLine, error) {
 	fields := strings.Fields(line)
 	l := upstreamLine{groups: []string{"upstream"}}
-	u := fields[0]
+	u, tags := fields[0], fields[1:]
+	if k, _, ok := strings.Cut(u, "="); u == "|" || ok && (k == "name" || k == "group") {
+		bar := slices.Index(fields, "|")
+		if bar < 0 || bar != len(fields)-2 {
+			return l, errors.New("tags before the URL end in a | and the URL: [name=<name>] [group=<group>] | <url>")
+		}
+		u, tags = fields[bar+1], fields[:bar]
+	}
 	word, _, isURL := strings.Cut(u, "://")
 	if !isURL {
 		if !upstreamWordRE.MatchString(u) {
@@ -893,10 +903,10 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 		u = a
 	}
 	seen := map[string]bool{}
-	for _, opt := range fields[1:] {
+	for _, opt := range tags {
 		k, v, ok := strings.Cut(opt, "=")
 		if !ok || seen[k] {
-			return l, errors.New("after the URL comes name=<name> and group=<group>[,<group>], each at most once")
+			return l, errors.New("the tags are name=<name> and group=<group>[,<group>], each at most once")
 		}
 		seen[k] = true
 		switch k {
@@ -916,7 +926,7 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 				}
 			}
 		default:
-			return l, errors.New("after the URL comes name=<name> and group=<group>[,<group>], each at most once")
+			return l, errors.New("the tags are name=<name> and group=<group>[,<group>], each at most once")
 		}
 	}
 
