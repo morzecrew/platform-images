@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.29
 
 # renovate: datasource=docker depName=rustfs/rustfs versioning=docker
-ARG RUSTFS_VERSION=1.0.5
+ARG RUSTFS_VERSION=1.0.6
 
 # Upstream publishes the server, the S3 endpoint on 9000 and its console on
 # 9001, and runs as uid 10001 with /data as the volume. This image adds the

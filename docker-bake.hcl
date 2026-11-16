@@ -321,7 +321,7 @@ target "valkey" {
 # the build cannot drift apart.
 # renovate: datasource=docker depName=rustfs/rustfs versioning=docker
 variable "RUSTFS_VERSION" {
-  default = "1.0.5"
+  default = "1.0.6"
 }
 
 # A thin image on purpose: three defaults changed, a credential check, and the
