@@ -648,8 +648,8 @@ https://bob:secret@203.0.113.9:8443 name=isp-b
 name=home group=upstream,ipv6    | wireguard://` + wgPriv + `@vpn.example:51820?publickey=` + wgPub + `&address=10.34.0.3/32,fd30:2::3/128&mtu=1280
 openvpn
 wireguard://` + encoded + `@[2001:db8::7]:51820/?PublicKey=` + wgPub + `&presharedkey=` + wgPSK + `&address=fd30:2::4/128&allowedips=::/0&keepalive=25#my%20exit group=ipv6
-group=ipv6 name=isp-c6           | socks5+tls://carol:pw@[2001:db8::9]:1080
-| http://198.51.100.4:3128
+group=ipv6 name=isp-c6|socks5+tls://carol:pw@[2001:db8::9]:1080
+|http://198.51.100.4:3128
 `
 	file := write(t, filepath.Join(dir, "upstreams"), list, 0o600)
 	aliases, err := upstreamAliases("openvpn=socks5://vpn:1080")

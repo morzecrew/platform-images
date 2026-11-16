@@ -872,7 +872,8 @@ func parseUpstreams(s string, aliases map[string]string, pin string) ([]upstream
 
 // One non-blank line: its tags, a "|" and a URL or an alias word; the URL or
 // word alone; or, the older form, the URL or word with its tags after it. A
-// line whose first word is a tag or "|" is the first form. An alias word
+// line that starts with a tag or "|" is the first form, split at its first
+// "|", spaces around it or not. An alias word
 // is the line, or its scheme (openvpn://<config>), whose rest is for the hop
 // the alias names, such as a tunnel's config, and is never read here: the k-th
 // line naming a word, k counting from 0 in the file's order (counts), dials
@@ -882,12 +883,13 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 	fields := strings.Fields(line)
 	l := upstreamLine{groups: []string{"upstream"}}
 	u, tags := fields[0], fields[1:]
-	if k, _, ok := strings.Cut(u, "="); u == "|" || ok && (k == "name" || k == "group") {
-		bar := slices.Index(fields, "|")
-		if bar < 0 || bar != len(fields)-2 {
+	if k, _, ok := strings.Cut(u, "="); strings.HasPrefix(u, "|") || ok && (k == "name" || k == "group") {
+		before, after, _ := strings.Cut(line, "|")
+		if rest := strings.Fields(after); len(rest) == 1 {
+			u, tags = rest[0], strings.Fields(before)
+		} else {
 			return l, errors.New("tags before the URL end in a | and the URL: [name=<name>] [group=<group>] | <url>")
 		}
-		u, tags = fields[bar+1], fields[:bar]
 	}
 	word, _, isURL := strings.Cut(u, "://")
 	if !isURL {
