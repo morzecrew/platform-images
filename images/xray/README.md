@@ -537,7 +537,7 @@ inbound. `http`, `https`, `socks5` and `socks5h` proxy URLs work.
 | `XRAY_UPSTREAM_PIN` | unset | Names of upstreams lines, separated by commas, each moved to the front of its groups. |
 | `XRAY_SUBSCRIPTION_INTERVAL` | `1h` | How often a [subscription](#a-subscriptions-outbounds) is fetched again. A Go duration, 1s or more. |
 | `XRAY_SUBSCRIPTION_PROXY` | unset | A `socks5://`, `socks5h://` or `http://` inbound of this Xray a subscription is fetched through, directly when that fails. No login. Unset means directly. |
-| `XRAY_SUBSCRIPTION_CACHE` | unset | A writable directory, outside `XRAY_SOURCE_DIR` and `XRAY_RUNTIME_DIR`, where each subscription's last accepted outbounds are kept, for a start while its URL is unreachable. Unset means none. |
+| `XRAY_SUBSCRIPTION_CACHE` | unset | A writable directory, outside `XRAY_SOURCE_DIR` and `XRAY_RUNTIME_DIR`, where each subscription's last accepted outbounds are kept, for a start while its URL is unreachable, such as `/var/lib/xray` with a volume on it: the image's is empty and 65532's, so a new volume there is writable. Unset means none. |
 
 A value set to the empty string takes the default. A bad URL, timeout or
 expression refuses at start (78), so it is found at deployment rather than as
