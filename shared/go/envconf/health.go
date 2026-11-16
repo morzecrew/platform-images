@@ -54,8 +54,8 @@ func (im *Image) HealthSettings() (h Health, err error) {
 
 // Healthcheck sends one GET through the proxy and returns the exit code: 0
 // for a 2xx whose body matches the expression, if one is set, and 1 for
-// anything else. With no proxy set it checks only that the server is PID 1
-// and that dir holds a file whose name matches pattern.
+// anything else. With no proxy set it checks only that the server runs and
+// that dir holds a file whose name matches pattern.
 func (im *Image) Healthcheck(dir, pattern string) int {
 	h, err := im.HealthSettings()
 	if err != nil {
@@ -109,9 +109,8 @@ func (im *Image) Healthcheck(dir, pattern string) int {
 // Without a proxy there is no egress to probe, and saying so is the point:
 // a green check that tested nothing would read as one that did.
 func (im *Image) liveness(dir, pattern string) int {
-	cmdline, err := os.ReadFile("/proc/1/cmdline")
-	if err != nil || !bytes.HasPrefix(cmdline, []byte(im.Bin+"\x00")) {
-		fmt.Fprintf(os.Stderr, "healthcheck: PID 1 is not %s\n", im.Title)
+	if !im.running() {
+		fmt.Fprintf(os.Stderr, "healthcheck: %s is not running\n", im.Title)
 		return 1
 	}
 	if !hasConfig(dir, pattern) {
@@ -120,6 +119,18 @@ func (im *Image) liveness(dir, pattern string) int {
 	}
 	fmt.Fprintf(os.Stderr, "healthcheck: %s is running. %sHEALTHCHECK_PROXY is unset, so egress was not probed\n", im.Title, im.Prefix)
 	return 0
+}
+
+// The server runs as PID 1, or as the child of an entrypoint that stays to
+// supervise it: any process of the container's will do.
+func (im *Image) running() bool {
+	cmdlines, _ := filepath.Glob("/proc/[0-9]*/cmdline")
+	for _, p := range cmdlines {
+		if b, err := os.ReadFile(p); err == nil && bytes.HasPrefix(b, []byte(im.Bin+"\x00")) {
+			return true
+		}
+	}
+	return false
 }
 
 // Only the name is a pattern: a glob of the whole path would read a [ or a *

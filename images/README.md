@@ -250,8 +250,10 @@ that is exactly `{"$file": "<absolute path>"}` with that file's content,
 in it, `{"$vlessClients": "<absolute path>"}` with the clients it lists,
 `{"$proxy": "<absolute path>"}` with the upstream proxy it names,
 `{"$wireguard": "<absolute path>"}` with the WireGuard peer its wg-quick file
-describes, or `{"$upstreams": "<absolute path>"}` with an outbound for each
-upstream it lists, and substitutes nothing else. The config is valid JSON before and after
+describes, `{"$upstreams": "<absolute path>"}` with an outbound for each
+upstream it lists, or `{"$subscription": "<absolute path>"}` with the outbounds
+of the Xray config the URL in it serves, fetched again on an interval, and
+substitutes nothing else. The config is valid JSON before and after
 and has no second syntax. See [its README](xray/README.md#the-config-and-file-references).
 
 `mihomo` is the second such image: inside its config, mihomo too reads no

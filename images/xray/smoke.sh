@@ -550,7 +550,75 @@ expect_in "without a proxy it checks liveness and says egress was not probed" \
 
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
-# --- 7. refusals --------------------------------------------------------------
+# --- 7. a subscription ----------------------------------------------------------
+
+# $subscription: the outbounds of the Xray config a URL serves, fetched again
+# every XRAY_SUBSCRIPTION_INTERVAL. The probe port goes to a balancer of the
+# subscription's tags; its first config has one freedom outbound to the
+# target, its second one blackhole outbound, its third one Xray refuses.
+SUB_TOKEN="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+SECRETS+=("${SUB_TOKEN}")
+serve() { printf '{"outbounds": [%s]}\n' "$1" >"${WORK}/www/${SUB_TOKEN}.json"; }
+serve '{"tag": "sub-a", "protocol": "freedom", "settings": {"redirect": "127.0.0.1:'"${TARGET_PORT}"'", "finalRules": [{"action": "allow"}]}}'
+printf 'http://127.0.0.1:%s/%s.json\n' "${TARGET_PORT}" "${SUB_TOKEN}" >"${WORK}/secrets/subscription_url"
+mkdir -p "${WORK}/sub" "${WORK}/subcache"
+chmod 0777 "${WORK}/subcache"
+cat >"${WORK}/sub/10-local.json" <<EOF
+{"inbounds": [{"listen": "127.0.0.1", "port": ${PROBE_PORT}, "protocol": "http"}],
+ "outbounds": [{"tag": "block", "protocol": "blackhole"}],
+ "routing": {"balancers": [{"tag": "sub", "selector": ["sub-"]}],
+   "rules": [{"type": "field", "network": "tcp", "balancerTag": "sub"}]}}
+EOF
+printf '{"outbounds": {"$subscription": "/run/secrets/subscription_url"}}\n' >"${WORK}/sub/20-sub.json"
+
+# run_sub <log needle>: the container on the subscription config, until the needle is in its log.
+run_sub() {
+	"${ENGINE}" run -d --name "${CTR}" "${RUN_ARGS[@]}" --read-only --tmpfs /run/xray:rw,mode=1777 \
+		-v "${WORK}/sub:/etc/xray:ro" -v "${WORK}/secrets:/run/secrets:ro" -v "${WORK}/subcache:/cache" \
+		-e XRAY_SUBSCRIPTION_INTERVAL=2s -e XRAY_SUBSCRIPTION_CACHE=/cache "${IMAGE}" >/dev/null
+	wait_sub "$1"
+}
+wait_sub() {
+	for _ in $(seq 1 30); do
+		logs="$("${ENGINE}" logs "${CTR}" 2>&1)"
+		case "${logs}" in *"$1"*) return 0 ;; esac
+		sleep 1
+	done
+	printf '%s\n' "${logs}" | tail -20
+	fail "no '$1' in the log"
+}
+
+run_sub "Xray ${VERSION} started"
+expect_in "the summary names the subscription and its outbounds, not the URL" "${logs}" \
+	"outbounds <- \$subscription /run/secrets/subscription_url 1 outbound(s)"
+[ "$(via "${PROBE_PORT}")" = 200 ] || fail "the subscription's freedom outbound did not reach the target"
+echo "ok: a \$subscription's outbound carries the balancer's traffic"
+out="$(hc -e XRAY_HEALTHCHECK_PROXY=)" || fail "liveness under the entrypoint: ${out}"
+echo "ok: liveness passes with Xray the entrypoint's child"
+
+serve '{"tag": "sub-b", "protocol": "blackhole"}'
+wait_sub "1 outbound(s); restarting Xray on it"
+sleep 1
+[ "$(via "${PROBE_PORT}")" != 200 ] || fail "the changed subscription did not take the freedom outbound away"
+echo "ok: a changed subscription restarts Xray on its outbounds"
+
+serve '{"tag": "sub-c", "protocol": "nonsense"}'
+wait_sub "Xray keeps the config it runs"
+[ "$(via "${PROBE_PORT}")" != 200 ] || fail "a refused subscription changed what Xray runs"
+[ "$("${ENGINE}" inspect -f '{{.State.Running}}' "${CTR}")" = true ] || fail "Xray stopped after a refused subscription"
+echo "ok: a subscription xray run -test refuses leaves Xray on the config it runs"
+ALL_OUTPUT+="$("${ENGINE}" logs "${CTR}" 2>&1)"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# Unreachable at start: the copy in the cache, the last one Xray accepted.
+printf 'http://127.0.0.1:1/%s.json\n' "${SUB_TOKEN}" >"${WORK}/secrets/subscription_url"
+run_sub "Xray ${VERSION} started"
+expect_in "unreachable at start, it starts on the cached copy" "${logs}" "starting on the copy in XRAY_SUBSCRIPTION_CACHE"
+expect_in "the copy is the last config Xray accepted" "${logs}" "prepend outbound with tag: sub-b"
+ALL_OUTPUT+="${logs}"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# --- 8. refusals --------------------------------------------------------------
 
 # refuse <label> <needle> <conf-dir> [run args...]: exit 78, needle in output.
 # Bounded, so a case that starts Xray instead fails rather than hangs.
@@ -645,6 +713,11 @@ refuse "an upstreams line whose scheme Xray has no outbound for" \
 refuse "a pin no upstreams line is named" \
 	'XRAY_UPSTREAM_PIN names "nowhere", which no line has as its name' "${WORK}/conf" -e XRAY_UPSTREAM_PIN=nowhere
 
+refuse "a subscription proxy with a login, which the environment would show" \
+	"XRAY_SUBSCRIPTION_PROXY holds a login" "${WORK}/conf" -e XRAY_SUBSCRIPTION_PROXY=socks5://u:p@127.0.0.1:1
+refuse "a subscription cache in the source directory, whose files it would replace" \
+	"XRAY_SUBSCRIPTION_CACHE (/etc/xray) overlaps" "${WORK}/conf" -e XRAY_SUBSCRIPTION_CACHE=/etc/xray
+
 # RE2 has no lookahead. Found at deployment, not as an unhealthy container.
 refuse "a healthcheck expression that does not compile" \
 	"XRAY_HEALTHCHECK_EXPECT is not a regular expression in Go's RE2 syntax" \
@@ -655,7 +728,7 @@ refuse "a healthcheck expression that does not compile" \
 refuse "a read-only root without a tmpfs" "XRAY_RUNTIME_DIR is /run/xray, which is not writable by uid 65532" \
 	"${WORK}/conf" --read-only --read-only-tmpfs=false
 
-# --- 8. no secret anywhere ----------------------------------------------------
+# --- 9. no secret anywhere ----------------------------------------------------
 
 for s in "${SECRETS[@]}"; do
 	case "${ALL_OUTPUT}" in
