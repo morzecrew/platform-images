@@ -642,14 +642,14 @@ func TestUpstreams(t *testing.T) {
 	dir := t.TempDir()
 	encoded := strings.NewReplacer("+", "%2B", "/", "%2F", "=", "%3D").Replace(wgPriv)
 	list := `# the ways out, in order
-socks5://alice:p@ss:word@proxy.example:1080 name=isp-a
-https://bob:secret@203.0.113.9:8443         name=isp-b
+name=isp-a                       | socks5://alice:p@ss:word@proxy.example:1080
+https://bob:secret@203.0.113.9:8443 name=isp-b
 
-wireguard://` + wgPriv + `@vpn.example:51820?publickey=` + wgPub + `&address=10.34.0.3/32,fd30:2::3/128&mtu=1280 name=home group=upstream,ipv6
+name=home group=upstream,ipv6    | wireguard://` + wgPriv + `@vpn.example:51820?publickey=` + wgPub + `&address=10.34.0.3/32,fd30:2::3/128&mtu=1280
 openvpn
 wireguard://` + encoded + `@[2001:db8::7]:51820/?PublicKey=` + wgPub + `&presharedkey=` + wgPSK + `&address=fd30:2::4/128&allowedips=::/0&keepalive=25#my%20exit group=ipv6
-socks5+tls://carol:pw@[2001:db8::9]:1080 group=ipv6 name=isp-c6
-http://198.51.100.4:3128
+group=ipv6 name=isp-c6|socks5+tls://carol:pw@[2001:db8::9]:1080
+|http://198.51.100.4:3128
 `
 	file := write(t, filepath.Join(dir, "upstreams"), list, 0o600)
 	aliases, err := upstreamAliases("openvpn=socks5://vpn:1080")
@@ -763,9 +763,13 @@ func TestUpstreamsRefusals(t *testing.T) {
 		{"an undefined word", "socks5://proxy.example:1080\nwarp\n", "", "line 2: warp is not a word XRAY_UPSTREAM_ALIASES defines"},
 		{"an unknown scheme", "ss://alice:secret@proxy.example:8388\n", "", "line 1: its scheme is not socks5"},
 		{"a bad proxy", "socks5://alice@proxy.example:1080\n", "", "line 1: does not hold [user:pass@]host:port"},
-		{"an unknown option", "socks5://proxy.example:1080 weight=2\n", "", "line 1: after the URL comes name="},
-		{"an option twice", "socks5://proxy.example:1080 name=a name=b\n", "", "line 1: after the URL comes name="},
-		{"a bare word option", "socks5://proxy.example:1080 ipv6\n", "", "line 1: after the URL comes name="},
+		{"an unknown option", "socks5://proxy.example:1080 weight=2\n", "", "line 1: the tags are name="},
+		{"an option twice", "socks5://proxy.example:1080 name=a name=b\n", "", "line 1: the tags are name="},
+		{"a bare word option", "socks5://proxy.example:1080 ipv6\n", "", "line 1: the tags are name="},
+		{"tags with no bar", "name=a socks5://proxy.example:1080\n", "", "line 1: tags before the URL end in a |"},
+		{"a bar and no URL", "name=a |\n", "", "line 1: tags before the URL end in a |"},
+		{"two bars", "name=a | group=ipv6 | socks5://proxy.example:1080\n", "", "line 1: tags before the URL end in a |"},
+		{"a bare word tag before the bar", "name=a ipv6 | socks5://proxy.example:1080\n", "", "line 1: the tags are name="},
 		{"a bad name", "socks5://proxy.example:1080 name=ISP_A\n", "", "line 1: a name is 1 to 32"},
 		{"a bad group", "socks5://proxy.example:1080 group=v6-only\n", "", "line 1: a group is 1 to 16"},
 		{"a group twice on a line", "socks5://proxy.example:1080 group=upstream,ipv6,upstream\n", "", "line 1: group= lists upstream twice"},

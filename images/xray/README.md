@@ -304,13 +304,18 @@ one outbound per line of the file, so every way out, whatever its kind and
 however many, is one secret in order of preference:
 
 ```text
-# <url> [name=<name>] [group=<group>[,<group>]]
-socks5://alice:secret@proxy.example:1080            name=isp-a
-https://bob:secret@203.0.113.9:8443                 name=isp-b
-wireguard://<private key>@vpn.example:51820?publickey=<base64>&address=10.34.0.3/32,fd30:2::3/128 name=home group=upstream,ipv6
-openvpn://H4sIAAAAAAAAA…                            name=vpn
-socks5://carol:secret@[2001:db8::9]:1080            name=isp-c6 group=ipv6
+# [name=<name>] [group=<group>[,<group>]] | <url>
+name=isp-a                     | socks5://alice:secret@proxy.example:1080
+name=isp-b                     | https://bob:secret@203.0.113.9:8443
+name=home group=upstream,ipv6  | wireguard://<private key>@vpn.example:51820?publickey=<base64>&address=10.34.0.3/32,fd30:2::3/128
+name=vpn                       | openvpn://H4sIAAAAAAAAA…
+name=isp-c6 group=ipv6         | socks5://carol:secret@[2001:db8::9]:1080
+socks5://dave:secret@proxy2.example:1080
 ```
+
+A line with no tags is its URL alone. Tags first keep each line's name in
+view however long its URL runs; the older form, the URL first and its tags
+after it, is still read.
 
 It stands for an array, so it goes where an array goes. Put it in a file of its
 own: Xray's `-confdir` puts a later file's outbounds before the earlier ones'
@@ -385,8 +390,9 @@ the URL:
 - No line, after blank lines and `#` comments.
 - A line that starts with neither a URL nor a word `XRAY_UPSTREAM_ALIASES`
   defines; a scheme other than those above.
-- An option other than `name=` and `group=`, one twice, or a name or group
-  outside its pattern; a name on two lines.
+- Tags before the URL that do not end in `|` and the URL; a tag other than
+  `name=` and `group=`, one twice, or a name or group outside its pattern; a
+  name on two lines.
 - A proxy `$proxy` would refuse; a `wireguard://` URL with no key before its
   `@`, a query key not listed above or one twice, a line break or `#` in a
   value, or settings `$wireguard` would refuse.

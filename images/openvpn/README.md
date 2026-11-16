@@ -72,7 +72,7 @@ holds a client config, gzipped, then base64url-encoded (padding optional),
 and runs as a tunnel of its own:
 
 ```sh
-printf 'openvpn://%s name=vpn-a\n' "$(gzip -c client.ovpn | base64 -w0 | tr '+/' '-_' | tr -d '=')"
+printf 'name=vpn-a | openvpn://%s\n' "$(gzip -c client.ovpn | base64 -w0 | tr '+/' '-_' | tr -d '=')"
 ```
 
 ```yaml
