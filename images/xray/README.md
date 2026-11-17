@@ -73,6 +73,7 @@ of these. Everything else in the config stays as written.
 | `{"$file": "/abs/path"}` | the file's content as a JSON string, minus one trailing newline |
 | `{"$vlessDecryption": "/abs/path"}` | the VLESS Encryption server key derived from the seed in the file (see below) |
 | `{"$vlessClients": "/abs/path"}` | a VLESS inbound's `clients` array, one client per line of the file (see below) |
+| `{"$hysteriaUsers": "/abs/path"}` | a Hysteria2 inbound's `users` array, from the same file (see below) |
 | `{"$proxy": "/abs/path"}` | a socks or http outbound's `settings`, split from the `[user:pass@]host:port` in the file (see below) |
 | `{"$wireguard": "/abs/path"}` | a wireguard outbound's `settings`, from the wg-quick client config in the file (see below) |
 | `{"$upstreams": "/abs/path"}` | an `outbounds` array, one socks, http or wireguard outbound per line of the file (see below) |
@@ -111,8 +112,8 @@ file, the JSON path and the referenced path, never a value.
   file (a directory counts: Compose leaves one where a secret's source file is
   missing), over 64 KiB, not UTF-8, or holding a NUL byte. These are the
   checks the shared `_FILE` contract makes.
-- An object holding `$file`, `$vlessDecryption`, `$vlessClients`, `$proxy`,
-  `$wireguard` or `$upstreams` and any other key, or a path that is not an absolute path in a string. A near
+- An object holding `$file`, `$vlessDecryption`, `$vlessClients`,
+  `$hysteriaUsers`, `$proxy`, `$wireguard` or `$upstreams` and any other key, or a path that is not an absolute path in a string. A near
   miss would otherwise reach Xray as a literal.
 - A seed file that is not exactly 128 hex characters.
 - A client list with a line it refuses (see below).
@@ -161,6 +162,20 @@ The file is UTF-8 text, one client per line:
   "flow": "xtls-rprx-vision",
   "decryption": "none"
 }
+```
+
+`{"$hysteriaUsers": "/run/secrets/vless_clients"}` reads the same file, with
+the same checks, as a Hysteria2 inbound's `users`: each device's UUID is its
+`auth`, its name its `email`. One file then adds and revokes a device on
+every inbound, VLESS and Hysteria2 alike, and a device's Hysteria2 link
+carries the UUID its VLESS links do:
+
+```json
+"settings": {"version": 2, "users": {"$hysteriaUsers": "/run/secrets/vless_clients"}}
+```
+
+```json
+[{"auth": "3f2c1f0e-8a4b-4c1d-9e2f-0a1b2c3d4e5f"}, {"auth": "6b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e", "email": "phone"}]
 ```
 
 Each of these exits 78. The message names the line, never what is on it:

@@ -307,6 +307,28 @@ func TestVlessClients(t *testing.T) {
 	}
 }
 
+func TestHysteriaUsers(t *testing.T) {
+	dir := t.TempDir()
+	list := write(t, filepath.Join(dir, "clients"), clientA+"\n"+clientB+" phone\n", 0o400)
+	src := write(t, filepath.Join(dir, "c.json"), `{"inbounds": [{"protocol": "hysteria", "settings": {"version": 2, "users": {"$hysteriaUsers": "`+list+`"}}}]}`, 0o600)
+	c, err := resolveFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"inbounds":[{"protocol":"hysteria","settings":{"users":[{"auth":"` + clientA + `"},{"auth":"` + clientB + `","email":"phone"}],"version":2}}]}` + "\n"
+	if string(c.Out) != want {
+		t.Errorf("resolved\n got %s\nwant %s", c.Out, want)
+	}
+	if !slices.Equal(c.Values, []string{clientA, clientB}) {
+		t.Errorf("values to redact = %v", c.Values)
+	}
+	// The same refusals as $vlessClients, from the same parser.
+	bad := write(t, filepath.Join(dir, "bad"), "not-a-uuid\n", 0o400)
+	if _, err := hysteriaUsers(bad); err == nil || !strings.Contains(err.Error(), "line 1: the id is not a UUID") {
+		t.Errorf("a bad id: %v", err)
+	}
+}
+
 func TestVlessClientsRefusals(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct{ name, content, want string }{

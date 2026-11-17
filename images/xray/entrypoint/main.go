@@ -14,7 +14,8 @@
 // exactly {"$vlessDecryption": "/absolute/path"} with the VLESS Encryption
 // server key derived from the seed in that file, or exactly
 // {"$vlessClients": "/absolute/path"} with the VLESS clients that file lists,
-// or exactly {"$proxy": "/absolute/path"} with a socks or http outbound's
+// or exactly {"$hysteriaUsers": "/absolute/path"} with the same clients as a
+// Hysteria2 inbound's users, or exactly {"$proxy": "/absolute/path"} with a socks or http outbound's
 // settings, split from the [user:pass@]host:port in that file, or exactly
 // {"$wireguard": "/absolute/path"} with a wireguard outbound's settings, from
 // the wg-quick client config in that file, or exactly
@@ -143,6 +144,7 @@ var references = []envconf.Reference{
 	envconf.File,
 	{Key: "$vlessDecryption", Resolve: envconf.Secret(vlessDecryption)},
 	{Key: "$vlessClients", Resolve: vlessClients},
+	{Key: "$hysteriaUsers", Resolve: hysteriaUsers},
 	{Key: "$proxy", Resolve: proxy},
 	{Key: "$wireguard", Resolve: wireguard},
 	{Key: "$upstreams", Resolve: upstreams},
@@ -277,6 +279,28 @@ func vlessClients(name string) (envconf.Resolution, error) {
 		r.Secrets = append(r.Secrets, c.ID)
 	}
 	return r, nil
+}
+
+// hysteriaUsers resolves {"$hysteriaUsers": path}: the clients the same file
+// lists, as a Hysteria2 inbound's users, each device's UUID its auth and its
+// name its email, so one file adds and revokes a device on every inbound.
+func hysteriaUsers(name string) (envconf.Resolution, error) {
+	r, err := vlessClients(name)
+	if err != nil {
+		return r, err
+	}
+	clients := r.Value.([]vlessClient)
+	users := make([]hysteriaUser, len(clients))
+	for i, c := range clients {
+		users[i] = hysteriaUser{Auth: c.ID, Email: c.Email}
+	}
+	r.Value = users
+	return r, nil
+}
+
+type hysteriaUser struct {
+	Auth  string `json:"auth"`
+	Email string `json:"email,omitempty"`
 }
 
 // The errors name a line, never what is on it. An id must be a UUID as
