@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.29
 
 # renovate: datasource=docker depName=valkey/valkey extractVersion=^(?<version>\d+\.\d+)\.\d+-alpine$
-ARG VALKEY_VERSION=9.1
+ARG VALKEY_VERSION=9.2
 
 # Alpine, so the shared POSIX-sh helper runs unmodified with no added bash
 # (S-0001/D-20, S-0001/D-17).

@@ -291,7 +291,7 @@ target "npm-builder" {
 # minor appears here once it has a stable release.
 # renovate: datasource=docker depName=valkey/valkey extractVersion=^(?<version>\d+\.\d+)\.\d+-alpine$
 variable "VALKEY_VERSION" {
-  default = "9.1"
+  default = "9.2"
 }
 
 target "valkey" {
