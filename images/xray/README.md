@@ -397,9 +397,10 @@ static config routes to tags it never spells out:
   k-th such line, counting from 0 in the file's order, at its port plus k,
   with no login and no TLS of its own. The hop is the
   [proxy-warm image](../proxy-warm/README.md), which reads the same list and
-  keeps `n` connections to the line's proxy open, logged in for SOCKS5, so a
-  new connection skips the proxy's handshake. Restart both after any change
-  to the list, so the k-th port leads to the same line in each. The summary
+  keeps `n` connections to the line's proxy open, logged in for SOCKS5. A
+  new connection's first data goes out with its CONNECT, before the proxy
+  replies, with no greeting or login to wait for. Restart both after any
+  change to the list, so the k-th port leads to the same line in each. The summary
   shows the proxy and the hop.
 - `name=` is 1 to 32 lowercase letters, digits and dashes, starting with a
   letter or a digit; a group is 1 to 16 lowercase letters and digits, starting

@@ -2,7 +2,7 @@
 
 # This repository's own program, so the version is ours, moved by hand with
 # each change to it (images/proxy-warm/README.md).
-ARG PROXY_WARM_VERSION=0.1.0
+ARG PROXY_WARM_VERSION=0.1.1
 # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
 ARG GO_VERSION=1.27.4
 

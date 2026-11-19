@@ -585,7 +585,7 @@ target "caddy-l4" {
 # This repository's own program (images/proxy-warm/src), so no Renovate
 # annotation: the version moves by hand with each change to it.
 variable "PROXY_WARM_VERSION" {
-  default = "0.1.0"
+  default = "0.1.1"
 }
 
 target "proxy-warm" {
