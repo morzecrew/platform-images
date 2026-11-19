@@ -1,8 +1,8 @@
 # proxy-warm
 
-A SOCKS5 front for upstream proxies. It keeps connections to each one open,
-and logged in, ahead of use, so a new connection's data leaves at once, not
-four round trips to the proxy later. uid 65532 on distroless, one static Go binary,
+A SOCKS5 front for upstream proxies. It keeps connections to each one open
+ahead of use, logged in when the proxy is SOCKS5, so a new connection's data
+leaves at once, not four round trips to the proxy later. uid 65532 on distroless, one static Go binary,
 `/usr/local/bin/proxy-warm`, which is the entrypoint. There is no shell.
 
 | | |
@@ -98,35 +98,47 @@ program has nothing else to set.
 ## How it behaves
 
 - **Spares.** Each line keeps `warm=` connections open: dialled, through TLS
-  for `socks5+tls://` and `https://`, and for SOCKS5 greeted and logged in, the
-  greeting and the login sent in one write. One taken is replaced at once.
-  They are checked every `PROXY_WARM_MAX_IDLE`/6 and when taken: one older
-  than `PROXY_WARM_MAX_IDLE`, or closed by the proxy, is never used. While
-  they cannot be opened, the log says why, once per try, backing off from 1 s
-  to 30 s.
+  for `socks5+tls://` and `https://`, and for SOCKS5 greeted and logged in,
+  step by step, as every proxy takes them. An HTTP proxy's login goes with
+  each CONNECT, so a wrong one shows only when a connection is used. One
+  taken is replaced at once. They are checked every `PROXY_WARM_MAX_IDLE`/6
+  and when taken: one older than `PROXY_WARM_MAX_IDLE`, or closed by the
+  proxy, is never used. While they cannot be opened, the log says why, once
+  per try, backing off from 1 s to 30 s.
 - **The answer comes first.** A client's CONNECT is answered yes at once, so
   Xray sends what it holds without waiting. If the proxy then refuses, the
   connection closes, as a refused site's would.
 - **Data before the reply.** The CONNECT leaves at once, and what the client
-  sends within 20 ms goes right after it, before the proxy has replied. A
-  proxy that drops bytes sent before its reply breaks every connection
-  through this image: send it a CONNECT and a request in one write, and see
-  whether the answer comes back, before tagging its line.
+  sends within 20 ms goes right after it, before the proxy has replied. With
+  no spare left, a new connection to a SOCKS5 proxy sends its greeting, login,
+  CONNECT and data in one go. A proxy that drops bytes sent before its reply
+  breaks connections through this image. Before tagging its line, send it,
+  on a new connection, the greeting, the login, a CONNECT and a request in
+  one write, and see whether the answer comes back.
 - **A dead spare.** One the proxy or a NAT on the way dropped without a word
-  answers nothing. Everything sent on it goes again on a new connection, once.
+  answers nothing. What was sent on it goes again on a new connection, once,
+  if sending it twice is harmless: nothing, or a TLS ClientHello, which starts
+  a handshake of its own there. Anything else may have reached the site, and
+  the connection closes instead.
 - **Closing.** Xray closes a connection whole, never half, so the end of
   what the client sends ends the connection. The proxy's end is passed on as
   a half close.
 - **UDP.** A UDP ASSOCIATE through a SOCKS5 line is answered once the proxy's
   association is ready, with a port of this container's, on the address the
   client reached it at. Datagrams pass through unchanged, and only from the
-  client's own address. The first association makes the line keep about half
+  client's address and the port its first datagram came from, where the
+  replies go. The first association makes the line keep about half
   as many associations ready as connections, each replaced after a third of
   `PROXY_WARM_MAX_IDLE`, since a relay may forget a mapping that has carried
   nothing. An HTTP line refuses UDP (reply 7).
 - **The client side** takes SOCKS5 without a login, CONNECT and UDP
   ASSOCIATE. Anything that reaches the port can use the line, so publish it
   nowhere: put it on a network only its client shares.
+- **The list** is read once, at start. The k-th port must lead to the same
+  line here as in the client, so restart both after any change to the list:
+  with only the client restarted, two `warm=` lines swapped send each one's
+  traffic out the other's proxy, and the healthcheck still passes. A tag
+  added to an idle container's list takes effect at its restart.
 
 With no line tagged `warm=`, it says so and runs idle, so it can be started
 before any line leads to it. The healthcheck passes while each line's port

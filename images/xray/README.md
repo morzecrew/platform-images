@@ -397,9 +397,10 @@ static config routes to tags it never spells out:
   k-th such line, counting from 0 in the file's order, at its port plus k,
   with no login and no TLS of its own. The hop is the
   [proxy-warm image](../proxy-warm/README.md), which reads the same list and
-  keeps `n` connections to the line's proxy open and logged in, so a new
-  connection skips the proxy's handshake. The summary shows the proxy and the
-  hop.
+  keeps `n` connections to the line's proxy open, logged in for SOCKS5, so a
+  new connection skips the proxy's handshake. Restart both after any change
+  to the list, so the k-th port leads to the same line in each. The summary
+  shows the proxy and the hop.
 - `name=` is 1 to 32 lowercase letters, digits and dashes, starting with a
   letter or a digit; a group is 1 to 16 lowercase letters and digits, starting
   with a letter, and appears once on a line.
@@ -417,7 +418,9 @@ the URL:
   `name=`, `group=` and `warm=`, one twice, or a name or group outside its
   pattern; a name on two lines.
 - `warm=` outside 1 to 16, on a WireGuard line or a word's, or with no
-  SOCKS5 hop named `warm` in `XRAY_UPSTREAM_ALIASES`; `warm` alone as a line.
+  SOCKS5 hop named `warm` in `XRAY_UPSTREAM_ALIASES`; `warm` alone as a line,
+  or as a scheme.
+- A SOCKS5 user or password over 255 bytes, which the protocol cannot send.
 - A proxy `$proxy` would refuse; a `wireguard://` URL with no key before its
   `@`, a query key not listed above or one twice, a line break or `#` in a
   value, or settings `$wireguard` would refuse.

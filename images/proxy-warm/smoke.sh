@@ -99,11 +99,16 @@ refused "refuses warm= on a tunnel" "is for a SOCKS5 or an HTTP proxy" -e PROXY_
 : >"${WORK}/www/generate_204"
 python3 -m http.server "${TARGET_PORT}" --bind 127.0.0.1 --directory "${WORK}/www" >"${WORK}/httpd.log" 2>&1 &
 PIDS+=($!)
-# SOCKS5 with a user and a password, CONNECT only; each login is a line in
-# logins.log.
+# SOCKS5 with a user and a password, CONNECT only. Each connection has a
+# number: logins.log gets "login <n>" when it logs in, and "connect <n>" when
+# it asks for a CONNECT.
 python3 - "${UP_PORT}" "${PROXY_USER}" "${PROXY_PASS}" "${WORK}/logins.log" >"${WORK}/upstream.log" 2>&1 <<'PY' &
-import socket, struct, sys, threading
+import itertools, socket, struct, sys, threading
 port, user, password, log = int(sys.argv[1]), sys.argv[2].encode(), sys.argv[3].encode(), sys.argv[4]
+numbers, lock = itertools.count(1), threading.Lock()
+def note(what, n):
+    with lock, open(log, "a") as f:
+        f.write("%s %d\n" % (what, n))
 def exact(c, n):
     b = b""
     while len(b) < n:
@@ -126,7 +131,7 @@ def pump(a, b):
             s.shutdown(socket.SHUT_RDWR)
         except OSError:
             pass
-def serve(c):
+def serve(c, number):
     try:
         ver, n = exact(c, 2)
         if 2 not in exact(c, n):
@@ -137,9 +142,9 @@ def serve(c):
         if (u, p) != (user, password):
             c.sendall(b"\x01\x01"); return
         c.sendall(b"\x01\x00")
-        with open(log, "a") as f:
-            f.write("login\n")
+        note("login", number)
         _, cmd, _, atyp = exact(c, 4)
+        note("connect", number)
         host = socket.inet_ntoa(exact(c, 4)) if atyp == 1 else exact(c, exact(c, 1)[0]).decode()
         port, = struct.unpack(">H", exact(c, 2))
         t = socket.create_connection((host, port))
@@ -150,7 +155,7 @@ def serve(c):
         c.close()
 srv = socket.create_server(("127.0.0.1", port))
 while True:
-    threading.Thread(target=serve, args=(srv.accept()[0],), daemon=True).start()
+    threading.Thread(target=serve, args=(srv.accept()[0], next(numbers)), daemon=True).start()
 PY
 PIDS+=($!)
 for p in "${TARGET_PORT}" "${UP_PORT}"; do
@@ -167,8 +172,9 @@ chmod 0644 "${WORK}/secrets/upstreams"
 "${ENGINE}" run -d --name "${CTR}" "${RUN_ARGS[@]}" --read-only -v "${WORK}/secrets:/run/secrets:ro" \
 	-e PROXY_WARM_UPSTREAMS=/run/secrets/upstreams -e PROXY_WARM_PORT="${WARM_PORT}" -e PROXY_WARM_TYPO=1 \
 	"${IMAGE}" >/dev/null
+logins() { grep -c '^login ' "${WORK}/logins.log" || true; }
 for _ in $(seq 1 50); do
-	[ "$(wc -l <"${WORK}/logins.log")" -ge 2 ] && break
+	[ "$(logins)" -ge 2 ] && break
 	sleep 0.2
 done
 logs="$("${ENGINE}" logs "${CTR}" 2>&1)"
@@ -176,20 +182,27 @@ expect_in "summary names the version" "${logs}" "proxy-warm = ${VERSION}"
 expect_in "summary shows where the port leads" "${logs}" \
 	":${WARM_PORT} <- line 3 (isp) socks5 127.0.0.1:${UP_PORT}, 2 kept ready"
 expect_in "warns about an unknown PROXY_WARM_ name" "${logs}" "WARN: PROXY_WARM_TYPO is set"
-[ "$(wc -l <"${WORK}/logins.log")" = 2 ] || fail "$(wc -l <"${WORK}/logins.log") logins before any client, not the 2 spares"
+[ "$(logins)" = 2 ] || fail "$(logins) logins before any client, not the 2 spares"
+! grep -q '^connect ' "${WORK}/logins.log" || fail "a CONNECT reached the proxy before any client asked"
+spares=" $(sed -n 's/^login //p' "${WORK}/logins.log" | tr '\n' ' ')"
 echo "ok: two spares logged in before any client asked"
 
 code="$(curl --noproxy '' -s -o /dev/null -w '%{http_code}' --max-time 10 \
 	-x "socks5://127.0.0.1:${WARM_PORT}" "http://127.0.0.1:${TARGET_PORT}/generate_204" || true)"
 [ "${code}" = 200 ] || fail "a request through the warm port answered ${code}, not 200"
 expect_in "the request reached the target" "$(cat "${WORK}/httpd.log")" '"GET /generate_204 HTTP/1.1" 200'
-# The spare taken is replaced: a third login, after the client's.
+# The CONNECT came on one of the spares, and another connection logged in to
+# replace it.
 for _ in $(seq 1 50); do
-	[ "$(wc -l <"${WORK}/logins.log")" -ge 3 ] && break
+	[ "$(logins)" -ge 3 ] && break
 	sleep 0.2
 done
-[ "$(wc -l <"${WORK}/logins.log")" = 3 ] || fail "$(wc -l <"${WORK}/logins.log") logins after one request, not 3"
-echo "ok: the request went out on a spare, which was replaced"
+used="$(sed -n 's/^connect //p' "${WORK}/logins.log")"
+[ "$(printf '%s\n' "${used}" | grep -c .)" = 1 ] || fail "one request made CONNECTs on connections '${used}', not one"
+case "${spares}" in *" ${used} "*) ;; *) fail "the CONNECT came on connection ${used}, not a spare (${spares})" ;; esac
+[ "$(logins)" = 3 ] || fail "$(logins) logins after one request, not 3"
+case "${spares}" in *" $(sed -n 's/^login //p' "${WORK}/logins.log" | tail -1) "*) fail "no new connection replaced the spare" ;; esac
+echo "ok: the request went out on a spare logged in before it, which a new connection replaced"
 
 "${ENGINE}" exec "${CTR}" /usr/local/bin/proxy-warm healthcheck || fail "the healthcheck fails on a running container"
 echo "ok: the healthcheck passes"

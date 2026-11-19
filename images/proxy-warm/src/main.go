@@ -116,7 +116,7 @@ func run() error {
 	}
 	for k, u := range c.ups {
 		p := newPool(u, c.maxIdle)
-		go p.keep()
+		go p.tcp.keep()
 		go p.serve(lns[k])
 	}
 	// PID 1 gets no default action for a signal: without this, a stop
@@ -332,9 +332,9 @@ func (u *upstream) dial() (net.Conn, error) {
 	return t, nil
 }
 
-// hello is what a SOCKS5 proxy is sent before a request: the greeting and, in
-// the same write, the login. Nothing for an HTTP proxy, which takes the login
-// with each CONNECT.
+// hello is what a SOCKS5 proxy is sent before a request: the greeting (its
+// first 3 bytes), then the login. Nothing for an HTTP proxy, which takes the
+// login with each CONNECT.
 func (u *upstream) hello() []byte {
 	if !u.socks {
 		return nil
@@ -346,10 +346,18 @@ func (u *upstream) hello() []byte {
 	return append(append(b, byte(len(u.pass))), u.pass...)
 }
 
+// readHello reads the replies to hello: the method's, then the login's.
 func (u *upstream) readHello(r io.Reader) error {
 	if !u.socks {
 		return nil
 	}
+	if err := u.readMethod(r); err != nil || u.user == "" {
+		return err
+	}
+	return u.readLogin(r)
+}
+
+func (u *upstream) readMethod(r io.Reader) error {
 	var b [2]byte
 	if _, err := io.ReadFull(r, b[:]); err != nil {
 		return err
@@ -361,9 +369,12 @@ func (u *upstream) readHello(r io.Reader) error {
 		return errors.New("the proxy asks for a login, and the line has none")
 	case u.user != "" && b[1] != 2:
 		return errors.New("the proxy does not take a user and a password")
-	case u.user == "":
-		return nil
 	}
+	return nil
+}
+
+func (u *upstream) readLogin(r io.Reader) error {
+	var b [2]byte
 	if _, err := io.ReadFull(r, b[:]); err != nil {
 		return err
 	}
@@ -373,16 +384,23 @@ func (u *upstream) readHello(r io.Reader) error {
 	return nil
 }
 
-// open is a connection ready for a request: dialled and, for SOCKS5, logged in.
+// open is a connection ready for a request: dialled and, for SOCKS5, greeted
+// and logged in, step by step, as every proxy takes them. Nobody waits on it.
 func (u *upstream) open() (net.Conn, error) {
 	c, err := u.dial()
 	if err != nil || !u.socks {
 		return c, err
 	}
 	_ = c.SetDeadline(time.Now().Add(timeout))
-	_, err = c.Write(u.hello())
+	h := u.hello()
+	_, err = c.Write(h[:3])
 	if err == nil {
-		err = u.readHello(c)
+		err = u.readMethod(c)
+	}
+	if err == nil && u.user != "" {
+		if _, err = c.Write(h[3:]); err == nil {
+			err = u.readLogin(c)
+		}
 	}
 	if err != nil {
 		c.Close()
@@ -422,16 +440,25 @@ func (u *upstream) answer(c net.Conn, hello bool) (left []byte, heard bool, err 
 	// Bounded: a header never needs more, and the rest is read from c itself.
 	br := bufio.NewReader(io.LimitReader(r, 64<<10))
 	tp := textproto.NewReader(br)
-	status, err := tp.ReadLine()
-	if err == nil {
-		_, err = tp.ReadMIMEHeader()
-	}
-	if err != nil {
-		return nil, r.n > 0, err
-	}
-	proto, code, _ := strings.Cut(status, " ")
-	if !strings.HasPrefix(proto, "HTTP/1.") || len(code) < 3 || code[0] != '2' {
-		return nil, true, fmt.Errorf("the proxy refused the CONNECT (%.3s)", code)
+	for {
+		status, err := tp.ReadLine()
+		if err == nil {
+			_, err = tp.ReadMIMEHeader()
+		}
+		if err != nil {
+			return nil, r.n > 0, err
+		}
+		proto, code, _ := strings.Cut(status, " ")
+		if !strings.HasPrefix(proto, "HTTP/1.") || len(code) < 3 {
+			return nil, true, errors.New("the proxy answered something other than HTTP/1")
+		}
+		if code[0] == '2' {
+			break
+		}
+		// An informational reply comes before the final one.
+		if code[0] != '1' {
+			return nil, true, fmt.Errorf("the proxy refused the CONNECT (%.3s)", code)
+		}
 	}
 	left, _ = br.Peek(br.Buffered())
 	return left, true, nil
@@ -497,112 +524,119 @@ func hostPort(dst []byte) string {
 	return net.JoinHostPort(string(dst[2:len(dst)-2]), port)
 }
 
-// alive reports whether an idle connection is still open: nothing to read,
-// neither data nor an end, which a proxy that closed it would have sent.
+// alive reports whether an idle connection is still open: nothing waiting on
+// its socket, neither data nor the end a proxy that closed it sent. It peeks
+// without blocking: a deadline already past fails a read before it looks.
+// Under TLS, a record waiting is the server's own, such as a session ticket,
+// and the connection open.
 func alive(c net.Conn) bool {
-	var b [1]byte
-	_ = c.SetReadDeadline(time.Now())
-	n, err := c.Read(b[:])
-	_ = c.SetReadDeadline(time.Time{})
-	var ne net.Error
-	return n == 0 && errors.As(err, &ne) && ne.Timeout()
+	t, overTLS := c.(*tls.Conn)
+	if overTLS {
+		c = t.NetConn()
+	}
+	sc, ok := c.(syscall.Conn)
+	if !ok {
+		return true
+	}
+	rc, err := sc.SyscallConn()
+	if err != nil {
+		return false
+	}
+	var n int
+	var peek error
+	err = rc.Read(func(fd uintptr) bool {
+		var b [1]byte
+		n, _, peek = syscall.Recvfrom(int(fd), b[:], syscall.MSG_PEEK|syscall.MSG_DONTWAIT)
+		return true
+	})
+	switch {
+	case err != nil:
+		return false
+	case errors.Is(peek, syscall.EAGAIN):
+		return true
+	case peek != nil, n == 0:
+		return false
+	}
+	return overTLS
 }
 
 // --- the pool ----------------------------------------------------------------
 
+// A spare: a connection ready for a request, or, with relay, a UDP
+// association on it, which lives as long as the connection does.
 type spare struct {
-	c    net.Conn
-	born time.Time
-}
-
-// A UDP association: it lives as long as its control connection.
-type assoc struct {
-	ctrl  net.Conn
+	c     net.Conn
 	relay *net.UDPConn
 	born  time.Time
 }
 
-func (a *assoc) close() {
-	a.ctrl.Close()
-	a.relay.Close()
-}
-
-type pool struct {
-	up      *upstream
-	maxIdle time.Duration
-	tcp     chan spare
-	// Associations, kept ready once a client has asked for one: none while
-	// the client sends no UDP.
-	udp     chan *assoc
-	wantUDP atomic.Bool
-	wake    chan struct{}
-}
-
-func newPool(u *upstream, maxIdle time.Duration) *pool {
-	p := &pool{up: u, maxIdle: maxIdle, tcp: make(chan spare, u.spares), wake: make(chan struct{}, 1)}
-	if u.socks {
-		p.udp = make(chan *assoc, (u.spares+1)/2)
+func (s spare) close() {
+	s.c.Close()
+	if s.relay != nil {
+		s.relay.Close()
 	}
-	return p
 }
 
-// An association's relay may forget a mapping that carried nothing sooner
-// than the proxy closes an idle connection, and a lost datagram says nothing.
-func (p *pool) udpIdle() time.Duration { return p.maxIdle / 3 }
+// A queue keeps spares of one kind ready, refilled on its own schedule: a
+// kind that fails, such as UDP through a proxy that has none, never holds the
+// other up.
+type queue struct {
+	label string // the line and what it keeps, for the log
+	q     chan spare
+	wake  chan struct{}
+	idle  time.Duration // never is a spare older than this used
+	open  func() (spare, error)
+}
 
-func (p *pool) poke() {
+func newQueue(label string, n int, idle time.Duration, open func() (spare, error)) *queue {
+	return &queue{label: label, q: make(chan spare, n), wake: make(chan struct{}, 1), idle: idle, open: open}
+}
+
+func (q *queue) usable(s spare) bool { return time.Since(s.born) < q.idle && alive(s.c) }
+
+func (q *queue) poke() {
 	select {
-	case p.wake <- struct{}{}:
+	case q.wake <- struct{}{}:
 	default:
 	}
 }
 
-// keep keeps the spares topped up: at once when one is taken, and every
-// maxIdle/6 to replace those gone stale. Never is one used past maxIdle.
-func (p *pool) keep() {
-	tick := time.NewTicker(p.maxIdle / 6)
+// keep keeps the queue full: at once when a spare is taken, and every idle/6
+// to replace those gone stale. While spares cannot be opened, the log says
+// why, once per try, backing off from 1 s to 30 s.
+func (q *queue) keep() {
+	tick := time.NewTicker(q.idle / 6)
 	fails := 0
 	for {
-		p.expire()
-		if err := p.fill(); err != nil {
+		q.expire()
+		if err := q.fill(); err != nil {
 			fails++
 			wait := min(time.Second<<min(fails-1, 5), 30*time.Second)
-			log.Printf("%s: %v; trying again in %s", p.up, err, wait)
+			log.Printf("%s: %v; trying again in %s", q.label, err, wait)
 			time.Sleep(wait)
 			continue
 		}
 		if fails > 0 {
-			log.Printf("%s: connections ready again", p.up)
+			log.Printf("%s: ready again", q.label)
 			fails = 0
 		}
 		select {
-		case <-p.wake:
+		case <-q.wake:
 		case <-tick.C:
 		}
 	}
 }
 
 // expire closes the spares gone stale or closed by the proxy. It runs while
-// nothing else adds to the pool, so putting one back never blocks.
-func (p *pool) expire() {
-	for range len(p.tcp) {
+// nothing else adds to the queue, so putting one back never blocks.
+func (q *queue) expire() {
+	for range len(q.q) {
 		select {
-		case s := <-p.tcp:
-			if time.Since(s.born) < p.maxIdle && alive(s.c) {
-				p.tcp <- s
+		case s := <-q.q:
+			if q.usable(s) {
+				q.q <- s
 			} else {
-				s.c.Close()
-			}
-		default:
-		}
-	}
-	for range len(p.udp) {
-		select {
-		case a := <-p.udp:
-			if time.Since(a.born) < p.udpIdle() && alive(a.ctrl) {
-				p.udp <- a
-			} else {
-				a.close()
+				s.close()
 			}
 		default:
 		}
@@ -610,50 +644,71 @@ func (p *pool) expire() {
 }
 
 // fill opens what is missing, all at once, and returns the first error.
-func (p *pool) fill() error {
+func (q *queue) fill() error {
 	var wg sync.WaitGroup
-	errs := make(chan error, cap(p.tcp)+cap(p.udp))
-	for range cap(p.tcp) - len(p.tcp) {
+	errs := make(chan error, cap(q.q))
+	for range cap(q.q) - len(q.q) {
 		wg.Go(func() {
-			c, err := p.up.open()
+			s, err := q.open()
 			if err != nil {
 				errs <- err
 				return
 			}
-			p.tcp <- spare{c, time.Now()}
+			q.q <- s
 		})
-	}
-	if p.wantUDP.Load() {
-		for range cap(p.udp) - len(p.udp) {
-			wg.Go(func() {
-				a, err := p.freshAssoc()
-				if err != nil {
-					errs <- err
-					return
-				}
-				p.udp <- a
-			})
-		}
 	}
 	wg.Wait()
 	close(errs)
 	return <-errs
 }
 
-// take is a spare, or nil with none ready.
-func (p *pool) take() net.Conn {
-	defer p.poke()
+// take is a spare, if one is ready.
+func (q *queue) take() (spare, bool) {
+	defer q.poke()
 	for {
 		select {
-		case s := <-p.tcp:
-			if time.Since(s.born) < p.maxIdle && alive(s.c) {
-				return s.c
+		case s := <-q.q:
+			if q.usable(s) {
+				return s, true
 			}
-			s.c.Close()
+			s.close()
 		default:
-			return nil
+			return spare{}, false
 		}
 	}
+}
+
+type pool struct {
+	up  *upstream
+	tcp *queue
+	// Associations, kept ready once a client has asked for one: none while
+	// the client sends no UDP. A relay may forget a mapping that has carried
+	// nothing sooner than the proxy closes an idle connection, and a lost
+	// datagram says nothing, so they are replaced after a third of the time.
+	udp     *queue
+	udpOnce sync.Once
+}
+
+func newPool(u *upstream, maxIdle time.Duration) *pool {
+	p := &pool{up: u}
+	p.tcp = newQueue(u.String()+" connections", u.spares, maxIdle, func() (spare, error) {
+		c, err := u.open()
+		return spare{c: c, born: time.Now()}, err
+	})
+	if u.socks {
+		p.udp = newQueue(u.String()+" UDP associations", (u.spares+1)/2, maxIdle/3, func() (spare, error) {
+			c, err := u.open()
+			if err != nil {
+				return spare{}, err
+			}
+			a, _, err := u.associateOn(c, false)
+			if err != nil {
+				c.Close()
+			}
+			return a, err
+		})
+	}
+	return p
 }
 
 // --- serving the client ------------------------------------------------------
@@ -661,6 +716,9 @@ func (p *pool) take() net.Conn {
 func (p *pool) serve(ln net.Listener) {
 	for {
 		c, err := ln.Accept()
+		if errors.Is(err, net.ErrClosed) {
+			return
+		}
 		if err != nil {
 			log.Printf("%s: %v", p.up, err)
 			time.Sleep(100 * time.Millisecond)
@@ -752,9 +810,9 @@ func (p *pool) connect(c net.Conn, dst []byte) {
 		return
 	}
 	req := p.up.request(dst)
-	up := p.take()
-	spare := up != nil
-	if !spare {
+	s, warm := p.tcp.take()
+	up := s.c
+	if !warm {
 		var err error
 		if up, err = p.up.dial(); err != nil {
 			return
@@ -771,10 +829,13 @@ func (p *pool) connect(c net.Conn, dst []byte) {
 	if len(first) > 0 {
 		_, _ = up.Write(first)
 	}
-	left, heard, err := p.up.answer(up, !spare)
-	if err != nil && spare && !heard {
-		// The spare was dead: the proxy closed it, or a NAT on the way
-		// forgot it. Everything goes again on a new connection.
+	left, heard, err := p.up.answer(up, !warm)
+	// No reply at all: the spare was dead, closed by the proxy or forgotten
+	// by a NAT on the way. Everything goes again on a new connection, unless
+	// what went with it may have reached the site, and must not arrive twice:
+	// only nothing, or a TLS ClientHello, which starts a handshake of its own
+	// on the new connection, is sent again.
+	if err != nil && warm && !heard && (len(first) == 0 || first[0] == 0x16) {
 		up.Close()
 		if up, err = p.up.dial(); err != nil {
 			return
@@ -827,7 +888,7 @@ func pipe(c, up net.Conn) {
 
 // associateOn asks for a UDP association on c, after the greeting and login
 // when hello. heard is whether any byte came back.
-func (u *upstream) associateOn(c net.Conn, hello bool) (a *assoc, heard bool, err error) {
+func (u *upstream) associateOn(c net.Conn, hello bool) (a spare, heard bool, err error) {
 	req := []byte{5, 3, 0, 1, 0, 0, 0, 0, 0, 0}
 	if hello {
 		req = append(u.hello(), req...)
@@ -838,12 +899,12 @@ func (u *upstream) associateOn(c net.Conn, hello bool) (a *assoc, heard bool, er
 	r := &counter{r: c}
 	if hello {
 		if err := u.readHello(r); err != nil {
-			return nil, r.n > 0, err
+			return spare{}, r.n > 0, err
 		}
 	}
 	host, port, err := readReply(r)
 	if err != nil {
-		return nil, r.n > 0, err
+		return spare{}, r.n > 0, err
 	}
 	// The relay is on the proxy's own address when the reply names none.
 	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
@@ -851,52 +912,41 @@ func (u *upstream) associateOn(c net.Conn, hello bool) (a *assoc, heard bool, er
 	}
 	ra, err := net.ResolveUDPAddr("udp", net.JoinHostPort(host, strconv.Itoa(port)))
 	if err != nil {
-		return nil, true, err
+		return spare{}, true, err
 	}
 	relay, err := net.DialUDP("udp", nil, ra)
 	if err != nil {
-		return nil, true, err
+		return spare{}, true, err
 	}
-	return &assoc{ctrl: c, relay: relay, born: time.Now()}, true, nil
+	return spare{c: c, relay: relay, born: time.Now()}, true, nil
 }
 
-func (p *pool) freshAssoc() (*assoc, error) {
+// takeAssoc is an association: a ready one, else one asked for on a spare
+// (one round trip), else on a new connection, the greeting, login and request
+// in one write (two).
+func (p *pool) takeAssoc() (spare, error) {
+	if a, ok := p.udp.take(); ok {
+		return a, nil
+	}
+	if s, ok := p.tcp.take(); ok {
+		a, heard, err := p.up.associateOn(s.c, false)
+		if err == nil {
+			return a, nil
+		}
+		s.c.Close()
+		if heard {
+			return spare{}, err
+		}
+	}
 	c, err := p.up.dial()
 	if err != nil {
-		return nil, err
+		return spare{}, err
 	}
 	a, _, err := p.up.associateOn(c, true)
 	if err != nil {
 		c.Close()
 	}
 	return a, err
-}
-
-// takeAssoc is an association: a ready one, else one asked for on a spare
-// (one round trip), else on a new connection (two).
-func (p *pool) takeAssoc() (*assoc, error) {
-	for len(p.udp) > 0 {
-		select {
-		case a := <-p.udp:
-			p.poke()
-			if time.Since(a.born) < p.udpIdle() && alive(a.ctrl) {
-				return a, nil
-			}
-			a.close()
-		default:
-		}
-	}
-	if c := p.take(); c != nil {
-		a, heard, err := p.up.associateOn(c, false)
-		if err == nil {
-			return a, nil
-		}
-		c.Close()
-		if heard {
-			return nil, err
-		}
-	}
-	return p.freshAssoc()
 }
 
 // associate carries a UDP ASSOCIATE. The client is answered once the proxy's
@@ -909,9 +959,7 @@ func (p *pool) associate(c net.Conn) {
 		_, _ = c.Write(reply(7, netip.AddrPort{}))
 		return
 	}
-	if !p.wantUDP.Swap(true) {
-		p.poke()
-	}
+	p.udpOnce.Do(func() { go p.udp.keep() })
 	a, err := p.takeAssoc()
 	if err != nil {
 		_, _ = c.Write(reply(1, netip.AddrPort{}))
@@ -937,9 +985,14 @@ func (p *pool) associate(c net.Conn) {
 			if err != nil {
 				return
 			}
-			// Only from the client that asked.
-			if from.IP.Equal(peer) {
+			// Only from the client that asked: its address, and the port
+			// its first datagram came from, where the replies go.
+			to := client.Load()
+			if to == nil && from.IP.Equal(peer) {
 				client.Store(from)
+				to = from
+			}
+			if to != nil && from.Port == to.Port && from.IP.Equal(to.IP) {
 				_, _ = a.relay.Write(b[:n])
 			}
 		}
@@ -961,7 +1014,7 @@ func (p *pool) associate(c net.Conn) {
 	}()
 	// The association lasts while both control connections do.
 	go func() {
-		_, _ = io.Copy(io.Discard, a.ctrl)
+		_, _ = io.Copy(io.Discard, a.c)
 		c.Close()
 	}()
 	_, _ = io.Copy(io.Discard, c)

@@ -865,7 +865,8 @@ func TestUpstreamsWarm(t *testing.T) {
 		{"a WireGuard line", "wireguard://" + wgPriv + "@vpn.example:51820?publickey=" + wgPub + "&address=10.34.0.3/32 warm=1\n", "which a WireGuard line is not"},
 		{"a tunnel's line", "name=v warm=1 | openvpn://H4sI\n", "not a word XRAY_UPSTREAM_ALIASES defines"},
 		{"the word alone", "warm\n", "warm is not a word XRAY_UPSTREAM_ALIASES defines for a line"},
-		{"warm as a scheme", "warm://alice:secret@p.example:1080\n", "its scheme is not socks5"},
+		{"warm as a scheme", "warm://alice:secret@p.example:1080\n", "warm is a tag, not a scheme"},
+		{"a SOCKS5 password past 255 bytes", "socks5://alice:" + strings.Repeat("s", 256) + "@p.example:1080 warm=1\n", "at most 255 bytes"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, _, _, err := parseUpstreams(tc.list, aliases, "")
@@ -873,6 +874,11 @@ func TestUpstreamsWarm(t *testing.T) {
 				t.Fatalf("err = %v\nwant %q, and no password", err, tc.want)
 			}
 		})
+	}
+	// 255 bytes is a SOCKS5 login's most, and an HTTP proxy's has no such cap.
+	long := strings.Repeat("s", 255)
+	if _, _, _, err := parseUpstreams("socks5://alice:"+long+"@p.example:1080 warm=1\nhttp://bob:"+long+"s@h.example:8080\n", aliases, ""); err != nil {
+		t.Errorf("a 255-byte SOCKS5 password or a longer HTTP one: %v", err)
 	}
 	for alias, want := range map[string]string{"": "needs XRAY_UPSTREAM_ALIASES to name warm's SOCKS5 hop", "http://warm:1080": "needs XRAY_UPSTREAM_ALIASES to name warm's SOCKS5 hop"} {
 		a := map[string]string{}

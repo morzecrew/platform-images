@@ -971,6 +971,10 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 		if err != nil {
 			return l, err
 		}
+		// SOCKS5 sends each as a length byte and the bytes.
+		if strings.HasPrefix(scheme, "socks") && (len(p.User) > 255 || len(p.Pass) > 255) {
+			return l, errors.New("a SOCKS5 user and password are at most 255 bytes each")
+		}
 		if alias {
 			if p.Port += counts[word]; p.Port > 65535 {
 				return l, fmt.Errorf("is line %d naming %s, past port 65535", counts[word]+1, word)
@@ -1017,6 +1021,8 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 			}
 		}
 		l.where = strings.Join(ends, " ")
+	case "warm":
+		return l, errors.New("warm is a tag, not a scheme: put warm=<n> among the tags, before the | and the proxy's URL")
 	default:
 		return l, errors.New("its scheme is not socks5, socks5+tls, http, https or wireguard")
 	}

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -80,6 +81,7 @@ type fake struct {
 	user, pass string
 	delay      time.Duration
 	refuse     bool
+	hints      bool         // an HTTP proxy's 103 before its 200
 	drop       atomic.Int32 // requests to close unanswered, as a dead spare does
 	logins     atomic.Int32
 	requests   atomic.Int32
@@ -231,6 +233,9 @@ func (f *fake) handleHTTP(c net.Conn, br *bufio.Reader) {
 		io.WriteString(c, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
 		return
 	}
+	if f.hints {
+		io.WriteString(c, "HTTP/1.1 103 Early Hints\r\nLink: </x>; rel=preload\r\n\r\n")
+	}
 	io.WriteString(c, "HTTP/1.1 200 Connection established\r\n\r\n")
 	relay(c, br, tgt)
 }
@@ -314,7 +319,7 @@ func serveWarm(t *testing.T, u *upstream, spares int) (string, *pool) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { ln.Close() })
-	go p.keep()
+	go p.tcp.keep()
 	go p.serve(ln)
 	return ln.Addr().String(), p
 }
@@ -328,41 +333,52 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// socks asks the server at addr, as Xray does, step by step: the greeting,
-// then the request, each waiting for its reply.
-func socks(t *testing.T, addr string, cmd byte, dst *net.TCPAddr) (net.Conn, []byte) {
-	t.Helper()
+// dialSocks asks the server at addr, as Xray does, step by step: the
+// greeting, then the request, each waiting for its reply.
+func dialSocks(addr string, cmd byte, dst *net.TCPAddr) (net.Conn, []byte, error) {
 	c, err := net.Dial("tcp", addr)
 	if err != nil {
-		t.Fatal(err)
+		return nil, nil, err
 	}
-	t.Cleanup(func() { c.Close() })
 	c.SetDeadline(time.Now().Add(5 * time.Second))
 	var b [2]byte
 	c.Write([]byte{5, 1, 0})
 	if _, err := io.ReadFull(c, b[:]); err != nil || b != [2]byte{5, 0} {
-		t.Fatalf("greeting: %v %v", b, err)
+		c.Close()
+		return nil, nil, fmt.Errorf("greeting: %v %v", b, err)
 	}
 	req := append([]byte{5, cmd, 0, 1}, dst.IP.To4()...)
 	c.Write(binary.BigEndian.AppendUint16(req, uint16(dst.Port)))
 	r := make([]byte, 10)
 	if _, err := io.ReadFull(c, r); err != nil {
-		t.Fatalf("reply: %v", err)
+		c.Close()
+		return nil, nil, fmt.Errorf("reply: %v", err)
 	}
+	return c, r, nil
+}
+
+func socks(t *testing.T, addr string, cmd byte, dst *net.TCPAddr) (net.Conn, []byte) {
+	t.Helper()
+	c, r, err := dialSocks(addr, cmd, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
 	return c, r
 }
 
-// roundTrip sends ping through c and times the echo.
-func roundTrip(t *testing.T, c net.Conn) (time.Duration, error) {
-	t.Helper()
+// roundTrip sends msg through c and times its echo.
+func roundTrip(c net.Conn, msg string) (time.Duration, error) {
 	start := time.Now()
-	c.Write([]byte("ping"))
-	b := make([]byte, 4)
-	_, err := io.ReadFull(c, b)
-	if err == nil && string(b) != "ping" {
-		t.Fatalf("echo %q", b)
+	c.Write([]byte(msg))
+	b := make([]byte, len(msg))
+	if _, err := io.ReadFull(c, b); err != nil {
+		return 0, err
 	}
-	return time.Since(start), err
+	if string(b) != msg {
+		return 0, fmt.Errorf("echo %q, sent %q", b, msg)
+	}
+	return time.Since(start), nil
 }
 
 const rtt = 200 * time.Millisecond
@@ -370,15 +386,15 @@ const rtt = 200 * time.Millisecond
 func TestWarmSOCKS5(t *testing.T) {
 	tcp, _ := echo(t)
 	f := &fake{socks: true, user: "u", pass: "p4ss", delay: rtt}
-	addr, _ := serveWarm(t, f.start(t), 2)
-	waitFor(t, "two spares logged in", func() bool { return f.logins.Load() == 2 })
+	addr, p := serveWarm(t, f.start(t), 2)
+	waitFor(t, "two spares ready", func() bool { return len(p.tcp.q) == 2 })
 	c, r := socks(t, addr, 1, tcp)
 	if r[1] != 0 {
 		t.Fatalf("reply %v", r)
 	}
 	// The CONNECT's reply is the one round trip: the greeting and the login
 	// were made beforehand, and the data went with the CONNECT.
-	d, err := roundTrip(t, c)
+	d, err := roundTrip(c, "ping")
 	if err != nil || d > 2*rtt {
 		t.Fatalf("the first echo took %v (%v), more than the one round trip of %v it needs", d, err, rtt)
 	}
@@ -388,10 +404,10 @@ func TestWarmSOCKS5(t *testing.T) {
 func TestWarmHTTP(t *testing.T) {
 	tcp, _ := echo(t)
 	f := &fake{user: "u", pass: "p4ss", delay: rtt}
-	addr, _ := serveWarm(t, f.start(t), 2)
-	time.Sleep(100 * time.Millisecond) // the spares' TCP, which logs nothing in
+	addr, p := serveWarm(t, f.start(t), 2)
+	waitFor(t, "two spares ready", func() bool { return len(p.tcp.q) == 2 })
 	c, _ := socks(t, addr, 1, tcp)
-	d, err := roundTrip(t, c)
+	d, err := roundTrip(c, "ping")
 	if err != nil || d > 2*rtt {
 		t.Fatalf("the first echo took %v (%v), more than the one round trip of %v it needs", d, err, rtt)
 	}
@@ -409,8 +425,12 @@ func TestNoSpareReady(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 8 {
 		wg.Go(func() {
-			c, _ := socks(t, addr, 1, tcp)
-			if _, err := roundTrip(t, c); err != nil {
+			c, _, err := dialSocks(addr, 1, tcp)
+			if err == nil {
+				defer c.Close()
+				_, err = roundTrip(c, "ping")
+			}
+			if err != nil {
 				t.Error(err)
 			}
 		})
@@ -418,22 +438,68 @@ func TestNoSpareReady(t *testing.T) {
 	wg.Wait()
 }
 
-// A spare the proxy dropped without a word still carries the connection: it
-// goes again on a new one.
+// A spare the proxy dropped without a word still carries the connection when
+// what went with it may go twice: it goes again on a new one. Anything else,
+// which may have reached the site already, is not sent again.
 func TestDeadSpare(t *testing.T) {
 	tcp, _ := echo(t)
-	for _, socks5 := range []bool{true, false} {
-		f := &fake{socks: socks5, user: "u", pass: "p4ss"}
+	hello := "\x16\x03\x01\x00\x05hello" // a TLS record, as a ClientHello starts
+	for _, tc := range []struct {
+		socks5 bool
+		msg    string
+		again  bool
+	}{{true, hello, true}, {false, hello, true}, {true, "POST /", false}, {false, "POST /", false}} {
+		f := &fake{socks: tc.socks5, user: "u", pass: "p4ss"}
 		addr, p := serveWarm(t, f.start(t), 1)
-		waitFor(t, "a spare", func() bool { return len(p.tcp) == 1 })
+		waitFor(t, "a spare", func() bool { return len(p.tcp.q) == 1 })
 		f.drop.Store(1)
 		c, _ := socks(t, addr, 1, tcp)
-		if _, err := roundTrip(t, c); err != nil {
-			t.Fatalf("socks5=%v: %v", socks5, err)
+		_, err := roundTrip(c, tc.msg)
+		if tc.again && err != nil || !tc.again && err == nil {
+			t.Fatalf("%+v: %v", tc, err)
 		}
-		if n := f.requests.Load(); n != 2 {
-			t.Fatalf("socks5=%v: %d requests reached the proxy, want 2", socks5, n)
+		if n, want := f.requests.Load(), map[bool]int32{true: 2, false: 1}[tc.again]; n != want {
+			t.Fatalf("%+v: %d requests reached the proxy, want %d", tc, n, want)
 		}
+	}
+}
+
+// A spare the proxy closed is never taken: alive sees its end.
+func TestAlive(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	srv, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !alive(c) {
+		t.Fatal("an open, quiet connection is not alive")
+	}
+	srv.Close()
+	waitFor(t, "the end to arrive", func() bool { return !alive(c) })
+	c2, _ := net.Dial("tcp", ln.Addr().String())
+	defer c2.Close()
+	srv2, _ := ln.Accept()
+	defer srv2.Close()
+	srv2.Write([]byte("x"))
+	waitFor(t, "the byte to arrive", func() bool { return !alive(c2) })
+}
+
+func TestHTTPInformational(t *testing.T) {
+	tcp, _ := echo(t)
+	f := &fake{user: "u", pass: "p4ss", hints: true}
+	addr, _ := serveWarm(t, f.start(t), 1)
+	c, _ := socks(t, addr, 1, tcp)
+	if _, err := roundTrip(c, "ping"); err != nil {
+		t.Fatalf("a 103 before the 200: %v", err)
 	}
 }
 
@@ -448,7 +514,7 @@ func TestRefused(t *testing.T) {
 		if r[1] != 0 {
 			t.Fatalf("socks5=%v: reply %v", socks5, r)
 		}
-		if _, err := roundTrip(t, c); err == nil {
+		if _, err := roundTrip(c, "ping"); err == nil {
 			t.Fatalf("socks5=%v: a refused CONNECT carried data", socks5)
 		}
 	}
@@ -461,7 +527,7 @@ func TestWrongLogin(t *testing.T) {
 	u.pass = "wrong"
 	addr, _ := serveWarm(t, u, 1)
 	c, _ := socks(t, addr, 1, tcp)
-	if _, err := roundTrip(t, c); err == nil {
+	if _, err := roundTrip(c, "ping"); err == nil {
 		t.Fatal("a refused login carried data")
 	}
 }
@@ -499,7 +565,7 @@ func TestUDP(t *testing.T) {
 	}
 	ask()
 	// The first association made UDP wanted: associations are now kept ready.
-	waitFor(t, "an association ready", func() bool { return len(p.udp) == cap(p.udp) })
+	waitFor(t, "an association ready", func() bool { return len(p.udp.q) == cap(p.udp.q) })
 	ask()
 }
 
