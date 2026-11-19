@@ -7,7 +7,7 @@ leaves at once, not four round trips to the proxy later. uid 65532 on distroless
 
 | | |
 |---|---|
-| Image | `ghcr.io/morzecrew/proxy-warm:0.1.0` |
+| Image | `ghcr.io/morzecrew/proxy-warm:0.1.1` |
 | Tag | This repository's version of the program, moved by hand |
 | User | `65532:65532` (`nonroot`), never root |
 | Base | `gcr.io/distroless/static-debian13:nonroot` |
@@ -29,7 +29,8 @@ away, that is 136 ms or 68 ms before a site's first byte, on every connection.
 
 proxy-warm answers its client at once, on the container network, and sends
 the CONNECT and the client's first bytes together on a connection it opened
-and logged in beforehand:
+beforehand, and for SOCKS5 logged in. An HTTP proxy's login goes with the
+CONNECT itself:
 
 | A new connection | Round trips to the proxy before data |
 |---|---|
@@ -46,7 +47,7 @@ to the first byte step by step, 87 ms with no spare, 51 ms on a spare.
 ```yaml
 services:
   warm:
-    image: ghcr.io/morzecrew/proxy-warm:0.1.0
+    image: ghcr.io/morzecrew/proxy-warm:0.1.1
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -112,9 +113,10 @@ program has nothing else to set.
   sends within 20 ms goes right after it, before the proxy has replied. With
   no spare left, a new connection to a SOCKS5 proxy sends its greeting, login,
   CONNECT and data in one go. A proxy that drops bytes sent before its reply
-  breaks connections through this image. Before tagging its line, send it,
-  on a new connection, the greeting, the login, a CONNECT and a request in
-  one write, and see whether the answer comes back.
+  breaks connections through this image. Before relying on a line, check it
+  through proxy-warm itself: once with its spares ready, and once in a burst
+  of more connections than `warm=`, which leaves none; with UDP, send a
+  datagram and see its reply come back, once ready and once in a burst.
 - **A dead spare.** One the proxy or a NAT on the way dropped without a word
   answers nothing. What was sent on it goes again on a new connection, once,
   if sending it twice is harmless: nothing, or a TLS ClientHello, which starts
@@ -136,9 +138,11 @@ program has nothing else to set.
   nowhere: put it on a network only its client shares.
 - **The list** is read once, at start. The k-th port must lead to the same
   line here as in the client, so restart both after any change to the list:
-  with only the client restarted, two `warm=` lines swapped send each one's
-  traffic out the other's proxy, and the healthcheck still passes. A tag
-  added to an idle container's list takes effect at its restart.
+  with only one restarted, two `warm=` lines swapped send each one's traffic
+  out the other's proxy, and the healthcheck still passes. Stop the client,
+  restart proxy-warm, then start the client; restarted together, they may
+  disagree for the second between their starts. A tag added to an idle
+  container's list takes effect at its restart.
 
 With no line tagged `warm=`, it says so and runs idle, so it can be started
 before any line leads to it. The healthcheck passes while each line's port

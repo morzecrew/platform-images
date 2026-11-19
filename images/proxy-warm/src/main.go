@@ -527,8 +527,9 @@ func hostPort(dst []byte) string {
 // alive reports whether an idle connection is still open: nothing waiting on
 // its socket, neither data nor the end a proxy that closed it sent. It peeks
 // without blocking: a deadline already past fails a read before it looks.
-// Under TLS, a record waiting is the server's own, such as a session ticket,
-// and the connection open.
+// Under TLS, a record waiting may be a session ticket, which leaves the
+// connection open, or the close_notify of a server that closed it: it is read,
+// which consumes a ticket and reports an end.
 func alive(c net.Conn) bool {
 	t, overTLS := c.(*tls.Conn)
 	if overTLS {
@@ -554,10 +555,23 @@ func alive(c net.Conn) bool {
 		return false
 	case errors.Is(peek, syscall.EAGAIN):
 		return true
-	case peek != nil, n == 0:
+	case peek != nil, n == 0, !overTLS:
 		return false
 	}
-	return overTLS
+	var b [1]byte
+	_ = t.SetReadDeadline(time.Now().Add(time.Millisecond))
+	n, err = t.Read(b[:])
+	_ = t.SetReadDeadline(time.Time{})
+	var ne net.Error
+	return n == 0 && errors.As(err, &ne) && ne.Timeout()
+}
+
+// lone reports whether b is exactly one TLS record holding a ClientHello:
+// sent again on a new connection, it starts a handshake of its own there and
+// nothing more. TLS 1.3 early data would follow in records of its own.
+func lone(b []byte) bool {
+	return len(b) > 5 && b[0] == 0x16 && b[1] == 3 && b[5] == 1 &&
+		int(binary.BigEndian.Uint16(b[3:5])) == len(b)-5
 }
 
 // --- the pool ----------------------------------------------------------------
@@ -833,9 +847,8 @@ func (p *pool) connect(c net.Conn, dst []byte) {
 	// No reply at all: the spare was dead, closed by the proxy or forgotten
 	// by a NAT on the way. Everything goes again on a new connection, unless
 	// what went with it may have reached the site, and must not arrive twice:
-	// only nothing, or a TLS ClientHello, which starts a handshake of its own
-	// on the new connection, is sent again.
-	if err != nil && warm && !heard && (len(first) == 0 || first[0] == 0x16) {
+	// only nothing, or a lone ClientHello, is sent again.
+	if err != nil && warm && !heard && (len(first) == 0 || lone(first)) {
 		up.Close()
 		if up, err = p.up.dial(); err != nil {
 			return

@@ -1,0 +1,24 @@
+package main
+
+// A throwaway self-signed certificate for TestAliveTLS, for proxy-warm.test,
+// valid 100 years. Nothing trusts it.
+
+var testCert = []byte(`-----BEGIN CERTIFICATE-----
+MIIBjDCCATGgAwIBAgIUeZJcfVMOFMK5JEayyF86e68SWCgwCgYIKoZIzj0EAwIw
+GjEYMBYGA1UEAwwPcHJveHktd2FybS50ZXN0MCAXDTI2MTExOTA2MzUxN1oYDzIx
+MjYxMDI2MDYzNTE3WjAaMRgwFgYDVQQDDA9wcm94eS13YXJtLnRlc3QwWTATBgcq
+hkjOPQIBBggqhkjOPQMBBwNCAARkzkJuaFyjDEoXxFmm84jAgrCEeZEJ+/jlirb5
+MGxzpwpsX+22Byn6EmuWHst/OFh6nAoz1elhXU7EK3J9HynHo1MwUTAdBgNVHQ4E
+FgQUejWE8WxDyAPJiM2HmQ/6da5da18wHwYDVR0jBBgwFoAUejWE8WxDyAPJiM2H
+mQ/6da5da18wDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNJADBGAiEAw5D9
+VSLrR2LwKcAG0CsalucuzS3/ofU17WyUTLqmPeACIQC4EG3bx0PyTs9BI5U05Iau
+xf/M+H2vwaS9w8GKpmL6bw==
+-----END CERTIFICATE-----
+`)
+
+var testKey = []byte(`-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgUEYgRpiauf1PcS1f
+BJwCT37/0VxX2wgpZ42z/9UC4xqhRANCAARkzkJuaFyjDEoXxFmm84jAgrCEeZEJ
++/jlirb5MGxzpwpsX+22Byn6EmuWHst/OFh6nAoz1elhXU7EK3J9HynH
+-----END PRIVATE KEY-----
+`)

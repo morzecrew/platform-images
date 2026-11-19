@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
@@ -443,12 +444,13 @@ func TestNoSpareReady(t *testing.T) {
 // which may have reached the site already, is not sent again.
 func TestDeadSpare(t *testing.T) {
 	tcp, _ := echo(t)
-	hello := "\x16\x03\x01\x00\x05hello" // a TLS record, as a ClientHello starts
+	hello := "\x16\x03\x01\x00\x05\x01\x00\x00\x01x" // one record, a ClientHello
+	opaque := "\x16\x03\x01\x00\x02\x01x and more"   // starts like one, and isn't
 	for _, tc := range []struct {
 		socks5 bool
 		msg    string
 		again  bool
-	}{{true, hello, true}, {false, hello, true}, {true, "POST /", false}, {false, "POST /", false}} {
+	}{{true, hello, true}, {false, hello, true}, {true, "POST /", false}, {false, "POST /", false}, {true, opaque, false}} {
 		f := &fake{socks: tc.socks5, user: "u", pass: "p4ss"}
 		addr, p := serveWarm(t, f.start(t), 1)
 		waitFor(t, "a spare", func() bool { return len(p.tcp.q) == 1 })
@@ -491,6 +493,53 @@ func TestAlive(t *testing.T) {
 	defer srv2.Close()
 	srv2.Write([]byte("x"))
 	waitFor(t, "the byte to arrive", func() bool { return !alive(c2) })
+}
+
+// Under TLS, a session ticket waiting leaves a spare alive; a close_notify
+// does not.
+func TestAliveTLS(t *testing.T) {
+	cert, err := tls.X509KeyPair(testCert, testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	for _, closes := range []bool{false, true} {
+		// The server's side of the handshake runs as the client's does, and
+		// sends its session tickets after it.
+		accepted := make(chan net.Conn, 1)
+		go func() {
+			srv, err := ln.Accept()
+			if err == nil {
+				srv.(*tls.Conn).Handshake()
+			}
+			accepted <- srv
+		}()
+		c, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{InsecureSkipVerify: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer c.Close()
+		srv := <-accepted
+		if srv == nil {
+			t.Fatal("no connection accepted")
+		}
+		defer srv.Close()
+		if closes {
+			srv.Close()
+			waitFor(t, "the close_notify to arrive", func() bool { return !alive(c) })
+			continue
+		}
+		time.Sleep(50 * time.Millisecond)
+		for range 3 {
+			if !alive(c) {
+				t.Fatal("an open TLS connection with a session ticket waiting is not alive")
+			}
+		}
+	}
 }
 
 func TestHTTPInformational(t *testing.T) {
