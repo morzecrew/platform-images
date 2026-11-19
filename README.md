@@ -54,6 +54,7 @@ Tags follow bake defaults. The image name carries what is inside; bake variables
 | [openvpn](./images/openvpn) | An OpenVPN client whose kill switch holds from the first packet: before openvpn starts, the default routes give way to host routes to its servers, so nothing leaves the namespace except through the tunnel. Root with `NET_ADMIN` and `/dev/net/tun`; a healthcheck that passes only while traffic is routed into the tunnel. |
 | [caddy-acmedns](./images/caddy-acmedns) | Upstream's Caddy with one module built in, caddy-dns/acmedns: a site takes its certificate, a wildcard included, through a DNS-01 check delegated by one CNAME to an acme-dns server, whatever hosts its DNS. Otherwise upstream's alpine image, unchanged. |
 | [caddy-l4](./images/caddy-l4) | Upstream's Caddy with one module built in, mholt/caddy-l4: a listener wrapper passes chosen TLS server names through, untouched, to a backend that terminates TLS itself, while the HTTP app serves every other connection. The binary can be copied out for a Caddy run as a service. |
+| [proxy-warm](./images/proxy-warm) | A SOCKS5 front for upstream proxies, as uid 65532 on distroless: connections to each kept open and logged in ahead of use, a client answered at once and its CONNECT sent with its first bytes, UDP associations kept ready once asked for. Lines from the xray image's upstreams list, tagged `warm=<n>`. |
 
 ## Consuming these images
 

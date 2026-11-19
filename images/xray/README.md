@@ -319,7 +319,7 @@ one outbound per line of the file, so every way out, whatever its kind and
 however many, is one secret in order of preference:
 
 ```text
-# [name=<name>] [group=<group>[,<group>]] | <url>
+# [name=<name>] [group=<group>[,<group>]] [warm=<n>] | <url>
 name=isp-a                     | socks5://alice:secret@proxy.example:1080
 name=isp-b                     | https://bob:secret@203.0.113.9:8443
 name=home group=upstream,ipv6  | wireguard://<private key>@vpn.example:51820?publickey=<base64>&address=10.34.0.3/32,fd30:2::3/128
@@ -392,6 +392,14 @@ static config routes to tags it never spells out:
   has a port of its own. Pins change the outbounds' order, not the ports. A
   word may not be a scheme a line already has (`socks`, `socks5`, `http`,
   `https`, `wireguard`).
+- **Warm.** A proxy line tagged `warm=<n>`, 1 to 16, is dialled at the SOCKS5
+  hop `XRAY_UPSTREAM_ALIASES` names `warm` (`warm=socks5://warm:1080`), the
+  k-th such line, counting from 0 in the file's order, at its port plus k,
+  with no login and no TLS of its own. The hop is the
+  [proxy-warm image](../proxy-warm/README.md), which reads the same list and
+  keeps `n` connections to the line's proxy open and logged in, so a new
+  connection skips the proxy's handshake. The summary shows the proxy and the
+  hop.
 - `name=` is 1 to 32 lowercase letters, digits and dashes, starting with a
   letter or a digit; a group is 1 to 16 lowercase letters and digits, starting
   with a letter, and appears once on a line.
@@ -406,8 +414,10 @@ the URL:
 - A line that starts with neither a URL nor a word `XRAY_UPSTREAM_ALIASES`
   defines; a scheme other than those above.
 - Tags before the URL that do not end in `|` and the URL; a tag other than
-  `name=` and `group=`, one twice, or a name or group outside its pattern; a
-  name on two lines.
+  `name=`, `group=` and `warm=`, one twice, or a name or group outside its
+  pattern; a name on two lines.
+- `warm=` outside 1 to 16, on a WireGuard line or a word's, or with no
+  SOCKS5 hop named `warm` in `XRAY_UPSTREAM_ALIASES`; `warm` alone as a line.
 - A proxy `$proxy` would refuse; a `wireguard://` URL with no key before its
   `@`, a query key not listed above or one twice, a line break or `#` in a
   value, or settings `$wireguard` would refuse.
