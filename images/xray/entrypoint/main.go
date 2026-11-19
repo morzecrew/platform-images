@@ -907,12 +907,12 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 	fields := strings.Fields(line)
 	l := upstreamLine{groups: []string{"upstream"}}
 	u, tags := fields[0], fields[1:]
-	if k, _, ok := strings.Cut(u, "="); strings.HasPrefix(u, "|") || ok && (k == "name" || k == "group") {
+	if k, _, ok := strings.Cut(u, "="); strings.HasPrefix(u, "|") || ok && (k == "name" || k == "group" || k == "warm") {
 		before, after, _ := strings.Cut(line, "|")
 		if rest := strings.Fields(after); len(rest) == 1 {
 			u, tags = rest[0], strings.Fields(before)
 		} else {
-			return l, errors.New("tags before the URL end in a | and the URL: [name=<name>] [group=<group>] | <url>")
+			return l, errors.New("tags before the URL end in a | and the URL: [name=<name>] [group=<group>] [warm=<n>] | <url>")
 		}
 	}
 	word, _, isURL := strings.Cut(u, "://")
@@ -920,19 +920,21 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 		if !upstreamWordRE.MatchString(u) {
 			return l, errors.New("does not start with a URL (socks5://, socks5+tls://, http://, https://, wireguard://) or a word XRAY_UPSTREAM_ALIASES defines")
 		}
-		if _, ok := aliases[u]; !ok {
-			return l, fmt.Errorf("%s is not a word XRAY_UPSTREAM_ALIASES defines", u)
+		if _, ok := aliases[u]; !ok || u == "warm" {
+			return l, fmt.Errorf("%s is not a word XRAY_UPSTREAM_ALIASES defines for a line", u)
 		}
 	}
 	a, alias := aliases[word]
+	alias = alias && word != "warm"
 	if alias {
 		u = a
 	}
 	seen := map[string]bool{}
+	warm := false
 	for _, opt := range tags {
 		k, v, ok := strings.Cut(opt, "=")
 		if !ok || seen[k] {
-			return l, errors.New("the tags are name=<name> and group=<group>[,<group>], each at most once")
+			return l, errors.New(tagsAre)
 		}
 		seen[k] = true
 		switch k {
@@ -951,8 +953,14 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 					return l, fmt.Errorf("group= lists %s twice", g)
 				}
 			}
+		case "warm":
+			// The connections the hop keeps ready, which it reads itself.
+			if n, err := strconv.Atoi(v); err != nil || n < 1 || n > 16 {
+				return l, errors.New("warm= is the number of connections to keep ready, from 1 to 16")
+			}
+			warm = true
 		default:
-			return l, errors.New("the tags are name=<name> and group=<group>[,<group>], each at most once")
+			return l, errors.New(tagsAre)
 		}
 	}
 
@@ -962,6 +970,10 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 		p, err := parseProxyFrom(rest, alias)
 		if err != nil {
 			return l, err
+		}
+		// SOCKS5 sends each as a length byte and the bytes.
+		if strings.HasPrefix(scheme, "socks") && (len(p.User) > 255 || len(p.Pass) > 255) {
+			return l, errors.New("a SOCKS5 user and password are at most 255 bytes each")
 		}
 		if alias {
 			if p.Port += counts[word]; p.Port > 65535 {
@@ -980,7 +992,21 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 		if p.User != "" {
 			l.secrets = []string{p.User, p.Pass}
 		}
+		if warm {
+			if alias {
+				return l, errors.New("warm= is for a proxy's own URL, not a word XRAY_UPSTREAM_ALIASES defines")
+			}
+			hop, err := warmHop(aliases, counts)
+			if err != nil {
+				return l, err
+			}
+			l.out = upstreamOutbound{Protocol: "socks", Settings: hop}
+			l.where += " via " + net.JoinHostPort(hop.Address, strconv.Itoa(hop.Port))
+		}
 	case "wireguard":
+		if warm {
+			return l, errors.New("warm= is for a SOCKS5 or an HTTP proxy, which a WireGuard line is not")
+		}
 		w, err := parseWireGuardURL(rest)
 		if err != nil {
 			return l, err
@@ -995,10 +1021,35 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 			}
 		}
 		l.where = strings.Join(ends, " ")
+	case "warm":
+		return l, errors.New("warm is a tag, not a scheme: put warm=<n> among the tags, before the | and the proxy's URL")
 	default:
 		return l, errors.New("its scheme is not socks5, socks5+tls, http, https or wireguard")
 	}
 	return l, nil
+}
+
+const tagsAre = "the tags are name=<name>, group=<group>[,<group>] and warm=<n>, each at most once"
+
+// warmHop is where a warm= line is dialled: the SOCKS5 hop XRAY_UPSTREAM_ALIASES
+// names warm, such as the proxy-warm image beside the container, which reads
+// the same list and keeps connections to the line's proxy open and logged in.
+// The k-th warm= line, counting from 0 in the file's order, dials its port
+// plus k. The hop holds the login; the outbound needs none.
+func warmHop(aliases map[string]string, counts map[string]int) (proxyServer, error) {
+	scheme, rest, _ := strings.Cut(aliases["warm"], "://")
+	if scheme != "socks5" && scheme != "socks" {
+		return proxyServer{}, errors.New("warm= needs XRAY_UPSTREAM_ALIASES to name warm's SOCKS5 hop, such as warm=socks5://warm:1080")
+	}
+	hop, err := parseProxyFrom(rest, true)
+	if err != nil {
+		return proxyServer{}, errors.New("XRAY_UPSTREAM_ALIASES gives warm a URL that " + err.Error())
+	}
+	if hop.Port += counts["warm"]; hop.Port > 65535 {
+		return proxyServer{}, fmt.Errorf("is warm= line %d, past port 65535", counts["warm"]+1)
+	}
+	counts["warm"]++
+	return hop, nil
 }
 
 // wireguardURLKeys maps a wireguard:// URL's query keys to wg-quick's.

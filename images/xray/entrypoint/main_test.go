@@ -825,3 +825,68 @@ func TestUpstreamsRefusals(t *testing.T) {
 		}
 	}
 }
+
+func TestUpstreamsWarm(t *testing.T) {
+	// A warm= line dials the warm hop, the k-th at its port plus k, with no
+	// login and no TLS of its own: the hop holds both.
+	list := "name=a warm=4 | socks5://alice:secret@proxy.example:1080\n" +
+		"http://bob:secret@h.example:8080 name=b\n" +
+		"https://carol:secret@203.0.113.9:8443 name=c warm=2\n"
+	aliases := map[string]string{"openvpn": "socks5://vpn:1080", "warm": "socks5://warm:1080"}
+	outs, secrets, note, err := parseUpstreams(list, aliases, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var have []string
+	for _, o := range outs {
+		p := o.Settings.(proxyServer)
+		have = append(have, fmt.Sprintf("%s %s %s:%d user=%s tls=%v", o.Tag, o.Protocol, p.Address, p.Port, p.User, o.StreamSettings != nil))
+	}
+	want := []string{
+		"upstream-0 socks warm:1080 user= tls=false",
+		"upstream-b1 http h.example:8080 user=bob tls=false",
+		"upstream-b2 socks warm:1081 user= tls=false",
+	}
+	if !slices.Equal(have, want) {
+		t.Fatalf("outbounds\n got %v\nwant %v", have, want)
+	}
+	for _, s := range []string{"alice", "carol"} {
+		if !slices.Contains(secrets, s) {
+			t.Errorf("%s is not among the secrets to redact", s)
+		}
+	}
+	if !strings.Contains(note, "upstream-0 (a) socks proxy.example:1080 via warm:1080") ||
+		!strings.Contains(note, "upstream-b2 (c) socks 203.0.113.9:8443 via warm:1081") {
+		t.Errorf("the summary note %q", note)
+	}
+	for _, tc := range []struct{ name, list, want string }{
+		{"no spares", "socks5://alice:secret@p.example:1080 warm=0\n", "warm= is the number of connections"},
+		{"too many", "socks5://alice:secret@p.example:1080 warm=17\n", "warm= is the number of connections"},
+		{"a WireGuard line", "wireguard://" + wgPriv + "@vpn.example:51820?publickey=" + wgPub + "&address=10.34.0.3/32 warm=1\n", "which a WireGuard line is not"},
+		{"a tunnel's line", "name=v warm=1 | openvpn://H4sI\n", "not a word XRAY_UPSTREAM_ALIASES defines"},
+		{"the word alone", "warm\n", "warm is not a word XRAY_UPSTREAM_ALIASES defines for a line"},
+		{"warm as a scheme", "warm://alice:secret@p.example:1080\n", "warm is a tag, not a scheme"},
+		{"a SOCKS5 password past 255 bytes", "socks5://alice:" + strings.Repeat("s", 256) + "@p.example:1080 warm=1\n", "at most 255 bytes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, err := parseUpstreams(tc.list, aliases, "")
+			if err == nil || !strings.Contains(err.Error(), tc.want) || strings.Contains(err.Error(), "secret") {
+				t.Fatalf("err = %v\nwant %q, and no password", err, tc.want)
+			}
+		})
+	}
+	// 255 bytes is a SOCKS5 login's most, and an HTTP proxy's has no such cap.
+	long := strings.Repeat("s", 255)
+	if _, _, _, err := parseUpstreams("socks5://alice:"+long+"@p.example:1080 warm=1\nhttp://bob:"+long+"s@h.example:8080\n", aliases, ""); err != nil {
+		t.Errorf("a 255-byte SOCKS5 password or a longer HTTP one: %v", err)
+	}
+	for alias, want := range map[string]string{"": "needs XRAY_UPSTREAM_ALIASES to name warm's SOCKS5 hop", "http://warm:1080": "needs XRAY_UPSTREAM_ALIASES to name warm's SOCKS5 hop"} {
+		a := map[string]string{}
+		if alias != "" {
+			a["warm"] = alias
+		}
+		if _, _, _, err := parseUpstreams("socks5://alice:secret@p.example:1080 warm=1\n", a, ""); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("warm alias %q: err = %v", alias, err)
+		}
+	}
+}

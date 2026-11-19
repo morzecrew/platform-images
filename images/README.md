@@ -99,6 +99,11 @@ contract. It is normative: image READMEs link here rather than restating it.
 >   reads the environment through Caddy's own `{$VAR}` expansion.
 > - **`caddy-l4`** is the same: upstream's image with one module built in,
 >   configured by its Caddyfile alone.
+> - **`proxy-warm`** has three curated names and warns about an unknown
+>   `PROXY_WARM_*` one, with no passthrough channel: it is this repository's
+>   own program, with nothing else to set. It reads its one file, the
+>   upstreams list, with the shared Go helper's checks, refuses with exit 78,
+>   and prints the summary with caddy's header and footer.
 >
 > Where an image's behaviour and this section disagree, this section is the
 > target and the image is the gap. Each image's own README states what it
@@ -323,6 +328,7 @@ author to remember.
 | `openvpn` | neither | One project, dotdash, needs an OpenVPN client for its OpenVPN upstream, which Xray cannot carry. A spike showed a stock client container leaks on a fresh start while its server is down, so the kill switch belongs in a reviewed image rather than in the bundle. Filed as a maintainer's call, like `xray` and `mihomo`. See [#144](https://github.com/morzecrew/platform-images/issues/144). | 2026-11-10, **admitted** (owner's call) |
 | `caddy-acmedns` | neither | One project, dotdash, needs Caddy with a DNS provider module to take wildcard certificates, which keep its servers' and relays' hostnames out of the Certificate Transparency logs. The owner's DNS host has no Caddy module, so the DNS-01 check is delegated by CNAME to acme-dns, which needs `caddy-dns/acmedns`. `caddy` is a different image (Coraza, CRS, a platform Caddyfile), not one to add a module to. Filed as a maintainer's call, like `xray`, `mihomo` and `openvpn`. See [#161](https://github.com/morzecrew/platform-images/issues/161). | 2026-11-13, **admitted** (owner's call) |
 | `caddy-l4` | neither | One project, dotdash, on machines whose own Caddy already holds 80 and 443 for other sites. Its REALITY inbound can't be terminated by a proxy in front, so the edge must pass its names through as raw TCP by the ClientHello's server name, which needs `mholt/caddy-l4` as a listener wrapper. Not a variant of `caddy-acmedns`: the edge has no use for the DNS module, nor a node's own Caddy for layer4. Filed as a maintainer's call, like `caddy-acmedns`. See [#170](https://github.com/morzecrew/platform-images/issues/170). | 2026-11-15, **admitted** (owner's call) |
+| `proxy-warm` | neither | One project, dotdash, whose gate leaves through upstream proxies that take a login and are a round trip of tens of milliseconds away. Xray handshakes with them step by step, four round trips before a new connection's data leaves; a front that keeps connections logged in ahead of use cuts that to none. No existing proxy keeps such connections ready, so the program is this repository's own. Filed as a maintainer's call, like `caddy-l4`. See [#180](https://github.com/morzecrew/platform-images/issues/180). | 2026-11-19, **admitted** (owner's call) |
 
 A refusal is recorded rather than left implicit, because the next person to want
 one of these will otherwise re-derive the case from scratch — and because the

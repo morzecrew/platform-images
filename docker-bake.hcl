@@ -47,6 +47,7 @@ variable "DESCRIPTIONS" {
     "openvpn"           = "OpenVPN client whose kill switch holds from the first packet: default routes swapped for host routes to its servers before openvpn starts."
     "caddy-acmedns"     = "Upstream's Caddy with the acme-dns DNS module, for certificates, wildcards included, through a DNS-01 check delegated by one CNAME."
     "caddy-l4"          = "Upstream's Caddy with the layer4 module, to pass chosen TLS server names through untouched while the HTTP app serves the rest."
+    "proxy-warm"        = "A SOCKS5 front for upstream proxies that keeps connections to them open and logged in, so a new connection's data leaves at once, not four round trips to the proxy later."
   }
 }
 
@@ -581,10 +582,32 @@ target "caddy-l4" {
 
 # ....................... #
 
+# This repository's own program (images/proxy-warm/src), so no Renovate
+# annotation: the version moves by hand with each change to it.
+variable "PROXY_WARM_VERSION" {
+  default = "0.1.0"
+}
+
+target "proxy-warm" {
+  inherits   = ["_attested"]
+  context    = "./images/proxy-warm"
+  contexts   = { shared = "./shared" }
+  dockerfile = "Dockerfile"
+  tags       = tag("proxy-warm", PROXY_WARM_VERSION)
+  labels     = label("proxy-warm", PROXY_WARM_VERSION)
+  args = {
+    PROXY_WARM_VERSION = PROXY_WARM_VERSION
+    # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
+    GO_VERSION         = "1.27.4"
+  }
+}
+
+# ....................... #
+
 group "default" {
   targets = [
     "flyway", "caddy", "postgres", "postgres-pgvector", "postgres-cron",
     "uv-builder", "npm-builder", "python-distroless", "valkey", "rustfs", "pgbouncer",
-    "xray", "mihomo", "openvpn", "caddy-acmedns", "caddy-l4",
+    "xray", "mihomo", "openvpn", "caddy-acmedns", "caddy-l4", "proxy-warm",
   ]
 }
