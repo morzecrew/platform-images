@@ -49,6 +49,7 @@ func TestParseLine(t *testing.T) {
 		{line: "socks5://u:p4ss@proxy.example warm=1", err: "a host, a colon and a port"},
 		{line: "socks5://u:p4ss@proxy.example:0 warm=1", err: "from 1 to 65535"},
 		{line: "warm=1 | ", err: "is for a SOCKS5"},
+		{line: "name=p4ss\x1b[2J warm=1 | socks5://u:p4ss@proxy.example:1080", err: "a name is 1 to 32"},
 	} {
 		got, err := parseLine(tc.line)
 		switch {

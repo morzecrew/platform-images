@@ -34,6 +34,7 @@ import (
 	"net/textproto"
 	"os"
 	"os/signal"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -233,6 +234,8 @@ func parseUpstreams(s string) ([]*upstream, error) {
 	return ups, nil
 }
 
+var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+
 // parseLine reads a line as the xray image does: its tags, a "|" and its URL;
 // the URL alone; or the URL with its tags after it. A line with no warm= tag
 // is the gate's alone, and nil: the xray image checks it. The login ends at
@@ -254,6 +257,10 @@ func parseLine(line string) (*upstream, error) {
 	for _, t := range tags {
 		switch k, v, _ := strings.Cut(t, "="); k {
 		case "name":
+			// Checked as the xray image checks it, since it goes into the log.
+			if !nameRE.MatchString(v) {
+				return nil, errors.New("a name is 1 to 32 lowercase letters, digits and dashes, starting with a letter or a digit")
+			}
 			u.name = v
 		case "warm":
 			if tagged {
