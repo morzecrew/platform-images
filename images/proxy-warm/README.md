@@ -128,8 +128,10 @@ program has nothing else to set.
   ASSOCIATE. Anything that reaches the port can use the line, so publish it
   nowhere: put it on a network only its client shares.
 
-The healthcheck passes while each line's port answers a SOCKS5 greeting.
-Whether a line carries traffic is its client's to judge.
+With no line tagged `warm=`, it says so and runs idle, so it can be started
+before any line leads to it. The healthcheck passes while each line's port
+answers a SOCKS5 greeting, and with no line. Whether a line carries traffic is
+its client's to judge.
 
 ## Refusals
 
@@ -138,7 +140,6 @@ Each exits 78, naming the file and the line, never the URL:
 - `PROXY_WARM_UPSTREAMS` unset, or a file the
   [shared checks](../README.md#environment-configuration) refuse: missing,
   unreadable, a directory, larger than 64 KiB, not UTF-8.
-- No line tagged `warm=`.
 - `warm=` outside 1 to 16, or twice on a line; on a line that is not
   `socks5://`, `socks://`, `socks5+tls://`, `http://` or `https://`.
 - A login that is not a user and a password, both non-empty; a SOCKS5 user or

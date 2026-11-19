@@ -108,6 +108,11 @@ func run() error {
 		}
 	}
 	summary(os.Stderr, c)
+	if len(c.ups) == 0 {
+		// Not a refusal: a deployment turns this on before it tags a line,
+		// and its only line may not lead here until this runs.
+		log.Printf("%s has no line tagged warm=: nothing to keep ready until one is", c.path)
+	}
 	for k, u := range c.ups {
 		p := newPool(u, c.maxIdle)
 		go p.keep()
@@ -152,9 +157,6 @@ func load() (*config, error) {
 	}
 	if c.ups, err = parseUpstreams(s); err != nil {
 		return nil, fmt.Errorf("%s: %v", c.path, err)
-	}
-	if len(c.ups) == 0 {
-		return nil, fmt.Errorf("%s has no line tagged warm=, so there is nothing to keep warm", c.path)
 	}
 	p, err := strconv.ParseUint(get("PROXY_WARM_PORT"), 10, 16)
 	if err != nil || p == 0 || int(p)+len(c.ups)-1 > 65535 {

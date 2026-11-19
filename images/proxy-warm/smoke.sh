@@ -81,7 +81,14 @@ refused() { # <label> <expected message> [run args...]
 }
 refused "refuses to start with no upstreams file" "PROXY_WARM_UPSTREAMS is unset"
 printf 'socks5://%s:%s@127.0.0.1:%s name=isp\n' "${PROXY_USER}" "${PROXY_PASS}" "${UP_PORT}" >"${WORK}/secrets/none"
-refused "refuses a file with no warm= line" "has no line tagged warm=" -e PROXY_WARM_UPSTREAMS=/run/secrets/none
+# No warm= line is no refusal: the container runs, idle, and stays healthy.
+"${ENGINE}" run -d --name "${CTR}" "${RUN_ARGS[@]}" -v "${WORK}/secrets:/run/secrets:ro" \
+	-e PROXY_WARM_UPSTREAMS=/run/secrets/none "${IMAGE}" >/dev/null
+sleep 1
+expect_in "a file with no warm= line leaves it idle" "$("${ENGINE}" logs "${CTR}" 2>&1)" "has no line tagged warm=: nothing to keep ready"
+"${ENGINE}" exec "${CTR}" /usr/local/bin/proxy-warm healthcheck || fail "the healthcheck fails while idle"
+echo "ok: idle, it passes its healthcheck"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
 printf 'socks5://%s:%s@127.0.0.1:%s warm=0\n' "${PROXY_USER}" "${PROXY_PASS}" "${UP_PORT}" >"${WORK}/secrets/zero"
 refused "refuses warm=0, without quoting the line" "line 1: warm= is the number of connections" -e PROXY_WARM_UPSTREAMS=/run/secrets/zero
 printf 'openvpn://H4sI warm=1\n' >"${WORK}/secrets/tunnel"
