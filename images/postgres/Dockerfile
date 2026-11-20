@@ -3,7 +3,7 @@
 # ....................... #
 
 # renovate: datasource=docker depName=postgres versioning=docker
-ARG POSTGRES_IMAGE_TAG=18.7
+ARG POSTGRES_IMAGE_TAG=19.0
 
 FROM postgres:${POSTGRES_IMAGE_TAG}
 

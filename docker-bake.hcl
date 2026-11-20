@@ -169,7 +169,7 @@ target "caddy" {
 
 # renovate: datasource=docker depName=postgres versioning=docker
 variable "POSTGRES_VERSION" {
-  default = "18.7"
+  default = "19.0"
 }
 
 # Three extension sets, three targets, one registry name (S-0001/D-19).
