@@ -360,6 +360,7 @@ static config routes to tags it never spells out:
 | `http://[user:pass@]host:port` | `http` |
 | `https://[user:pass@]host:port` | `http` over TLS |
 | `wireguard://<private key>@host:port?<query>` | `wireguard`, as from a wg-quick file |
+| `direct`, alone | `freedom`: this machine's own address, for a machine already on the network the traffic is to leave from, such as a home line. It takes `name=` and `group=`, not `warm=` |
 | a word, such as `openvpn`, alone or as the scheme of `openvpn://<anything>` | the URL `XRAY_UPSTREAM_ALIASES` gives it, its port moved up one for each earlier line naming the word |
 
 - **Tags.** A line's group is `upstream` unless `group=` names others, and a line
