@@ -364,7 +364,7 @@ func next(s subSettings) time.Duration {
 // fetched and passed, or a subscription changed, and the runtime directory now
 // holds the config resolved on it, which `xray run -test` passed.
 func refresh(src, run string, extra []string, s subSettings) bool {
-	geoRestart := refreshGeo(src, run, extra, s.proxy)
+	geoRestart := refreshGeo(run, extra, s.proxy)
 	old := maps.Clone(subs)
 	changed := false
 	for _, name := range slices.Sorted(maps.Keys(subs)) {
@@ -408,6 +408,7 @@ func refresh(src, run string, extra []string, s subSettings) bool {
 	if err := writeRuntime(run, configs); err != nil {
 		return revert(err)
 	}
+	running = configs
 	writeCaches()
 	for _, c := range configs {
 		for _, r := range c.Refs {

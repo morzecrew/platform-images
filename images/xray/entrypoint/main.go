@@ -125,7 +125,7 @@ func start(extra []string) error {
 		return err
 	}
 	if len(geo) > 0 {
-		if err := geodataPrepare(subProxy); err != nil {
+		if err := geodataPrepare(); err != nil {
 			return err
 		}
 	}
@@ -136,6 +136,7 @@ func start(extra []string) error {
 	if err := writeRuntime(run, configs); err != nil {
 		return err
 	}
+	running = configs
 	version, err := testConfig(run, extra, configs)
 	if err != nil {
 		if h := geoHint(); h != "" {
@@ -151,6 +152,10 @@ func start(extra []string) error {
 	img.Exec(append([]string{"run", "-confdir", run}, extra...)...)
 	return nil
 }
+
+// The configs the runtime directory holds, resolved: a later `xray run -test`
+// on it is redacted of their values.
+var running []*envconf.Config
 
 // The reference forms, in the order they are looked for: an object whose one
 // key is one of these, naming an absolute path.

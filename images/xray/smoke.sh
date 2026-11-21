@@ -658,10 +658,17 @@ run_geo() {
 rm -f "${WORK}/www/geosite-smoke.dat"
 geo_config
 run_geo volume "Xray ${VERSION} started"
-expect_in "not served at start, it starts on the image's own" "${logs}" \
-	"geosite.dat: its URL answered 404 Not Found; starting on the image's own"
+expect_in "nothing kept, it starts on the image's own" "${logs}" \
+	"geosite.dat: starting on the image's own, and fetching the pinned one once Xray runs"
+wait_sub "geosite.dat: its URL answered 404 Not Found; Xray keeps the one it has"
 cp "${WORK}/geosite-smoke.dat" "${WORK}/www/geosite-smoke.dat"
 wait_sub "geosite.dat: fetched, its sha256 the pinned one; restarting Xray on it"
+for _ in $(seq 1 30); do
+	logs="$("${ENGINE}" logs "${CTR}" 2>&1)"
+	[ "$(printf '%s\n' "${logs}" | grep -c "Xray ${VERSION} started")" -ge 2 ] && break
+	sleep 1
+done
+[ "$(printf '%s\n' "${logs}" | grep -c "Xray ${VERSION} started")" -ge 2 ] || fail "Xray did not restart on the fetched geosite.dat"
 echo "ok: a pinned geosite.dat fetched once Xray runs restarts Xray on it"
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 

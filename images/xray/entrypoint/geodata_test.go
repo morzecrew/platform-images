@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func sha(s string) string {
@@ -73,6 +74,7 @@ func TestGeodataSettings(t *testing.T) {
 		{"", good, "/var/lib/xray/geodata", "/usr/local/share/xray", "XRAY_LOCATION_ASSET is set"},
 		{"", good, "/run/xray/geodata", "", "overlaps"},
 		{"", good, "/etc", "", "overlaps"},
+		{"", "https://u:p@cdn.example/g " + sha("x"), "/var/lib/xray/geodata", "", "holds a login"},
 	} {
 		t.Setenv("XRAY_GEOIP", c.geoip)
 		t.Setenv("XRAY_GEOSITE", c.geosite)
@@ -89,6 +91,18 @@ func TestGeodataSettings(t *testing.T) {
 	t.Setenv("XRAY_LOCATION_ASSET", "")
 	if err := geodataSettings("/etc/xray", "/run/xray"); err != nil || len(geo) != 1 || geo[0].sha != sha("x") || geo[0].name != "geosite.dat" {
 		t.Fatalf("an upper-case sha256: %v, %+v", err, geo)
+	}
+	t.Setenv("XRAY_GEODATA_DIR", "geodata")
+	if err := geodataSettings("/etc/xray", "/run/xray"); err != nil || !filepath.IsAbs(geoDir) {
+		t.Fatalf("a relative XRAY_GEODATA_DIR: %v, %s", err, geoDir)
+	}
+	t.Setenv("XRAY_GEODATA_DIR", "/var/lib/xray/geodata")
+	for cache, want := range map[string]string{"/var/lib/xray": "", "/var/lib/xray/geodata/active/c": "every start empties"} {
+		t.Setenv("XRAY_SUBSCRIPTION_CACHE", cache)
+		err := geodataSettings("/etc/xray", "/run/xray")
+		if (want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), want)) {
+			t.Errorf("cache %s: %v", cache, err)
+		}
 	}
 }
 
@@ -111,6 +125,9 @@ func TestGeoGetKeepsOnlyThePinnedFile(t *testing.T) {
 		geo[0].url = srv.URL + c.path
 		p, err := geoGet(geo[0], nil)
 		if c.want == "" {
+			if err != nil {
+				t.Errorf("%s: %v", c.path, err)
+			}
 			os.Remove(p)
 			continue
 		}
@@ -134,10 +151,14 @@ func TestGeoGetKeepsOnlyThePinnedFile(t *testing.T) {
 }
 
 func TestGeodataPrepare(t *testing.T) {
-	srv := geoServer(t, "pinned data")
+	// Counted: nothing is fetched at start.
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { n++ }))
+	defer srv.Close()
 	dir := geoSetup(t, srv.URL+"/geosite.dat", "pinned data")
-	// What a fetch, a test and an earlier pin of geoip.dat left.
-	for _, p := range []string{".geosite.dat-123", ".next-1/geosite.dat", "active/geoip.dat"} {
+	// What a fetch, a test and an earlier pin of geoip.dat left, and a dot
+	// file that is not the entrypoint's.
+	for _, p := range []string{".geosite.dat-123", ".next-1/geosite.dat", "active/geoip.dat", ".keep"} {
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, p)), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -145,54 +166,50 @@ func TestGeodataPrepare(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := geodataPrepare(nil); err != nil {
+	if err := geodataPrepare(); err != nil {
 		t.Fatal(err)
 	}
 	active := filepath.Join(dir, "active")
-	if os.Getenv("XRAY_LOCATION_ASSET") != active || !geo[0].ready || geoWaiting() || geoHint() != "" {
-		t.Fatalf("after a fetch at start: %s, %+v", os.Getenv("XRAY_LOCATION_ASSET"), geo[0])
+	if os.Getenv("XRAY_LOCATION_ASSET") != active || geo[0].ready || !geoWaiting() || n != 0 {
+		t.Fatalf("with nothing kept: %s, %+v, %d requests", os.Getenv("XRAY_LOCATION_ASSET"), geo[0], n)
 	}
-	if read(t, filepath.Join(active, "geosite.dat")) != "pinned data" {
-		t.Fatal("active/geosite.dat is not the fetched file")
+	if !strings.Contains(geoHint(), "another geosite.dat than the pinned one") || exists(filepath.Join(active, "geosite.dat")) {
+		t.Fatalf("with nothing kept, Xray's own: %q", geoHint())
 	}
-	entries, _ := os.ReadDir(dir)
-	if len(entries) != 2 || exists(filepath.Join(active, "geoip.dat")) {
-		t.Fatalf("leftovers kept: %v", entries)
-	}
-
-	// A new pin, its URL unreachable: the earlier pin's file stays in use.
-	srv.Close()
-	t.Setenv("XRAY_GEOSITE", srv.URL+"/geosite.dat "+sha("new data"))
-	t.Setenv("XRAY_LOCATION_ASSET", "")
-	if err := geodataSettings("/etc/xray", "/run/xray"); err != nil {
-		t.Fatal(err)
-	}
-	if err := geodataPrepare(nil); err != nil {
-		t.Fatal(err)
-	}
-	if geo[0].ready || !geoWaiting() || !strings.Contains(geoHint(), "another geosite.dat than the pinned one") {
-		t.Fatalf("an earlier pin's file: %+v, %q", geo[0], geoHint())
-	}
-	if read(t, filepath.Join(active, "geosite.dat")) != "pinned data" {
-		t.Fatal("the earlier pin's file is not linked")
+	if entries, _ := os.ReadDir(dir); len(entries) != 2 || exists(filepath.Join(active, "geoip.dat")) {
+		t.Fatalf("leftovers kept, or .keep removed: %v", entries)
 	}
 	if next(subSettings{interval: 3600e9}) != subRetry {
 		t.Fatal("a file still to fetch is not retried sooner")
 	}
 
-	// With a proxy, an inbound of the Xray yet to start, nothing is fetched
-	// at start.
-	n := 0
-	counted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { n++ }))
-	defer counted.Close()
-	t.Setenv("XRAY_GEOSITE", counted.URL+"/geosite.dat "+sha("new data"))
+	// Kept: linked, and ready.
+	if err := os.WriteFile(filepath.Join(dir, "geosite.dat"), []byte("pinned data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("XRAY_LOCATION_ASSET", "")
 	if err := geodataSettings("/etc/xray", "/run/xray"); err != nil {
 		t.Fatal(err)
 	}
-	proxy, _ := url.Parse(counted.URL)
-	if err := geodataPrepare(proxy); err != nil || n != 0 || !geoWaiting() {
-		t.Fatalf("with a proxy at start: %v, %d requests", err, n)
+	if err := geodataPrepare(); err != nil || !geo[0].ready || geoWaiting() || geoHint() != "" {
+		t.Fatalf("kept: %v, %+v", err, geo[0])
+	}
+	if read(t, filepath.Join(active, "geosite.dat")) != "pinned data" {
+		t.Fatal("active/geosite.dat is not the kept file")
+	}
+
+	// A new pin: the earlier pin's file stays in use till the new one is
+	// fetched.
+	t.Setenv("XRAY_GEOSITE", srv.URL+"/geosite.dat "+sha("new data"))
+	t.Setenv("XRAY_LOCATION_ASSET", "")
+	if err := geodataSettings("/etc/xray", "/run/xray"); err != nil {
+		t.Fatal(err)
+	}
+	if err := geodataPrepare(); err != nil || geo[0].ready || !geoWaiting() || n != 0 {
+		t.Fatalf("an earlier pin's file: %v, %+v", err, geo[0])
+	}
+	if read(t, filepath.Join(active, "geosite.dat")) != "pinned data" {
+		t.Fatal("the earlier pin's file is not linked")
 	}
 }
 
@@ -210,10 +227,7 @@ func fakeXray(t *testing.T, accept string) {
 }
 
 func TestRefreshGeoTestsBeforeInstalling(t *testing.T) {
-	src, run := t.TempDir(), t.TempDir()
-	if err := os.WriteFile(filepath.Join(src, "10.json"), []byte(`{"log": {}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	run := t.TempDir()
 	body := "pinned data"
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(body))
@@ -227,19 +241,19 @@ func TestRefreshGeoTestsBeforeInstalling(t *testing.T) {
 		t.Fatal(err)
 	}
 	body = "not served yet"
-	if err := geodataPrepare(nil); err != nil {
+	if err := geodataPrepare(); err != nil {
 		t.Fatal(err)
 	}
 
 	fakeXray(t, "pinned data")
 	body = "pinned data"
-	if !refreshGeo(src, run, nil, nil) || !geo[0].ready {
+	if !refreshGeo(run, nil, nil) || !geo[0].ready {
 		t.Fatalf("a fetched file the test passes: no restart, %+v", geo[0])
 	}
 	if read(t, filepath.Join(dir, "active", "geosite.dat")) != "pinned data" {
 		t.Fatal("not installed")
 	}
-	if refreshGeo(src, run, nil, nil) {
+	if refreshGeo(run, nil, nil) {
 		t.Fatal("a restart with nothing fetched")
 	}
 
@@ -251,11 +265,11 @@ func TestRefreshGeoTestsBeforeInstalling(t *testing.T) {
 	if err := geodataSettings("/etc/xray", "/run/xray"); err != nil {
 		t.Fatal(err)
 	}
-	if err := geodataPrepare(nil); err != nil {
+	if err := geodataPrepare(); err != nil {
 		t.Fatal(err)
 	}
 	body = "refused data"
-	if refreshGeo(src, run, nil, nil) || !geo[0].failed || geoWaiting() {
+	if refreshGeo(run, nil, nil) || !geo[0].failed || geoWaiting() {
 		t.Fatalf("a file the test refuses: %+v", geo[0])
 	}
 	if read(t, filepath.Join(dir, "active", "geosite.dat")) != "pinned data" {
@@ -263,5 +277,47 @@ func TestRefreshGeoTestsBeforeInstalling(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 2 {
 		t.Fatalf("leftovers: %v", entries)
+	}
+}
+
+// A URL serving another file is final: not fetched again, nor directly after
+// the proxy, which here is the same server, counting requests.
+func TestRefreshGeoGivesUpOnAnotherFile(t *testing.T) {
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		_, _ = w.Write([]byte("moved on"))
+	}))
+	defer srv.Close()
+	geoSetup(t, srv.URL+"/geosite.dat", "pinned data")
+	if err := geodataPrepare(); err != nil {
+		t.Fatal(err)
+	}
+	proxy, _ := url.Parse(srv.URL)
+	if refreshGeo(t.TempDir(), nil, proxy) || !geo[0].failed || geoWaiting() || n != 1 {
+		t.Fatalf("another file: %+v, %d requests", geo[0], n)
+	}
+	if refreshGeo(t.TempDir(), nil, proxy) || n != 1 {
+		t.Fatalf("fetched again: %d requests", n)
+	}
+}
+
+func TestGeoGetGivesUpOnAStall(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("a start"))
+		w.(http.Flusher).Flush()
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release)
+	dir := geoSetup(t, srv.URL+"/geosite.dat", "pinned data")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	defer func(d time.Duration) { geoIdle = d }(geoIdle)
+	geoIdle = 200 * time.Millisecond
+	if _, err := geoGet(geo[0], nil); err == nil || !strings.Contains(err.Error(), "stalled") {
+		t.Fatalf("a stall: %v", err)
 	}
 }

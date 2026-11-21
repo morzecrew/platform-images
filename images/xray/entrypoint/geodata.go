@@ -7,8 +7,8 @@ package main
 // copy of a file not linked there. A file that is not the pinned one yet is
 // fetched every 30 seconds once Xray runs, through XRAY_SUBSCRIPTION_PROXY
 // first and directly when that fails, and Xray restarts on it once `xray run
-// -test` passes the running config on it. With no XRAY_SUBSCRIPTION_PROXY,
-// there being no tunnel to wait for, it is fetched at start too.
+// -test` passes the running config on it. Never at start: an untested file
+// would replace the one that works, and a stalled fetch would hold Xray up.
 
 import (
 	"context"
@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/morzecrew/platform-images/shared/go/envconf"
@@ -32,7 +33,15 @@ import (
 const (
 	geoTimeout = 10 * time.Minute // one fetch, the body included
 	geoConnect = 10 * time.Second // to connect, and for a TLS handshake
+	geoHeader  = 30 * time.Second // for the response to start
 )
+
+// A fetch gives up once nothing came for this long; a variable for the tests.
+var geoIdle = time.Minute
+
+// errFinal marks what fetching the same URL again won't change: a file of
+// another sha256, or too large.
+type errFinal struct{ error }
 
 var geoMax int64 = 256 << 20 // the most a file may hold; a variable for the tests
 
@@ -41,7 +50,7 @@ type geoFile struct {
 	url    string
 	sha    string // lowercase hex
 	ready  bool   // the file in XRAY_GEODATA_DIR is the pinned one
-	failed bool   // xray run -test refused the config on the pinned one: not fetched again till a restart
+	failed bool   // the URL serves another file, or the running config fails on it: not fetched again till a restart
 }
 
 // The files XRAY_GEOIP and XRAY_GEOSITE pin, and where they are kept; none
@@ -68,6 +77,10 @@ func geodataSettings(src, run string) error {
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return fmt.Errorf("%s does not start with an http or https URL", e.env)
 		}
+		// The summary shows the environment, and an error the URL.
+		if u.User != nil {
+			return fmt.Errorf("%s holds a login, which the startup summary would show", e.env)
+		}
 		if b, err := hex.DecodeString(f[1]); err != nil || len(b) != sha256.Size {
 			return fmt.Errorf("%s does not end in a sha256, 64 hex digits", e.env)
 		}
@@ -76,7 +89,12 @@ func geodataSettings(src, run string) error {
 	if len(geo) == 0 {
 		return nil
 	}
+	// Absolute: the links in active/ name their targets by it, and a relative
+	// target would be read from inside active/.
 	geoDir = filepath.Clean(img.Get("XRAY_GEODATA_DIR"))
+	if abs, err := filepath.Abs(geoDir); err == nil {
+		geoDir = abs
+	}
 	switch {
 	case img.Get("XRAY_GEODATA_DIR") == "":
 		return errors.New("XRAY_GEOIP and XRAY_GEOSITE need XRAY_GEODATA_DIR, a writable directory the fetched files are kept in, such as /var/lib/xray/geodata with a volume on /var/lib/xray")
@@ -84,16 +102,30 @@ func geodataSettings(src, run string) error {
 		return errors.New("XRAY_LOCATION_ASSET is set, and XRAY_GEOIP and XRAY_GEOSITE set it themselves: unset one or the other")
 	case envconf.Overlap(geoDir, src) || envconf.Overlap(geoDir, run):
 		return fmt.Errorf("XRAY_GEODATA_DIR (%s) overlaps XRAY_SOURCE_DIR or XRAY_RUNTIME_DIR: point it at a directory of its own", geoDir)
+	case inside(img.Get("XRAY_SUBSCRIPTION_CACHE"), filepath.Join(geoDir, "active")):
+		return fmt.Errorf("XRAY_SUBSCRIPTION_CACHE is inside %s/active, which every start empties", geoDir)
 	}
 	return nil
 }
 
+// inside tells whether p is dir or under it; an empty p never is.
+func inside(p, dir string) bool {
+	if p == "" {
+		return false
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(dir, abs)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, "../")
+}
+
 // geodataPrepare links each pinned file XRAY_GEODATA_DIR holds, the pinned one
-// or the one fetched for an earlier pin, into active/, fetches each that is
-// not the pinned one when there is no proxy, and points Xray at active/. At
-// start, before anything is resolved; start's own `xray run -test` then
-// judges the files.
-func geodataPrepare(proxy *url.URL) error {
+// or the one fetched for an earlier pin, into active/, and points Xray at
+// active/. At start, before anything is resolved; the supervision loop
+// fetches what is not the pinned one.
+func geodataPrepare() error {
 	active := filepath.Join(geoDir, "active")
 	hint := func(err error) error {
 		return fmt.Errorf("XRAY_GEODATA_DIR is %s, which is not writable by uid %d (%v)", geoDir, os.Getuid(), envconf.Cause(err))
@@ -108,7 +140,9 @@ func geodataPrepare(proxy *url.URL) error {
 			return hint(err)
 		}
 		for _, e := range entries {
-			if dir == active || strings.HasPrefix(e.Name(), ".") {
+			n := e.Name()
+			if dir == active || strings.HasPrefix(n, ".next-") ||
+				strings.HasPrefix(n, ".geoip.dat-") || strings.HasPrefix(n, ".geosite.dat-") {
 				if err := os.RemoveAll(filepath.Join(dir, e.Name())); err != nil {
 					return hint(err)
 				}
@@ -121,34 +155,20 @@ func geodataPrepare(proxy *url.URL) error {
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 		case err != nil:
-			return hint(err)
+			return fmt.Errorf("XRAY_GEODATA_DIR's %s could not be read (%v)", g.name, envconf.Cause(err))
 		default:
 			g.ready = sum == g.sha
 			if err := os.Symlink(p, filepath.Join(active, g.name)); err != nil {
 				return hint(err)
 			}
 		}
-		if g.ready {
-			continue
+		if !g.ready {
+			have := "the image's own"
+			if sum != "" {
+				have = "the one fetched for an earlier pin"
+			}
+			fmt.Fprintf(os.Stderr, "geodata: %s: starting on %s, and fetching the pinned one once Xray runs\n", g.name, have)
 		}
-		have := "the image's own"
-		if sum != "" {
-			have = "the one fetched for an earlier pin"
-		}
-		if proxy != nil {
-			// The proxy is an inbound of the Xray yet to start.
-			fmt.Fprintf(os.Stderr, "geodata: %s: starting on %s, and fetching the pinned one through XRAY_SUBSCRIPTION_PROXY once Xray runs\n", g.name, have)
-			continue
-		}
-		tmp, err := geoGet(g, nil)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "geodata: %s: %v; starting on %s, and fetching it again once Xray runs\n", g.name, err, have)
-			continue
-		}
-		if err := install(g, tmp); err != nil {
-			return hint(err)
-		}
-		fmt.Fprintf(os.Stderr, "geodata: %s: fetched, its sha256 the pinned one\n", g.name)
 	}
 	return os.Setenv("XRAY_LOCATION_ASSET", active)
 }
@@ -190,25 +210,31 @@ func geoHint() string {
 	if len(names) == 0 {
 		return ""
 	}
-	return fmt.Sprintf("Xray tested it on another %s than the pinned one, not fetched yet: a rule naming a list only the pinned one has can't pass until it is. Set XRAY_GEOIP or XRAY_GEOSITE first, and such rules once it is fetched", strings.Join(names, " and "))
+	return fmt.Sprintf("If Xray named a list above it could not find: it tested the config on another %s than the pinned one, not fetched yet, and a rule naming a list only the pinned one has can't pass until it is. Set XRAY_GEOIP or XRAY_GEOSITE first, and such rules once it is fetched", strings.Join(names, " and "))
 }
 
 // refreshGeo fetches each pinned file that is not there yet and reports
 // whether Xray is to restart: one was fetched, and `xray run -test` passed the
-// running config on it, read from a directory of links beside active/. A
-// file the test refuses is not fetched again till a restart.
-func refreshGeo(src, run string, extra []string, proxy *url.URL) bool {
+// running config on it, read from a directory of links beside active/. A file
+// the test refuses, or a URL serving another file, is not fetched again till a
+// restart.
+func refreshGeo(run string, extra []string, proxy *url.URL) bool {
 	tmps := map[*geoFile]string{}
 	for _, g := range geo {
 		if g.ready || g.failed {
 			continue
 		}
 		tmp, err := geoFetch(g, proxy)
-		if err != nil {
+		var final errFinal
+		switch {
+		case errors.As(err, &final):
+			g.failed = true
+			fmt.Fprintf(os.Stderr, "geodata: %s: %v; Xray keeps the one it has, and it is not fetched again till a restart: check the pin\n", g.name, err)
+		case err != nil:
 			fmt.Fprintf(os.Stderr, "geodata: %s: %v; Xray keeps the one it has\n", g.name, err)
-			continue
+		default:
+			tmps[g] = tmp
 		}
-		tmps[g] = tmp
 	}
 	if len(tmps) == 0 {
 		return false
@@ -238,33 +264,36 @@ func refreshGeo(src, run string, extra []string, proxy *url.URL) bool {
 			return keep(fmt.Errorf("XRAY_GEODATA_DIR is not writable (%v)", envconf.Cause(err)))
 		}
 	}
-	configs, err := resolveDir(src)
-	if err != nil {
-		return keep(err)
-	}
-	if _, err := testConfig(run, extra, configs, "XRAY_LOCATION_ASSET="+stage); err != nil {
+	// The values the running config was resolved from, so Xray's output is
+	// redacted of those it runs on.
+	if _, err := testConfig(run, extra, running, "XRAY_LOCATION_ASSET="+stage); err != nil {
 		for g := range tmps {
 			g.failed = true
 			fmt.Fprintf(os.Stderr, "geodata: %s: the pinned one fails the running config (%v); Xray keeps the one it has, and it is not fetched again till a restart\n", g.name, err)
 		}
 		return false
 	}
+	installed := false
 	for g, t := range tmps {
 		if err := install(g, t); err != nil {
-			return keep(fmt.Errorf("%s could not be kept (%v)", g.name, envconf.Cause(err)))
+			// One installed already is in active/: Xray restarts on it.
+			fmt.Fprintf(os.Stderr, "geodata: %s could not be kept (%v)\n", g.name, envconf.Cause(err))
+			continue
 		}
+		installed = true
 		fmt.Fprintf(os.Stderr, "geodata: %s: fetched, its sha256 the pinned one; restarting Xray on it\n", g.name)
 	}
-	return true
+	return installed
 }
 
 // geoFetch fetches through proxy first when it is set, and directly when that
-// fails, into a temporary file in XRAY_GEODATA_DIR.
+// fails short of a final answer, into a temporary file in XRAY_GEODATA_DIR.
 func geoFetch(g *geoFile, proxy *url.URL) (string, error) {
 	if proxy != nil {
 		p, err := geoGet(g, proxy)
-		if err == nil {
-			return p, nil
+		var final errFinal
+		if err == nil || errors.As(err, &final) {
+			return p, err
 		}
 		fmt.Fprintf(os.Stderr, "geodata: %s: through XRAY_SUBSCRIPTION_PROXY: %v\n", g.name, err)
 	}
@@ -275,7 +304,7 @@ func geoFetch(g *geoFile, proxy *url.URL) (string, error) {
 // when its sha256 is the pinned one.
 func geoGet(g *geoFile, proxy *url.URL) (_ string, err error) {
 	tr := &http.Transport{Proxy: nil, ForceAttemptHTTP2: true, TLSHandshakeTimeout: geoConnect,
-		DialContext: (&net.Dialer{Timeout: geoConnect}).DialContext}
+		ResponseHeaderTimeout: geoHeader, DialContext: (&net.Dialer{Timeout: geoConnect}).DialContext}
 	if proxy != nil {
 		tr.Proxy = http.ProxyURL(proxy)
 	}
@@ -305,22 +334,40 @@ func geoGet(g *geoFile, proxy *url.URL) (_ string, err error) {
 		}
 	}()
 	h := sha256.New()
-	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, geoMax+1))
+	// A stall cancels the request: geoTimeout alone would wait it out.
+	var stalled atomic.Bool
+	idle := time.AfterFunc(geoIdle, func() { stalled.Store(true); cancel() })
+	defer idle.Stop()
+	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(idleReader{resp.Body, idle}, geoMax+1))
 	switch {
+	case err != nil && stalled.Load():
+		return "", fmt.Errorf("stalled: nothing came for %s", geoIdle)
 	case err != nil:
-		return "", fmt.Errorf("could not be read (%v)", err)
+		return "", fmt.Errorf("could not be read or written (%v)", err)
 	case n > geoMax:
-		err = fmt.Errorf("its URL serves more than %d bytes", geoMax)
+		err = errFinal{fmt.Errorf("its URL serves more than %d bytes", geoMax)}
 		return "", err
 	}
 	if sum := hex.EncodeToString(h.Sum(nil)); sum != g.sha {
-		err = fmt.Errorf("its URL serves a file whose sha256 is %s, not the pinned %s", sum, g.sha)
+		err = errFinal{fmt.Errorf("its URL serves a file whose sha256 is %s, not the pinned %s", sum, g.sha)}
 		return "", err
 	}
 	if err = f.Close(); err != nil {
 		return "", fmt.Errorf("could not be written (%v)", err)
 	}
 	return f.Name(), nil
+}
+
+// idleReader pushes its timer back on every read.
+type idleReader struct {
+	r io.Reader
+	t *time.Timer
+}
+
+func (i idleReader) Read(p []byte) (int, error) {
+	n, err := i.r.Read(p)
+	i.t.Reset(geoIdle)
+	return n, err
 }
 
 func fileSHA(p string) (string, error) {
