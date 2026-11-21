@@ -662,7 +662,7 @@ expect_in "nothing kept, it starts on the image's own" "${logs}" \
 	"geosite.dat: starting on the image's own, and fetching the pinned one once Xray runs"
 wait_sub "geosite.dat: its URL answered 404 Not Found; Xray keeps the one it has"
 cp "${WORK}/geosite-smoke.dat" "${WORK}/www/geosite-smoke.dat"
-wait_sub "geosite.dat: fetched, its sha256 the pinned one; restarting Xray on it"
+wait_sub "geosite.dat: fetched, its sha256 the pinned one, and the running config passes on it"
 for _ in $(seq 1 30); do
 	logs="$("${ENGINE}" logs "${CTR}" 2>&1)"
 	[ "$(printf '%s\n' "${logs}" | grep -c "Xray ${VERSION} started")" -ge 2 ] && break
@@ -685,6 +685,17 @@ echo "ok: a rule naming a list only the fetched geosite.dat has starts on the ke
 run_geo tmpfs "FATAL"
 expect_in "a rule naming a list not fetched yet is refused, and why" "${logs}" \
 	"another geosite.dat than the pinned one, not fetched yet"
+ALL_OUTPUT+="${logs}"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# Not kept but served, as on a new machine: the start fetches it directly,
+# once, tests it and runs on it.
+cp "${WORK}/geosite-smoke.dat" "${WORK}/www/geosite-smoke.dat"
+run_geo tmpfs "Xray ${VERSION} started"
+expect_in "a new machine fetches the pinned file at start when the config needs it" "${logs}" \
+	"fetching the pinned ones directly, once"
+[ "$(via "${PROBE_PORT}")" = 200 ] || fail "the probe did not get out on the geosite.dat fetched at start"
+echo "ok: a rule naming a list of the pinned file starts on an empty XRAY_GEODATA_DIR"
 ALL_OUTPUT+="${logs}"
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 

@@ -488,21 +488,27 @@ neither variable pins stays the image's own.
   directly when that fails, as a [subscription](#a-subscriptions-outbounds)
   is: so never around the tunnel before Xray runs, but directly once it runs
   and a fetch through the tunnel fails. Xray restarts on it once `xray run
-  -test` passes the running config on it. Never at start: an untested file
-  would replace the one that works, and a slow fetch would hold Xray up.
+  -test` passes the running config on it: the files fetched together are
+  tested together, beside the files in use, and each alone when they fail. At start only when the config fails without it, as on a new
+  machine or a lost volume, where Xray can't run to fetch it: then once,
+  directly, tested the same way before it is kept.
 - **When it is not fetched again.** A URL that serves a file of another
   sha256, or a larger one than below, and a file the test refuses: till a
-  restart, as for a new pin, Xray keeps the one it has.
+  restart, as for a new pin, Xray keeps the one it has. Directly, after the
+  tunnel failed, a wrong file is not final, as a block page may answer
+  there; nor is a test that was killed rather than refused.
 - **Until then.** Xray starts on the file kept for an earlier pin, or with
   none, on the image's own. A rule naming a list only the pinned file has
-  fails that start, and the error says so: pin the file first, and add such
-  rules once its log says it was fetched. After that, the kept copy serves
-  every start, with the URL unreachable or not.
+  fails that start unless the direct fetch above gets it, and the error then
+  says so: behind a kill switch, pin the file first, and add such rules once
+  its log says it was fetched. After that, the kept copy serves every start,
+  with the URL unreachable or not.
 - **What is accepted.** A `200`, redirects followed, of at most 256 MiB
   whose sha256 is the pinned one: connected to within 10 seconds, answering
   within 30, never a minute without data, and read within 10 minutes.
-  Anything else is not kept. A URL with a login is refused at start, as the
-  startup summary would show it.
+  Anything else is not kept, and a kept file is on disk before it is in use.
+  A URL with a login or a query is refused at start, as the startup summary
+  would show it.
 
 ## VLESS Encryption from one seed
 
