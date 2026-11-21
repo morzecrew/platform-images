@@ -5,7 +5,8 @@ on distroless, a read-only root, secrets read from files that its JSON config
 references, and a healthcheck that sends a request out through Xray itself.
 
 The binary and the geodata are upstream's, copied unchanged out of
-`ghcr.io/xtls/xray-core` pinned by digest. The image adds one static Go binary,
+`ghcr.io/xtls/xray-core` pinned by digest; [`XRAY_GEOIP` and
+`XRAY_GEOSITE`](#geodata-from-a-url) fetch other geodata at run time. The image adds one static Go binary,
 `/usr/local/bin/xray-entrypoint`, which is the entrypoint. There is no shell.
 
 | | |
@@ -467,6 +468,36 @@ the container with Xray's status.
   `protocol`, `network`, `security`, `flow`, `fingerprint`, `mode`, `tag` and
   `type`, is redacted from Xray's output.
 
+## Geodata from a URL
+
+`XRAY_GEOIP` and `XRAY_GEOSITE` replace the image's `geoip.dat` and
+`geosite.dat` with a file from a URL, pinned by its sha256, such as a
+version of a list whose names (`geosite:<name>`) the image's lacks:
+
+```sh
+XRAY_GEOSITE="https://cdn.example/lists@2026.11.01/geosite.dat 3a7bd3e2360a3d29eea436fcfb7e44c735d117c42d1c1835420b6b9942dd4f1b"
+XRAY_GEODATA_DIR=/var/lib/xray/geodata
+```
+
+A file is kept in `XRAY_GEODATA_DIR`, and Xray reads it from there: the
+entrypoint sets `XRAY_LOCATION_ASSET`, which may not be set as well. A file
+neither variable pins stays the image's own.
+
+- **When it is fetched.** At start, when the kept file is not the pinned
+  one, through `XRAY_SUBSCRIPTION_PROXY` first and directly when that fails,
+  as a [subscription](#a-subscriptions-outbounds) is. One that can't be
+  fetched then is tried again every 30 seconds once Xray runs, so through
+  the tunnel where only the tunnel gets through; Xray restarts on it once
+  `xray run -test` passes the running config on it. A file the test refuses
+  is not fetched again till a restart, and Xray keeps the one it has.
+- **Until then.** Xray starts on the file kept for an earlier pin, or with
+  none, on the image's own. A rule naming a list only the pinned file has
+  fails that start, and the error says so: pin the file first, and add such
+  rules once its log says it was fetched. After that, the kept copy serves
+  every start, with the URL unreachable or not.
+- **What is accepted.** A `200`, redirects followed, of at most 256 MiB
+  whose sha256 is the pinned one. Anything else is not kept.
+
 ## VLESS Encryption from one seed
 
 Both halves of an ML-KEM-768 VLESS Encryption key pair derive from one 64-byte
@@ -565,8 +596,11 @@ inbound. `http`, `https`, `socks5` and `socks5h` proxy URLs work.
 | `XRAY_UPSTREAM_ALIASES` | unset | `<word>=<url>` pairs, separated by spaces, that an [upstreams](#any-number-of-upstreams-from-one-list) line may name by its word. No login. |
 | `XRAY_UPSTREAM_PIN` | unset | Names of upstreams lines, separated by commas, each moved to the front of its groups. |
 | `XRAY_SUBSCRIPTION_INTERVAL` | `1h` | How often a [subscription](#a-subscriptions-outbounds) is fetched again. A Go duration, 1s or more. |
-| `XRAY_SUBSCRIPTION_PROXY` | unset | A `socks5://`, `socks5h://` or `http://` inbound of this Xray a subscription is fetched through, directly when that fails. No login. Unset means directly. |
+| `XRAY_SUBSCRIPTION_PROXY` | unset | A `socks5://`, `socks5h://` or `http://` inbound of this Xray a subscription, and pinned geodata, is fetched through, directly when that fails. No login. Unset means directly. |
 | `XRAY_SUBSCRIPTION_CACHE` | unset | A writable directory, outside `XRAY_SOURCE_DIR` and `XRAY_RUNTIME_DIR`, where each subscription's last accepted outbounds are kept, for a start while its URL is unreachable, such as `/var/lib/xray` with a volume on it: the image's is empty and 65532's, so a new volume there is writable. Unset means none. |
+| `XRAY_GEOIP` | unset | `<url> <sha256>`: a [`geoip.dat`](#geodata-from-a-url) fetched in place of the image's. |
+| `XRAY_GEOSITE` | unset | `<url> <sha256>`: a [`geosite.dat`](#geodata-from-a-url) fetched in place of the image's. |
+| `XRAY_GEODATA_DIR` | unset | A writable directory, outside `XRAY_SOURCE_DIR` and `XRAY_RUNTIME_DIR`, where fetched geodata is kept, such as `/var/lib/xray/geodata` with a volume on `/var/lib/xray`. Needed by `XRAY_GEOIP` and `XRAY_GEOSITE`. |
 
 A value set to the empty string takes the default. A bad URL, timeout or
 expression refuses at start (78), so it is found at deployment rather than as

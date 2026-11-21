@@ -296,7 +296,8 @@ func subscriptionSettings() (subSettings, error) {
 }
 
 // supervise runs Xray on the runtime directory and, every interval (subRetry
-// while a subscription holds nothing), fetches each subscription again:
+// while a subscription holds nothing or a pinned geodata file is still to be
+// fetched), fetches each subscription again, and each such file:
 // through XRAY_SUBSCRIPTION_PROXY first when set, directly when that fails.
 // When one changed, the whole source is resolved again and tested in a
 // directory beside the running config; Xray restarts on it only if it passes,
@@ -347,6 +348,9 @@ func exitCode(ps *os.ProcessState) int {
 }
 
 func next(s subSettings) time.Duration {
+	if geoWaiting() {
+		return min(subRetry, s.interval)
+	}
 	for _, b := range subs {
 		if b == nil {
 			return min(subRetry, s.interval)
@@ -355,10 +359,12 @@ func next(s subSettings) time.Duration {
 	return s.interval
 }
 
-// refresh fetches every subscription and reports whether Xray is to restart:
-// one changed, and the runtime directory now holds the config resolved on it,
-// which `xray run -test` passed.
+// refresh fetches each pinned geodata file not there yet (geodata.go) and
+// every subscription, and reports whether Xray is to restart: a file was
+// fetched and passed, or a subscription changed, and the runtime directory now
+// holds the config resolved on it, which `xray run -test` passed.
 func refresh(src, run string, extra []string, s subSettings) bool {
+	geoRestart := refreshGeo(src, run, extra, s.proxy)
 	old := maps.Clone(subs)
 	changed := false
 	for _, name := range slices.Sorted(maps.Keys(subs)) {
@@ -377,12 +383,12 @@ func refresh(src, run string, extra []string, s subSettings) bool {
 		}
 	}
 	if !changed {
-		return false
+		return geoRestart
 	}
 	revert := func(err error) bool {
 		fmt.Fprintf(os.Stderr, "subscription: %v; Xray keeps the config it runs\n", err)
 		subs = old
-		return false
+		return geoRestart
 	}
 	configs, err := resolveDir(src)
 	if err != nil {

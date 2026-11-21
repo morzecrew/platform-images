@@ -66,6 +66,9 @@ var img = &envconf.Image{
 		{Name: "XRAY_SUBSCRIPTION_INTERVAL", Default: "1h"},
 		{Name: "XRAY_SUBSCRIPTION_PROXY", Default: ""},
 		{Name: "XRAY_SUBSCRIPTION_CACHE", Default: ""},
+		{Name: "XRAY_GEOIP", Default: ""},
+		{Name: "XRAY_GEOSITE", Default: ""},
+		{Name: "XRAY_GEODATA_DIR", Default: ""},
 	},
 	Upstream: map[string]bool{
 		"XRAY_LOCATION_ASSET": true, "XRAY_LOCATION_CERT": true,
@@ -118,6 +121,14 @@ func start(extra []string) error {
 		return err
 	}
 	subProxy = subSet.proxy
+	if err := geodataSettings(src, run); err != nil {
+		return err
+	}
+	if len(geo) > 0 {
+		if err := geodataPrepare(subProxy); err != nil {
+			return err
+		}
+	}
 	configs, err := resolveDir(src)
 	if err != nil {
 		return err
@@ -127,10 +138,13 @@ func start(extra []string) error {
 	}
 	version, err := testConfig(run, extra, configs)
 	if err != nil {
+		if h := geoHint(); h != "" {
+			return fmt.Errorf("%v. %s", err, h)
+		}
 		return err
 	}
 	img.Summary(os.Stderr, version, configs)
-	if len(subs) > 0 {
+	if len(subs) > 0 || geoWaiting() {
 		writeCaches()
 		return supervise(src, run, extra, subSet)
 	}
@@ -1200,11 +1214,16 @@ func writeRuntime(dir string, configs []*envconf.Config) error {
 	return nil
 }
 
-// Runs `xray run -test` on the resolved config and returns Xray's version
-// line. Xray quotes the value it rejects ("invalid UUID: <the id>"), so its
-// output is printed with every resolved value replaced.
-func testConfig(dir string, extra []string, configs []*envconf.Config) (string, error) {
-	out, err := exec.Command(img.Bin, append([]string{"run", "-test", "-confdir", dir}, extra...)...).CombinedOutput()
+// Runs `xray run -test` on the resolved config, with env added to the
+// environment, and returns Xray's version line. Xray quotes the value it
+// rejects ("invalid UUID: <the id>"), so its output is printed with every
+// resolved value replaced.
+func testConfig(dir string, extra []string, configs []*envconf.Config, env ...string) (string, error) {
+	cmd := exec.Command(img.Bin, append([]string{"run", "-test", "-confdir", dir}, extra...)...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	out, err := cmd.CombinedOutput()
 	var values []string
 	for _, c := range configs {
 		values = append(values, c.Values...)

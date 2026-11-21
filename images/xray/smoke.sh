@@ -45,6 +45,7 @@ cleanup() {
 	[ -z "${HTTPD_PID}" ] || kill "${HTTPD_PID}" 2>/dev/null || true
 	[ -z "${TLSD_PID}" ] || kill "${TLSD_PID}" 2>/dev/null || true
 	"${ENGINE}" volume rm -f "${CTR}-state" >/dev/null 2>&1 || true
+	"${ENGINE}" volume rm -f "${CTR}-geo" >/dev/null 2>&1 || true
 	rm -rf "${WORK}"
 }
 trap cleanup EXIT
@@ -258,7 +259,7 @@ printf '%s\n' "${ID_B}" >"${WORK}/secrets/vless_uuid_b"
 # Two devices as an operator keeps them: a comment, a blank line, a tab, and a
 # name on the second.
 printf '# <uuid> [name]\n\n%s\n\t%s\tphone\n' "${uuid}" "${ID_B}" >"${WORK}/secrets/vless_clients"
-# Client lists section 7 refuses, each naming the line at fault.
+# Client lists section 9 refuses, each naming the line at fault.
 printf '# devices\n%s phone spare\n' "${uuid}" >"${WORK}/secrets/clients_three_fields"
 printf '%s\n%s\n' "${uuid}" "${ID_B:0:35}g" >"${WORK}/secrets/clients_not_uuid"
 printf '%s ph/one\n' "${uuid}" >"${WORK}/secrets/clients_bad_name"
@@ -274,7 +275,7 @@ printf '%s\n' "${PROXY_USER}" >"${WORK}/secrets/proxy_user"
 printf '%s\n' "${PROXY_PASS}" >"${WORK}/secrets/proxy_pass"
 printf '%s:%s@127.0.0.1:%s\n' "${PROXY_USER}" "${PROXY_PASS}" "${UP_SOCKS_PORT}" >"${WORK}/secrets/proxy_socks"
 printf '%s:%s@127.0.0.1:%s\n' "${PROXY_USER}" "${PROXY_PASS}" "${UP_HTTP_PORT}" >"${WORK}/secrets/proxy_http"
-# Proxy lines section 7 refuses. The last is the credentials alone, which an
+# Proxy lines section 9 refuses. The last is the credentials alone, which an
 # error that quoted what it could not parse would print; its password has no
 # "@", which would make its tail the host.
 printf 'socks5://%s:%s@127.0.0.1:%s\n' "${PROXY_USER}" "${PROXY_PASS}" "${UP_SOCKS_PORT}" >"${WORK}/secrets/proxy_scheme"
@@ -619,7 +620,68 @@ expect_in "the copy is the last config Xray accepted" "${logs}" "prepend outboun
 ALL_OUTPUT+="${logs}"
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
-# --- 8. refusals --------------------------------------------------------------
+# --- 8. geodata from a URL ---------------------------------------------------
+
+# XRAY_GEOSITE: a geosite.dat of one list, SMOKETEST, which the image's own
+# lacks, so a rule naming it passes only on the fetched file. Hand-made in
+# geosite.dat's protobuf form: GeoSiteList{GeoSite{"SMOKETEST", Domain{Domain,
+# "smoke.test"}}}.
+printf '\x0a\x1b\x0a\x09SMOKETEST\x12\x0e\x08\x02\x12\x0asmoke.test' >"${WORK}/geosite-smoke.dat"
+GEO_SHA="$(sha256sum "${WORK}/geosite-smoke.dat" | cut -d' ' -f1)"
+mkdir -p "${WORK}/geo"
+# geo_config [rule]: a probe inbound to a direct outbound, and with an argument
+# a rule naming SMOKETEST.
+geo_config() {
+	local rule=""
+	[ -z "${1:-}" ] || rule='{"type": "field", "domain": ["geosite:smoketest"], "outboundTag": "direct"},'
+	cat >"${WORK}/geo/10-geo.json" <<EOF
+{"inbounds": [{"listen": "127.0.0.1", "port": ${PROBE_PORT}, "protocol": "http"}],
+ "outbounds": [{"tag": "direct", "protocol": "freedom", "settings": {"finalRules": [{"action": "allow"}]}}],
+ "routing": {"rules": [${rule} {"type": "field", "network": "tcp", "outboundTag": "direct"}]}}
+EOF
+}
+# run_geo <state> <log needle>: the container, its XRAY_GEODATA_DIR on the
+# named volume or the tmpfs <state> names, until the needle is in its log.
+run_geo() {
+	local state=(-v "${CTR}-geo:/var/lib/xray")
+	# shellcheck disable=SC2054 # the commas are the option's own
+	[ "$1" = volume ] || state=(--tmpfs /var/lib/xray:rw,mode=1777)
+	"${ENGINE}" run -d --name "${CTR}" "${RUN_ARGS[@]}" --read-only --tmpfs /run/xray:rw,mode=1777 \
+		-v "${WORK}/geo:/etc/xray:ro" "${state[@]}" -e XRAY_SUBSCRIPTION_INTERVAL=2s \
+		-e XRAY_GEOSITE="http://127.0.0.1:${TARGET_PORT}/geosite-smoke.dat ${GEO_SHA}" \
+		-e XRAY_GEODATA_DIR=/var/lib/xray/geodata "${IMAGE}" >/dev/null
+	wait_sub "$2"
+}
+
+# Not served at start: Xray starts on the image's own, and restarts on the
+# pinned file once it is.
+rm -f "${WORK}/www/geosite-smoke.dat"
+geo_config
+run_geo volume "Xray ${VERSION} started"
+expect_in "not served at start, it starts on the image's own" "${logs}" \
+	"geosite.dat: its URL answered 404 Not Found; starting on the image's own"
+cp "${WORK}/geosite-smoke.dat" "${WORK}/www/geosite-smoke.dat"
+wait_sub "geosite.dat: fetched, its sha256 the pinned one; restarting Xray on it"
+echo "ok: a pinned geosite.dat fetched once Xray runs restarts Xray on it"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# Kept: a rule naming its list starts on the copy, with the URL gone.
+rm -f "${WORK}/www/geosite-smoke.dat"
+geo_config rule
+run_geo volume "Xray ${VERSION} started"
+expect_not_in "the kept copy is not fetched again" "${logs}" "answered 404"
+[ "$(via "${PROBE_PORT}")" = 200 ] || fail "the probe did not get out on the fetched geosite.dat"
+echo "ok: a rule naming a list only the fetched geosite.dat has starts on the kept copy"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# Neither kept nor served: the rule can't pass, and the refusal says why.
+run_geo tmpfs "FATAL"
+expect_in "a rule naming a list not fetched yet is refused, and why" "${logs}" \
+	"another geosite.dat than the pinned one, not fetched yet"
+ALL_OUTPUT+="${logs}"
+"${ENGINE}" rm -f "${CTR}" >/dev/null
+
+# --- 9. refusals --------------------------------------------------------------
 
 # refuse <label> <needle> <conf-dir> [run args...]: exit 78, needle in output.
 # Bounded, so a case that starts Xray instead fails rather than hangs.
@@ -729,7 +791,7 @@ refuse "a healthcheck expression that does not compile" \
 refuse "a read-only root without a tmpfs" "XRAY_RUNTIME_DIR is /run/xray, which is not writable by uid 65532" \
 	"${WORK}/conf" --read-only --read-only-tmpfs=false
 
-# --- 9. no secret anywhere ----------------------------------------------------
+# --- 10. no secret anywhere ---------------------------------------------------
 
 for s in "${SECRETS[@]}"; do
 	case "${ALL_OUTPUT}" in
