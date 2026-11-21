@@ -5,9 +5,10 @@ package main
 // XRAY_GEODATA_DIR, and Xray finds them through XRAY_LOCATION_ASSET, set to
 // its active/ directory, which links the files in use: Xray takes its own
 // copy of a file not linked there. A file that is not the pinned one yet is
-// fetched at start, and again every 30 seconds once Xray runs, through
-// XRAY_SUBSCRIPTION_PROXY first and directly when that fails; Xray restarts on
-// it once `xray run -test` passes the running config on it.
+// fetched every 30 seconds once Xray runs, through XRAY_SUBSCRIPTION_PROXY
+// first and directly when that fails, and Xray restarts on it once `xray run
+// -test` passes the running config on it. With no XRAY_SUBSCRIPTION_PROXY,
+// there being no tunnel to wait for, it is fetched at start too.
 
 import (
 	"context"
@@ -17,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,7 +29,10 @@ import (
 	"github.com/morzecrew/platform-images/shared/go/envconf"
 )
 
-const geoTimeout = 10 * time.Minute // one fetch, the body included
+const (
+	geoTimeout = 10 * time.Minute // one fetch, the body included
+	geoConnect = 10 * time.Second // to connect, and for a TLS handshake
+)
 
 var geoMax int64 = 256 << 20 // the most a file may hold; a variable for the tests
 
@@ -85,8 +90,9 @@ func geodataSettings(src, run string) error {
 
 // geodataPrepare links each pinned file XRAY_GEODATA_DIR holds, the pinned one
 // or the one fetched for an earlier pin, into active/, fetches each that is
-// not the pinned one, and points Xray at active/. At start, before anything
-// is resolved; start's own `xray run -test` then judges the files.
+// not the pinned one when there is no proxy, and points Xray at active/. At
+// start, before anything is resolved; start's own `xray run -test` then
+// judges the files.
 func geodataPrepare(proxy *url.URL) error {
 	active := filepath.Join(geoDir, "active")
 	hint := func(err error) error {
@@ -125,12 +131,17 @@ func geodataPrepare(proxy *url.URL) error {
 		if g.ready {
 			continue
 		}
-		tmp, err := geoFetch(g, proxy)
+		have := "the image's own"
+		if sum != "" {
+			have = "the one fetched for an earlier pin"
+		}
+		if proxy != nil {
+			// The proxy is an inbound of the Xray yet to start.
+			fmt.Fprintf(os.Stderr, "geodata: %s: starting on %s, and fetching the pinned one through XRAY_SUBSCRIPTION_PROXY once Xray runs\n", g.name, have)
+			continue
+		}
+		tmp, err := geoGet(g, nil)
 		if err != nil {
-			have := "the image's own"
-			if sum != "" {
-				have = "the one fetched for an earlier pin"
-			}
 			fmt.Fprintf(os.Stderr, "geodata: %s: %v; starting on %s, and fetching it again once Xray runs\n", g.name, err, have)
 			continue
 		}
@@ -263,7 +274,8 @@ func geoFetch(g *geoFile, proxy *url.URL) (string, error) {
 // geoGet GETs the pinned URL, following redirects, and keeps the body only
 // when its sha256 is the pinned one.
 func geoGet(g *geoFile, proxy *url.URL) (_ string, err error) {
-	tr := &http.Transport{Proxy: nil, ForceAttemptHTTP2: true}
+	tr := &http.Transport{Proxy: nil, ForceAttemptHTTP2: true, TLSHandshakeTimeout: geoConnect,
+		DialContext: (&net.Dialer{Timeout: geoConnect}).DialContext}
 	if proxy != nil {
 		tr.Proxy = http.ProxyURL(proxy)
 	}

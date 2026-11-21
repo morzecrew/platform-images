@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,6 +178,21 @@ func TestGeodataPrepare(t *testing.T) {
 	}
 	if next(subSettings{interval: 3600e9}) != subRetry {
 		t.Fatal("a file still to fetch is not retried sooner")
+	}
+
+	// With a proxy, an inbound of the Xray yet to start, nothing is fetched
+	// at start.
+	n := 0
+	counted := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { n++ }))
+	defer counted.Close()
+	t.Setenv("XRAY_GEOSITE", counted.URL+"/geosite.dat "+sha("new data"))
+	t.Setenv("XRAY_LOCATION_ASSET", "")
+	if err := geodataSettings("/etc/xray", "/run/xray"); err != nil {
+		t.Fatal(err)
+	}
+	proxy, _ := url.Parse(counted.URL)
+	if err := geodataPrepare(proxy); err != nil || n != 0 || !geoWaiting() {
+		t.Fatalf("with a proxy at start: %v, %d requests", err, n)
 	}
 }
 

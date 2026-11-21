@@ -483,20 +483,21 @@ A file is kept in `XRAY_GEODATA_DIR`, and Xray reads it from there: the
 entrypoint sets `XRAY_LOCATION_ASSET`, which may not be set as well. A file
 neither variable pins stays the image's own.
 
-- **When it is fetched.** At start, when the kept file is not the pinned
-  one, through `XRAY_SUBSCRIPTION_PROXY` first and directly when that fails,
-  as a [subscription](#a-subscriptions-outbounds) is. One that can't be
-  fetched then is tried again every 30 seconds once Xray runs, so through
-  the tunnel where only the tunnel gets through; Xray restarts on it once
-  `xray run -test` passes the running config on it. A file the test refuses
-  is not fetched again till a restart, and Xray keeps the one it has.
+- **When it is fetched.** When the kept file is not the pinned one, every
+  30 seconds once Xray runs, through `XRAY_SUBSCRIPTION_PROXY` first and
+  directly when that fails, as a [subscription](#a-subscriptions-outbounds)
+  is: so through the tunnel, never around it before the tunnel is up. Xray
+  restarts on it once `xray run -test` passes the running config on it. With
+  no `XRAY_SUBSCRIPTION_PROXY`, it is fetched at start too. A file the test
+  refuses is not fetched again till a restart, and Xray keeps the one it has.
 - **Until then.** Xray starts on the file kept for an earlier pin, or with
   none, on the image's own. A rule naming a list only the pinned file has
   fails that start, and the error says so: pin the file first, and add such
   rules once its log says it was fetched. After that, the kept copy serves
   every start, with the URL unreachable or not.
 - **What is accepted.** A `200`, redirects followed, of at most 256 MiB
-  whose sha256 is the pinned one. Anything else is not kept.
+  whose sha256 is the pinned one, connected to within 10 seconds and read
+  within 10 minutes. Anything else is not kept.
 
 ## VLESS Encryption from one seed
 
