@@ -944,36 +944,8 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 		}
 	}
 	word, _, isURL := strings.Cut(u, "://")
-	if u == "direct" {
-		// This machine's own address: an exit already on the network the
-		// traffic is to leave from, such as a home line.
-		for _, opt := range tags {
-			k, v, ok := strings.Cut(opt, "=")
-			switch {
-			case !ok:
-				return l, errors.New(tagsAre)
-			case k == "warm":
-				return l, errors.New("warm= is for a SOCKS5 or an HTTP proxy, which direct is not")
-			case k == "name" && !upstreamNameRE.MatchString(v):
-				return l, errors.New("a name is 1 to 32 lowercase letters, digits and dashes, starting with a letter or a digit")
-			case k == "name":
-				l.name = v
-			case k == "group":
-				l.groups = strings.Split(v, ",")
-				for i, g := range l.groups {
-					if !upstreamGroupRE.MatchString(g) || slices.Contains(l.groups[:i], g) {
-						return l, errors.New("a group is 1 to 16 lowercase letters and digits, starting with a letter, each named once")
-					}
-				}
-			default:
-				return l, errors.New(tagsAre)
-			}
-		}
-		l.out = upstreamOutbound{Protocol: "freedom", Settings: struct{}{}}
-		l.where = "this machine's own address"
-		return l, nil
-	}
-	if !isURL {
+	direct := u == "direct"
+	if !isURL && !direct {
 		if !upstreamWordRE.MatchString(u) {
 			return l, errors.New("does not start with a URL (socks5://, socks5+tls://, http://, https://, wireguard://), direct, or a word XRAY_UPSTREAM_ALIASES defines")
 		}
@@ -1021,6 +993,16 @@ func parseUpstreamLine(line string, aliases map[string]string, counts map[string
 		}
 	}
 
+	if direct {
+		// This machine's own address: an exit already on the network the
+		// traffic is to leave from, such as a home line.
+		if warm {
+			return l, errors.New("warm= is for a SOCKS5 or an HTTP proxy, which direct is not")
+		}
+		l.out = upstreamOutbound{Protocol: "freedom", Settings: struct{}{}}
+		l.where = "this machine's own address"
+		return l, nil
+	}
 	scheme, rest, _ := strings.Cut(u, "://")
 	switch scheme {
 	case "socks", "socks5", "socks5+tls", "http", "https":

@@ -917,11 +917,13 @@ func TestUpstreamsDirect(t *testing.T) {
 		t.Fatalf("direct in both groups: %+v, %v", outs, err)
 	}
 	for list, want := range map[string]string{
-		"warm=2 | direct\n":    "warm= is for a SOCKS5 or an HTTP proxy",
-		"direct weight=2\n":    "the tags are name=",
-		"direct name=Home\n":   "a name is 1 to 32",
-		"direct group=v6-x\n":  "a group is 1 to 16",
-		"direct://example:1\n": "its scheme is not",
+		"warm=2 | direct\n":                  "warm= is for a SOCKS5 or an HTTP proxy",
+		"direct weight=2\n":                  "the tags are name=",
+		"direct name=Home\n":                 "a name is 1 to 32",
+		"direct group=v6-x\n":                "a group is 1 to 16",
+		"direct name=a name=b\n":             "the tags are name=",
+		"direct group=upstream group=ipv6\n": "the tags are name=",
+		"direct://example:1\n":               "its scheme is not",
 	} {
 		if _, _, _, err := parseUpstreams(list, nil, ""); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%q: %v, want %q", list, err, want)
