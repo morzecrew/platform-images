@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -888,5 +889,47 @@ func TestUpstreamsWarm(t *testing.T) {
 		if _, _, _, err := parseUpstreams("socks5://alice:secret@p.example:1080 warm=1\n", a, ""); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("warm alias %q: err = %v", alias, err)
 		}
+	}
+}
+
+// direct: this machine's own address, a freedom outbound, with the tags any
+// line takes but warm=, beside proxies or alone.
+func TestUpstreamsDirect(t *testing.T) {
+	outs, secrets, note, err := parseUpstreams("name=home | direct\nsocks5://proxy.example:1080 name=isp\n", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outs) != 2 || outs[0].Protocol != "freedom" || outs[1].Protocol != "socks" || len(secrets) != 0 {
+		t.Fatalf("direct and a proxy: %+v, %v", outs, secrets)
+	}
+	b, _ := json.Marshal(outs[0])
+	if !strings.Contains(string(b), `"protocol":"freedom","settings":{}`) {
+		t.Fatalf("direct's outbound: %s", b)
+	}
+	if !strings.Contains(note, "this machine's own address") {
+		t.Fatalf("the summary does not say where direct leaves from: %s", note)
+	}
+	if outs, _, _, err := parseUpstreams("direct\n", nil, ""); err != nil || len(outs) != 1 || outs[0].Protocol != "freedom" {
+		t.Fatalf("direct alone: %+v, %v", outs, err)
+	}
+	if outs, _, _, err := parseUpstreams("direct group=upstream,ipv6\n", nil, ""); err != nil || len(outs) != 2 ||
+		outs[0].Protocol != "freedom" || outs[1].Protocol != "freedom" || outs[1].Tag != "ipv6-0" {
+		t.Fatalf("direct in both groups: %+v, %v", outs, err)
+	}
+	for list, want := range map[string]string{
+		"warm=2 | direct\n":                  "warm= is for a SOCKS5 or an HTTP proxy",
+		"direct weight=2\n":                  "the tags are name=",
+		"direct name=Home\n":                 "a name is 1 to 32",
+		"direct group=v6-x\n":                "a group is 1 to 16",
+		"direct name=a name=b\n":             "the tags are name=",
+		"direct group=upstream group=ipv6\n": "the tags are name=",
+		"direct://example:1\n":               "its scheme is not",
+	} {
+		if _, _, _, err := parseUpstreams(list, nil, ""); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: %v, want %q", list, err, want)
+		}
+	}
+	if _, err := upstreamAliases("direct=socks5://hop:1080"); err == nil || !strings.Contains(err.Error(), "of its own") {
+		t.Fatalf("an alias named direct: %v", err)
 	}
 }
