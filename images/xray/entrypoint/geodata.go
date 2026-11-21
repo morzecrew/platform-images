@@ -181,10 +181,11 @@ func install(g *geoFile, tmp string) error {
 		os.Remove(tmp)
 		return err
 	}
-	g.ready = true
+	// Ready only once linked: an unlinked file is fetched and linked again.
 	if err := os.Symlink(p, filepath.Join(geoDir, "active", g.name)); err != nil && !errors.Is(err, fs.ErrExist) {
 		return err
 	}
+	g.ready = true
 	return nil
 }
 
@@ -317,6 +318,12 @@ func geoGet(g *geoFile, proxy *url.URL) (_ string, err error) {
 	}
 	resp, err := (&http.Client{Transport: tr}).Do(req)
 	if err != nil {
+		// A *url.Error quotes the URL, or a redirect's, query tokens included:
+		// only its cause goes to the log.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		return "", fmt.Errorf("could not be fetched (%v)", err)
 	}
 	defer resp.Body.Close()

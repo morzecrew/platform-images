@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 const subConfig = `{"inbounds": [{"port": 10808, "protocol": "socks"}],
@@ -244,5 +245,17 @@ func TestSubscriptionsSharingAFileNameAreRefusedWithACache(t *testing.T) {
 	}
 	if _, err := subscription(urlFile(t, u)); err == nil || !strings.Contains(err.Error(), "rename one") {
 		t.Fatalf("a second subscription_url: %v", err)
+	}
+}
+
+// While a geodata file waits the refresh runs every 30 seconds, and the
+// subscriptions are fetched only when their own interval comes round.
+func TestRefreshKeepsTheSubscriptionsInterval(t *testing.T) {
+	_, u, n := subServer(t, 200, subConfig)
+	subs = map[string][]byte{urlFile(t, u): []byte(`[]`)}
+	defer func() { subs, subsDue = map[string][]byte{}, time.Time{} }()
+	subsDue = time.Now().Add(time.Hour)
+	if refresh(t.TempDir(), t.TempDir(), nil, subSettings{interval: time.Hour}) || *n != 0 {
+		t.Fatalf("fetched before its interval: %d requests", *n)
 	}
 }

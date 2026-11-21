@@ -321,3 +321,41 @@ func TestGeoGetGivesUpOnAStall(t *testing.T) {
 		t.Fatalf("a stall: %v", err)
 	}
 }
+
+// A failed fetch's error names its cause, never the URL and its query.
+func TestGeoGetKeepsTheURLOutOfErrors(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	gone := srv.URL
+	srv.Close()
+	dir := geoSetup(t, gone+"/geosite.dat?token=0123456789secret", "pinned data")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := geoGet(geo[0], nil)
+	if err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), gone) {
+		t.Fatalf("an unreachable URL: %v", err)
+	}
+}
+
+// A file kept but not linked is not ready, so it is fetched and linked again.
+func TestInstallIsReadyOnlyOnceLinked(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes a read-only directory")
+	}
+	dir := geoSetup(t, "https://cdn.example/geosite.dat", "pinned data")
+	active := filepath.Join(dir, "active")
+	if err := os.MkdirAll(active, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(active, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(active, 0o700)
+	tmp := filepath.Join(dir, ".geosite.dat-1")
+	if err := os.WriteFile(tmp, []byte("pinned data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := install(geo[0], tmp); err == nil || geo[0].ready {
+		t.Fatalf("unlinked: %v, %+v", err, geo[0])
+	}
+}
