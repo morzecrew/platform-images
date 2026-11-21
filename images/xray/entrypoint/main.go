@@ -138,6 +138,15 @@ func start(extra []string) error {
 	}
 	running = configs
 	version, err := testConfig(run, extra, configs)
+	if err != nil && geoWaiting() {
+		// A rule naming a list only a pinned file has, with none kept (a new
+		// machine, a lost volume): Xray can't run to fetch it through the
+		// tunnel, so once directly, tested before it is kept, and again.
+		fmt.Fprintln(os.Stderr, "geodata: the config fails on the files at hand: fetching the pinned ones directly, once")
+		if refreshGeo(run, extra, nil) {
+			version, err = testConfig(run, extra, configs)
+		}
+	}
 	if err != nil {
 		if h := geoHint(); h != "" {
 			return fmt.Errorf("%v. %s", err, h)
@@ -1236,7 +1245,7 @@ func testConfig(dir string, extra []string, configs []*envconf.Config, env ...st
 	text := envconf.Redact(string(out), values)
 	if err != nil {
 		fmt.Fprint(os.Stderr, text)
-		return "", fmt.Errorf("xray run -test refused the configuration (%v)", err)
+		return "", fmt.Errorf("xray run -test refused the configuration (%w)", err)
 	}
 	version, _, _ := strings.Cut(text, "\n")
 	return version, nil

@@ -259,3 +259,14 @@ func TestRefreshKeepsTheSubscriptionsInterval(t *testing.T) {
 		t.Fatalf("fetched before its interval: %d requests", *n)
 	}
 }
+
+// Once no geodata file waits, the timer comes back at the subscriptions' own
+// due time rather than a full interval later.
+func TestNextKeepsTheSubscriptionsDueTime(t *testing.T) {
+	subs = map[string][]byte{"/run/secrets/s": []byte(`[]`)}
+	defer func() { subs, subsDue = map[string][]byte{}, time.Time{} }()
+	subsDue = time.Now().Add(10 * time.Minute)
+	if d := next(subSettings{interval: time.Hour}); d > 10*time.Minute || d < 9*time.Minute {
+		t.Fatalf("next: %s, want about 10m", d)
+	}
+}
