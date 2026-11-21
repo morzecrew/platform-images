@@ -441,3 +441,39 @@ func TestRefreshGeoTestsEachFileAlone(t *testing.T) {
 		t.Fatal("not the good one alone in use")
 	}
 }
+
+// Files whose lists the config names together pass only together: each alone,
+// beside the other's old copy, would fail.
+func TestRefreshGeoInstallsFilesNeededTogether(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.TrimPrefix(r.URL.Path, "/")))
+	}))
+	defer srv.Close()
+	dir := filepath.Join(t.TempDir(), "geodata")
+	t.Setenv("XRAY_GEOIP", srv.URL+"/ip "+sha("ip"))
+	t.Setenv("XRAY_GEOSITE", srv.URL+"/site "+sha("site"))
+	t.Setenv("XRAY_GEODATA_DIR", dir)
+	t.Setenv("XRAY_LOCATION_ASSET", "")
+	t.Cleanup(func() { geo, geoDir = nil, "" })
+	if err := geodataSettings("/etc/xray", "/run/xray"); err != nil {
+		t.Fatal(err)
+	}
+	if err := geodataPrepare(); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "xray")
+	script := "#!/bin/sh\n[ \"$(cat \"$XRAY_LOCATION_ASSET/geoip.dat\" 2>/dev/null)\" = ip ] && " +
+		"[ \"$(cat \"$XRAY_LOCATION_ASSET/geosite.dat\" 2>/dev/null)\" = site ] && exit 0\necho 'failed to check code X'; exit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := img.Bin
+	img.Bin = bin
+	t.Cleanup(func() { img.Bin = old })
+	if !refreshGeo(t.TempDir(), nil, nil) || !geo[0].ready || !geo[1].ready || geo[0].failed || geo[1].failed {
+		t.Fatalf("two files needed together: %+v %+v", geo[0], geo[1])
+	}
+	if read(t, filepath.Join(dir, "active", "geoip.dat")) != "ip" || read(t, filepath.Join(dir, "active", "geosite.dat")) != "site" {
+		t.Fatal("not both in use")
+	}
+}

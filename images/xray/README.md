@@ -488,8 +488,8 @@ neither variable pins stays the image's own.
   directly when that fails, as a [subscription](#a-subscriptions-outbounds)
   is: so never around the tunnel before Xray runs, but directly once it runs
   and a fetch through the tunnel fails. Xray restarts on it once `xray run
-  -test` passes the running config on it, each file tested beside the files
-  in use. At start only when the config fails without it, as on a new
+  -test` passes the running config on it: the files fetched together are
+  tested together, beside the files in use, and each alone when they fail. At start only when the config fails without it, as on a new
   machine or a lost volume, where Xray can't run to fetch it: then once,
   directly, tested the same way before it is kept.
 - **When it is not fetched again.** A URL that serves a file of another

@@ -375,19 +375,26 @@ func next(s subSettings) time.Duration {
 // comes second: a slow fetch doesn't hold the subscriptions up, and its test
 // runs on the config Xray restarts on.
 func refresh(src, run string, extra []string, s subSettings) bool {
-	restart := refreshSubs(src, run, extra, s)
+	restart, intact := refreshSubs(src, run, extra, s)
+	if !intact {
+		// Neither a restart nor a geodata test on a broken runtime directory,
+		// which would blame a good file.
+		fmt.Fprintln(os.Stderr, "xray-entrypoint: XRAY_RUNTIME_DIR could not be put back; Xray keeps running on the config it loaded, and geodata waits")
+		return false
+	}
 	return refreshGeo(run, extra, s.proxy) || restart
 }
 
 // refreshSubs fetches every subscription, when due, and reports whether one
-// changed and the runtime directory now holds the config resolved on it.
-func refreshSubs(src, run string, extra []string, s subSettings) bool {
+// changed and the runtime directory now holds the config resolved on it, and
+// whether the runtime directory holds a whole config, the old one or the new.
+func refreshSubs(src, run string, extra []string, s subSettings) (bool, bool) {
 	due := !time.Now().Before(subsDue)
 	for _, b := range subs {
 		due = due || b == nil
 	}
 	if !due || len(subs) == 0 {
-		return false
+		return false, true
 	}
 	subsDue = time.Now().Add(s.interval)
 	old := maps.Clone(subs)
@@ -408,12 +415,12 @@ func refreshSubs(src, run string, extra []string, s subSettings) bool {
 		}
 	}
 	if !changed {
-		return false
+		return false, true
 	}
-	revert := func(err error) bool {
+	revert := func(err error) (bool, bool) {
 		fmt.Fprintf(os.Stderr, "subscription: %v; Xray keeps the config it runs\n", err)
 		subs = old
-		return false
+		return false, true
 	}
 	configs, err := resolveDir(src)
 	if err != nil {
@@ -433,8 +440,8 @@ func refreshSubs(src, run string, extra []string, s subSettings) bool {
 	if err := writeRuntime(run, configs); err != nil {
 		// The runtime directory is emptied before it is written: put back the
 		// config Xray runs, which a later restart (geodata's) starts on.
-		_ = writeRuntime(run, running)
-		return revert(err)
+		revert(err)
+		return false, writeRuntime(run, running) == nil
 	}
 	running = configs
 	writeCaches()
@@ -445,7 +452,7 @@ func refreshSubs(src, run string, extra []string, s subSettings) bool {
 			}
 		}
 	}
-	return true
+	return true, true
 }
 
 func launch(run string, extra []string) (*exec.Cmd, chan error, error) {

@@ -226,13 +226,16 @@ func geoHint() string {
 }
 
 // refreshGeo fetches each pinned file that is not there yet and reports
-// whether Xray is to restart: one was fetched and installed. Each is tested
-// alone, beside the files in use, in a directory of links beside active/,
-// and installed only if `xray run -test` passes the running config on it, so
-// Xray restarts only on files that passed together. A file the test refuses,
-// or a URL serving another file, is not fetched again till a restart.
+// whether Xray is to restart: one was fetched and installed. The fetched
+// files are tested together, beside the files in use, in a directory of
+// links beside active/, and installed if `xray run -test` passes the running
+// config on them: files whose lists the config names together pass only
+// together. When they fail together, each is tested alone, so a good one is
+// installed though another fails. Xray restarts only on files that passed
+// together. A file the test refuses, or a URL serving another file, is not
+// fetched again till a restart.
 func refreshGeo(run string, extra []string, proxy *url.URL) bool {
-	installed := false
+	tmps := map[*geoFile]string{}
 	for _, g := range geo {
 		if g.ready || g.failed {
 			continue
@@ -243,45 +246,94 @@ func refreshGeo(run string, extra []string, proxy *url.URL) bool {
 		case errors.As(err, &final):
 			g.failed = true
 			fmt.Fprintf(os.Stderr, "geodata: %s: %v; Xray keeps the one it has, and it is not fetched again till a restart: check the pin\n", g.name, err)
-			continue
 		case err != nil:
 			fmt.Fprintf(os.Stderr, "geodata: %s: %v; Xray keeps the one it has\n", g.name, err)
-			continue
-		}
-		err = geoTest(run, extra, g, tmp)
-		var exit *exec.ExitError
-		switch {
-		case errors.As(err, &exit) && exit.Exited():
-			g.failed = true
-			fmt.Fprintf(os.Stderr, "geodata: %s: the pinned one fails the running config (%v); Xray keeps the one it has, and it is not fetched again till a restart\n", g.name, err)
-		case err != nil:
-			// Killed, or not run at all: the file is not to blame.
-			fmt.Fprintf(os.Stderr, "geodata: %s: not tested (%v); Xray keeps the one it has\n", g.name, err)
 		default:
-			if err = install(g, tmp); err != nil {
-				fmt.Fprintf(os.Stderr, "geodata: %s could not be kept (%v); Xray keeps the one it has\n", g.name, envconf.Cause(err))
-				break
-			}
-			installed = true
-			fmt.Fprintf(os.Stderr, "geodata: %s: fetched, its sha256 the pinned one, and the running config passes on it\n", g.name)
+			tmps[g] = tmp
 		}
-		os.Remove(tmp) // gone already once installed
+	}
+	defer func() {
+		for _, t := range tmps {
+			os.Remove(t) // gone already once installed
+		}
+	}()
+	if len(tmps) == 0 {
+		return false
+	}
+	err := geoTest(run, extra, tmps)
+	if err == nil {
+		return installAll(tmps)
+	}
+	if !refused(err) || len(tmps) == 1 {
+		judge(tmps, err)
+		return false
+	}
+	installed := false
+	for _, g := range geo {
+		if t, ok := tmps[g]; ok {
+			one := map[*geoFile]string{g: t}
+			if err := geoTest(run, extra, one); err != nil {
+				judge(one, err)
+				continue
+			}
+			installed = installAll(one) || installed
+		}
 	}
 	return installed
 }
 
-// geoTest runs `xray run -test` on the running config with tmp for g's file
-// and the files in use for the others. The running config's own values
-// redact Xray's output.
-func geoTest(run string, extra []string, g *geoFile, tmp string) error {
+// refused tells a refusal by `xray run -test` from a test killed or never run,
+// which no file is to blame for.
+func refused(err error) bool {
+	var exit *exec.ExitError
+	return errors.As(err, &exit) && exit.Exited()
+}
+
+// judge marks the files a refusal blames as failed, and says so.
+func judge(tmps map[*geoFile]string, err error) {
+	for _, g := range geo {
+		if _, ok := tmps[g]; !ok {
+			continue
+		}
+		if refused(err) {
+			g.failed = true
+			fmt.Fprintf(os.Stderr, "geodata: %s: the pinned one fails the running config (%v); Xray keeps the one it has, and it is not fetched again till a restart\n", g.name, err)
+		} else {
+			fmt.Fprintf(os.Stderr, "geodata: %s: not tested (%v); Xray keeps the one it has\n", g.name, err)
+		}
+	}
+}
+
+// installAll installs the files a test passed, and reports whether one was.
+func installAll(tmps map[*geoFile]string) bool {
+	installed := false
+	for _, g := range geo {
+		t, ok := tmps[g]
+		if !ok {
+			continue
+		}
+		if err := install(g, t); err != nil {
+			fmt.Fprintf(os.Stderr, "geodata: %s could not be kept (%v); Xray keeps the one it has\n", g.name, envconf.Cause(err))
+			continue
+		}
+		installed = true
+		fmt.Fprintf(os.Stderr, "geodata: %s: fetched, its sha256 the pinned one, and the running config passes on it\n", g.name)
+	}
+	return installed
+}
+
+// geoTest runs `xray run -test` on the running config with the fetched files
+// in tmps and the files in use for the others. The running config's own
+// values redact Xray's output.
+func geoTest(run string, extra []string, tmps map[*geoFile]string) error {
 	stage, err := os.MkdirTemp(geoDir, ".next-")
 	if err != nil {
 		return fmt.Errorf("XRAY_GEODATA_DIR is not writable (%v)", envconf.Cause(err))
 	}
 	defer os.RemoveAll(stage)
 	for _, h := range geo {
-		p := tmp
-		if h != g {
+		p, ok := tmps[h]
+		if !ok {
 			if p = filepath.Join(geoDir, h.name); !exists(p) {
 				continue
 			}
