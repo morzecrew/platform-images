@@ -7,7 +7,7 @@ ARG FLYWAY_VERSION=13.13
 FROM flyway/flyway:${FLYWAY_VERSION}-alpine
 
 # renovate: datasource=maven depName=org.postgresql:postgresql
-ARG POSTGRES_JDBC_VERSION=42.7.14
+ARG POSTGRES_JDBC_VERSION=42.7.15
 # renovate: datasource=maven depName=com.clickhouse:clickhouse-jdbc
 ARG CLICKHOUSE_JDBC_VERSION=0.11.2
 
