@@ -9,7 +9,7 @@
 # - a link made with --make-link reads back with --parse-link;
 # - through the client's SOCKS5, a request reaches a target over the exit, and
 #   the exit's TCP and UDP both leave through its --upstream-proxy, which
-#   logs them (patches/exit-udp-socks5.patch);
+#   logs them (patches/);
 # - an upstream that refuses UDP ASSOCIATE gets the exit's UDP dropped, never
 #   sent around it.
 # Targets listen on this machine's own address, not loopback: the client's
@@ -157,21 +157,27 @@ out="$(udp_ping)"
 grep -qx "udp ${HOST_IP} ${ECHO_PORT}" "${WORK}/up.log" || fail "the exit's UDP did not go through the upstream: $(cat "${WORK}/up.log")"
 echo "ok: the exit's UDP left through the upstream's UDP ASSOCIATE, and the reply came back"
 
+# The first exit's log, before the next case replaces it.
+LOGS="$("${ENGINE}" logs "${CTR}-exit" 2>&1)"
+
 # --- 5. an upstream that refuses UDP ------------------------------------------
 
 exit_node "${TCPONLY_PORT}"
 wait_up
 grep -qx "tcp ${HOST_IP} ${HTTP_PORT}" "${WORK}/tcponly.log" || fail "the exit's TCP did not go through the TCP-only upstream"
 echoes=$(grep -c '^echo' "${WORK}/echo.log" || true)
+refusals=$(grep -c '^udp refused$' "${WORK}/tcponly.log" || true)
 out="$(udp_ping)"
 [ "${out}" = "no reply" ] || fail "UDP with a TCP-only upstream: ${out}"
 sleep 1
+[ "$(grep -c '^udp refused$' "${WORK}/tcponly.log" || true)" -gt "${refusals}" ] ||
+	fail "the exit never asked the TCP-only upstream for UDP ASSOCIATE"
 [ "$(grep -c '^echo' "${WORK}/echo.log" || true)" = "${echoes}" ] || fail "the exit sent UDP around the upstream that refused it"
 echo "ok: an upstream that refuses UDP ASSOCIATE gets the exit's UDP dropped, nothing sent around it"
 
 # --- 6. no key in any log -----------------------------------------------------
 
-logs="$("${ENGINE}" logs "${CTR}-exit" 2>&1)$("${ENGINE}" logs "${CTR}-client" 2>&1)"
+logs="${LOGS}$("${ENGINE}" logs "${CTR}-exit" 2>&1)$("${ENGINE}" logs "${CTR}-client" 2>&1)"
 case "${logs}" in *"${KEY}"*) fail "the key appears in a log" ;; esac
 echo "ok: the key is in no log"
 echo "PASS: openflux smoke (${IMAGE})"

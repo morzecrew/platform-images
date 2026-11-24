@@ -5,7 +5,7 @@
       A proxy on 127.0.0.1:<port> that serves CONNECT, and UDP ASSOCIATE
       unless noudp, printing "tcp <host> <port>" or "udp <host> <port>" for
       each destination asked for. noudp refuses UDP ASSOCIATE (reply 7), as a
-      TCP-only proxy does.
+      TCP-only proxy does, and prints "udp refused".
   smoke-socks.py udp <socks port> <host> <port>
       Sends "ping" to <host>:<port> through the SOCKS5 proxy on
       127.0.0.1:<socks port> and prints the reply, or exits 1 with no reply.
@@ -68,14 +68,28 @@ def pipe(a, b):
 
 
 def relay(ctrl, r):
-    # The association lives as long as its TCP connection.
-    threading.Thread(target=lambda: (ctrl.recv(1), r.close()), daemon=True).start()
+    # The association lives as long as its TCP connection. A close from the
+    # other thread need not wake recvfrom, so it waits a second at a time and
+    # looks.
+    done = threading.Event()
+
+    def watch():
+        try:
+            ctrl.recv(1)
+        except OSError:
+            pass
+        done.set()
+
+    threading.Thread(target=watch, daemon=True).start()
+    r.settimeout(1)
     client = None
-    while True:
+    while not done.is_set():
         try:
             d, src = r.recvfrom(65535)
+        except socket.timeout:
+            continue
         except OSError:
-            return
+            break
         if client is None or src == client:
             client = src
             host, port, j = parse_addr(d, 3)
@@ -83,6 +97,7 @@ def relay(ctrl, r):
             r.sendto(d[j:], (host, port))
         else:
             r.sendto(b"\x00\x00\x00" + ipv4(*src) + d, client)
+    r.close()
 
 
 def handle(c, udp):
@@ -110,6 +125,8 @@ def handle(c, udp):
             c.sendall(b"\x05\x00\x00" + ipv4("127.0.0.1", r.getsockname()[1]))
             relay(c, r)
         else:
+            if cmd == 3:
+                print("udp refused", flush=True)
             c.sendall(b"\x05\x07\x00" + ipv4("0.0.0.0", 0))
     except (OSError, EOFError, ValueError):
         pass

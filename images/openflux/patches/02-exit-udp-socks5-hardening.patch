@@ -1,0 +1,254 @@
+On top of 01-exit-udp-socks5.patch, from platform-images' review of it:
+
+- the SOCKS5 handshake runs in the flow's goroutine, not in gVisor's UDP
+  forwarder, which a slow proxy would otherwise hold up for every flow;
+- a wildcard relay (0.0.0.0) is taken on the address the control
+  connection reached, so a proxy given by name, such as gate:1080, works;
+- the flow ends when the proxy closes the control connection (RFC 1928);
+- a relay named by a domain is looked up within the handshake's deadline;
+- fragments (FRAG != 0) are dropped, not delivered as whole datagrams;
+- the log says UDP is dropped where the proxy refuses it;
+- the fake relay in the tests checks the destination it is sent, answers
+  with a header of its own after a fragment, and announces a wildcard relay
+  to a proxy dialled by name in a new case.
+
+diff --git a/tunnel/socks5_udp.go b/tunnel/socks5_udp.go
+index 44d3471..8b5c223 100644
+--- a/tunnel/socks5_udp.go
++++ b/tunnel/socks5_udp.go
+@@ -1,6 +1,7 @@
+ package tunnel
+ 
+ import (
++	"context"
+ 	"encoding/binary"
+ 	"fmt"
+ 	"io"
+@@ -67,7 +68,8 @@ func dialSOCKS5UDP(proxyAddr string, auth *proxy.Auth, dest string) (net.Conn, e
+ 	}
+ 	closeTCP := func() { _ = tcpConn.Close() }
+ 	// The handshake must not hang a UDP flow if the proxy stalls.
+-	if err := tcpConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
++	deadline := time.Now().Add(10 * time.Second)
++	if err := tcpConn.SetDeadline(deadline); err != nil {
+ 		closeTCP()
+ 		return nil, err
+ 	}
+@@ -129,26 +131,36 @@ func dialSOCKS5UDP(proxyAddr string, auth *proxy.Auth, dest string) (net.Conn, e
+ 		closeTCP()
+ 		return nil, fmt.Errorf("socks5: udp associate failed (rep=%#x)", hdr[1])
+ 	}
+-	relayIP, relayPort, err := readSocksAddr(tcpConn, hdr[3])
++	relayIP, relayPort, err := readSocksAddr(tcpConn, hdr[3], deadline)
+ 	if err != nil {
+ 		closeTCP()
+ 		return nil, err
+ 	}
++	// A wildcard relay is on the proxy's own address: the one this
++	// connection reached, which a proxy given by name (gate:1080) has too.
++	relayZone := ""
+ 	if relayIP == nil || relayIP.IsUnspecified() {
+-		sHost, _, _ := net.SplitHostPort(proxyAddr)
+-		relayIP = net.ParseIP(sHost)
+-		if relayIP == nil {
++		ta, ok := tcpConn.RemoteAddr().(*net.TCPAddr)
++		if !ok {
+ 			closeTCP()
+ 			return nil, fmt.Errorf("socks5: relay address unusable")
+ 		}
++		relayIP, relayZone = ta.IP, ta.Zone
+ 	}
+ 	_ = tcpConn.SetDeadline(time.Time{})
+ 
+-	uConn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: relayIP, Port: relayPort})
++	uConn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: relayIP, Port: relayPort, Zone: relayZone})
+ 	if err != nil {
+ 		closeTCP()
+ 		return nil, err
+ 	}
++	// The association ends with its control connection (RFC 1928): once
++	// the proxy closes it, so does the flow, rather than sending datagrams
++	// the proxy no longer relays.
++	go func() {
++		_, _ = io.Copy(io.Discard, tcpConn)
++		_ = uConn.Close()
++	}()
+ 
+ 	header := make([]byte, 0, 3+len(dst))
+ 	header = append(header, 0, 0, 0) // RSV, RSV, FRAG
+@@ -157,7 +169,7 @@ func dialSOCKS5UDP(proxyAddr string, auth *proxy.Auth, dest string) (net.Conn, e
+ }
+ 
+ // readSocksAddr reads the address that follows a 4-byte SOCKS5 reply header.
+-func readSocksAddr(r io.Reader, atyp byte) (net.IP, int, error) {
++func readSocksAddr(r io.Reader, atyp byte, deadline time.Time) (net.IP, int, error) {
+ 	switch atyp {
+ 	case 0x01:
+ 		b := make([]byte, 4+2)
+@@ -181,7 +193,9 @@ func readSocksAddr(r io.Reader, atyp byte) (net.IP, int, error) {
+ 			return nil, 0, err
+ 		}
+ 		host := string(b[:len(b)-2])
+-		ips, err := net.LookupIP(host)
++		ctx, cancel := context.WithDeadline(context.Background(), deadline)
++		defer cancel()
++		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+ 		if err != nil || len(ips) == 0 {
+ 			return nil, 0, fmt.Errorf("socks5: relay host %q: %v", host, err)
+ 		}
+@@ -192,15 +206,22 @@ func readSocksAddr(r io.Reader, atyp byte) (net.IP, int, error) {
+ 
+ func (c *socks5UDPConn) Read(b []byte) (int, error) {
+ 	buf := make([]byte, 65535)
+-	n, err := c.udpConn.Read(buf)
+-	if err != nil {
+-		return 0, err
+-	}
+-	skip, err := socksHeaderLen(buf[:n])
+-	if err != nil {
+-		return 0, err
++	for {
++		n, err := c.udpConn.Read(buf)
++		if err != nil {
++			return 0, err
++		}
++		skip, err := socksHeaderLen(buf[:n])
++		if err != nil {
++			return 0, err
++		}
++		// A fragment (FRAG != 0) is dropped: nothing here reassembles them
++		// (RFC 1928, 7).
++		if buf[2] != 0 {
++			continue
++		}
++		return copy(b, buf[skip:n]), nil
+ 	}
+-	return copy(b, buf[skip:n]), nil
+ }
+ 
+ // socksHeaderLen returns how many bytes of a relayed datagram are header.
+diff --git a/tunnel/socks5_udp_fake_test.go b/tunnel/socks5_udp_fake_test.go
+index d5161cc..f911010 100644
+--- a/tunnel/socks5_udp_fake_test.go
++++ b/tunnel/socks5_udp_fake_test.go
+@@ -10,10 +10,12 @@ import (
+ 	"golang.org/x/net/proxy"
+ )
+ 
+-// fakeSOCKS5UDP runs a minimal SOCKS5 server with UDP ASSOCIATE: it echoes
+-// every relayed datagram back, stripping nothing, so a round trip proves the
+-// header is written and parsed the way RFC 1928 says.
+-func fakeSOCKS5UDP(t *testing.T, want *proxy.Auth) string {
++// fakeSOCKS5UDP runs a minimal SOCKS5 server with UDP ASSOCIATE. It answers
++// a datagram for 1.1.1.1:53 alone, with a header of its own and the payload,
++// after a fragment the client must drop, so a round trip proves the header is
++// written and parsed the way RFC 1928 says. wildcard: the relay is announced
++// as 0.0.0.0, on the proxy's own address.
++func fakeSOCKS5UDP(t *testing.T, want *proxy.Auth, wildcard bool) string {
+ 	t.Helper()
+ 	ln, err := net.Listen("tcp", "127.0.0.1:0")
+ 	if err != nil {
+@@ -74,19 +76,31 @@ func fakeSOCKS5UDP(t *testing.T, want *proxy.Auth) string {
+ 				defer u.Close()
+ 				addr := u.LocalAddr().(*net.UDPAddr)
+ 				reply := []byte{0x05, 0x00, 0x00, 0x01}
+-				reply = append(reply, addr.IP.To4()...)
++				if wildcard {
++					reply = append(reply, 0, 0, 0, 0)
++				} else {
++					reply = append(reply, addr.IP.To4()...)
++				}
+ 				reply = binary.BigEndian.AppendUint16(reply, uint16(addr.Port))
+ 				if _, err := c.Write(reply); err != nil {
+ 					return
+ 				}
++				want := []byte{0, 0, 0, 0x01, 1, 1, 1, 1, 0, 53}
+ 				buf := make([]byte, 2048)
+ 				for {
+ 					n, from, err := u.ReadFromUDP(buf)
+ 					if err != nil {
+ 						return
+ 					}
+-					if _, err := u.WriteToUDP(buf[:n], from); err != nil {
+-						return
++					if n < len(want) || string(buf[:len(want)]) != string(want) {
++						continue
++					}
++					frag := []byte{0, 0, 1, 0x01, 1, 1, 1, 1, 0, 53, 'x'}
++					answer := append([]byte{0, 0, 0, 0x01, 1, 1, 1, 1, 0, 53}, buf[len(want):n]...)
++					for _, d := range [][]byte{frag, answer} {
++						if _, err := u.WriteToUDP(d, from); err != nil {
++							return
++						}
+ 					}
+ 				}
+ 			}(c)
+@@ -117,15 +131,22 @@ func roundTrip(t *testing.T, proxyAddr string, auth *proxy.Auth) {
+ 	}
+ }
+ 
+-func TestSOCKS5UDPNoAuth(t *testing.T) { roundTrip(t, fakeSOCKS5UDP(t, nil), nil) }
++func TestSOCKS5UDPNoAuth(t *testing.T) { roundTrip(t, fakeSOCKS5UDP(t, nil, false), nil) }
+ 
+ func TestSOCKS5UDPWithAuth(t *testing.T) {
+ 	auth := &proxy.Auth{User: "u", Password: "p"}
+-	roundTrip(t, fakeSOCKS5UDP(t, auth), auth)
++	roundTrip(t, fakeSOCKS5UDP(t, auth, false), auth)
++}
++
++// A proxy given by name that announces a wildcard relay: the relay is on the
++// address the name reached.
++func TestSOCKS5UDPWildcardRelayOfANamedProxy(t *testing.T) {
++	_, port, _ := net.SplitHostPort(fakeSOCKS5UDP(t, nil, true))
++	roundTrip(t, net.JoinHostPort("localhost", port), nil)
+ }
+ 
+ func TestSOCKS5UDPWrongAuthFails(t *testing.T) {
+-	addr := fakeSOCKS5UDP(t, &proxy.Auth{User: "u", Password: "p"})
++	addr := fakeSOCKS5UDP(t, &proxy.Auth{User: "u", Password: "p"}, false)
+ 	if _, err := dialSOCKS5UDP(addr, &proxy.Auth{User: "u", Password: "x"}, "1.1.1.1:53"); err == nil {
+ 		t.Fatal("a wrong password was accepted")
+ 	}
+diff --git a/tunnel/tunnel.go b/tunnel/tunnel.go
+index 013deb2..e163521 100644
+--- a/tunnel/tunnel.go
++++ b/tunnel/tunnel.go
+@@ -253,16 +253,18 @@ func (t *TCPTunnel) handleExitUDP(r *udp.ForwarderRequest) bool {
+ 	}
+ 	local := gonet.NewUDPConn(&wq, ep)
+ 	noteUDPBypassesUpstream()
+-	remote, err := dialExitUDP(dest)
+-	if err != nil {
+-		utils.Debugf("[EXIT] UDP dial %s failed: %v", dest, err)
+-		local.Close()
+-		t.udpFlows.Add(-1)
+-		return true
+-	}
+ 
++	// The dial runs in the flow's goroutine: through an upstream proxy it is
++	// a SOCKS5 handshake, which must not hold up gVisor's forwarder, and so
++	// every other flow, while the proxy is slow to answer.
+ 	utils.SafeGo("exit.udp-flow", func() {
+ 		defer t.udpFlows.Add(-1)
++		remote, err := dialExitUDP(dest)
++		if err != nil {
++			utils.Debugf("[EXIT] UDP dial %s failed: %v", dest, err)
++			local.Close()
++			return
++		}
+ 		refresh := func() {
+ 			deadline := time.Now().Add(udpIdleTimeout)
+ 			_ = local.SetReadDeadline(deadline)
+diff --git a/tunnel/upstream.go b/tunnel/upstream.go
+index 87088e1..180cc5e 100644
+--- a/tunnel/upstream.go
++++ b/tunnel/upstream.go
+@@ -121,7 +121,7 @@ func noteUDPBypassesUpstream() {
+ 	}
+ 	udpBypassNote.Do(func() {
+ 		if ExitUpstream() != "" {
+-			utils.Infof("[EXIT] UDP is routed via upstream SOCKS5 UDP relay (UDP ASSOCIATE)")
++			utils.Infof("[EXIT] UDP goes to the upstream proxy's UDP relay (SOCKS5 UDP ASSOCIATE), and is dropped where the proxy refuses it")
+ 			return
+ 		}
+ 		utils.Infof("[EXIT] UDP is not sent through --upstream-proxy; it leaves this host directly")

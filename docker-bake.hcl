@@ -48,7 +48,7 @@ variable "DESCRIPTIONS" {
     "caddy-acmedns"     = "Upstream's Caddy with the acme-dns DNS module, for certificates, wildcards included, through a DNS-01 check delegated by one CNAME."
     "caddy-l4"          = "Upstream's Caddy with the layer4 module, to pass chosen TLS server names through untouched while the HTTP app serves the rest."
     "proxy-warm"        = "A SOCKS5 front for upstream proxies that keeps connections to them open and logged in, so a new connection's data leaves at once, not four round trips to the proxy later."
-    "openflux"          = "OpenFlux's core, a tunnel over services a network still lets through, built from a release tag's source as uid 65532: its exit's UDP leaves through its upstream proxy or not at all."
+    "openflux"          = "OpenFlux's core, a tunnel over services a network still lets through, built from a release tag's source as uid 65532: an exit given an upstream proxy sends its UDP through it or not at all."
   }
 }
 
@@ -611,9 +611,10 @@ target "proxy-warm" {
 # (.github/renovate.json): the commit the tag names moves with the version,
 # patches go once a release carries them, and the apps the exits serve must
 # speak the new core. The nightly-* prereleases are not versions, and the
-# pattern skips them. The commit, by hand:
+# pattern skips them. The commit, here and in the Dockerfile's default, by
+# hand: the ^{} line's for an annotated tag, else the tag's own line.
 #
-#   git ls-remote https://github.com/p1neappleXpress/OpenFlux.git 'refs/tags/v<version>^{}'
+#   git ls-remote https://github.com/p1neappleXpress/OpenFlux.git 'refs/tags/v<version>*'
 # renovate: datasource=github-releases depName=p1neappleXpress/OpenFlux extractVersion=^v(?<version>\d+\.\d+\.\d+)$
 variable "OPENFLUX_VERSION" {
   default = "0.17.1"

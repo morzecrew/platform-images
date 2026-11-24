@@ -13,8 +13,10 @@
 # once a release carries it, and the apps the exits serve must speak it.
 # renovate: datasource=github-releases depName=p1neappleXpress/OpenFlux extractVersion=^v(?<version>\d+\.\d+\.\d+)$
 ARG OPENFLUX_VERSION=0.17.1
-# The commit the tag names. Upstream has force-pushed before, so the build
-# refuses a tag that has moved: `git ls-remote <repo> 'refs/tags/v<version>^{}'`.
+# The commit the tag names, here and in docker-bake.hcl. Upstream has
+# force-pushed before, so the build refuses a tag that has moved. By hand:
+# `git ls-remote <repo> 'refs/tags/v<version>*'`, the ^{} line's commit for
+# an annotated tag, else the tag's own line.
 ARG OPENFLUX_COMMIT=f492a1a33b7581ad8f88118f97e0b866adda3cdc
 # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
 ARG GO_VERSION=1.27.4

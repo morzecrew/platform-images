@@ -26,7 +26,7 @@ them.
 
 ### An exit behind a SOCKS5 upstream
 
-The exit sends every connection it opens through the proxy: TCP with CONNECT, and UDP with UDP ASSOCIATE.
+Given `--upstream-proxy`, the exit sends every connection it opens through the proxy: TCP with CONNECT, and UDP with UDP ASSOCIATE.
 If the proxy refuses UDP ASSOCIATE, as a TCP-only proxy does, the exit drops that UDP. Nothing goes around
 the proxy. Only the carrier's own connections leave directly.
 
@@ -43,9 +43,12 @@ Type = <transport>
 URL = <the carrier's link>
 ```
 
+The key file must be readable by uid 65532.
+
 ```sh
 docker run -d --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
-  -v /etc/openflux:/etc/openflux:ro -v openflux:/var/lib/openflux \
+  -v /etc/openflux:/etc/openflux:ro -v /etc/openflux/key:/run/secrets/openflux_key:ro \
+  -v openflux:/var/lib/openflux \
   ghcr.io/morzecrew/openflux:0.17.1 --config /etc/openflux/exit.conf --upstream-proxy=gate:1080
 ```
 
@@ -63,11 +66,13 @@ echo '{"name":"phone","negotiate":true,"secret":"<key>","transports":[{"type":"<
 
 ## Patches
 
-Changes that no release carries yet. Each is dropped once a release carries it.
+Changes that no release carries yet, applied in the order of their names. Each is dropped once a release
+carries it.
 
 | Patch | What | From |
 | --- | --- | --- |
-| [`exit-udp-socks5.patch`](patches/exit-udp-socks5.patch) | The `l4` exit's UDP through `--upstream-proxy` with SOCKS5 UDP ASSOCIATE, refused where the proxy refuses it. Without it, UDP leaves the exit directly. | [OpenFluxTeam/OpenFlux#12](https://github.com/OpenFluxTeam/OpenFlux/pull/12) (merged there), [#13](https://github.com/OpenFluxTeam/OpenFlux/pull/13) |
+| [`01-exit-udp-socks5.patch`](patches/01-exit-udp-socks5.patch) | The `l4` exit's UDP through `--upstream-proxy` with SOCKS5 UDP ASSOCIATE, refused where the proxy refuses it. Without it, UDP leaves the exit directly. | [OpenFluxTeam/OpenFlux#12](https://github.com/OpenFluxTeam/OpenFlux/pull/12) (merged there), [#13](https://github.com/OpenFluxTeam/OpenFlux/pull/13) |
+| [`02-exit-udp-socks5-hardening.patch`](patches/02-exit-udp-socks5-hardening.patch) | On top of it, from this repository's review:<ul><li>the handshake runs off gVisor's forwarder;</li><li>a wildcard relay is taken on a named proxy's address (`gate:1080`);</li><li>the flow ends with its control connection;</li><li>fragments are dropped;</li><li>the tests check what they are sent.</li></ul> | here |
 
 ## Environment
 
@@ -80,8 +85,9 @@ neither.
 Tagged with OpenFlux's version, from its GitHub releases. The `nightly-*` prereleases are skipped. A new
 release is moved by hand, and Renovate's pull request never merges on its own:
 
-- `OPENFLUX_COMMIT` in [`docker-bake.hcl`](../../docker-bake.hcl) moves with the version: `git ls-remote
-  https://github.com/p1neappleXpress/OpenFlux.git 'refs/tags/v<version>^{}'`;
+- `OPENFLUX_COMMIT` moves with the version, in [`docker-bake.hcl`](../../docker-bake.hcl) and as the
+  Dockerfile's default: `git ls-remote https://github.com/p1neappleXpress/OpenFlux.git 'refs/tags/v<version>*'`,
+  the `^{}` line's commit for an annotated tag, else the tag's own;
 - each patch that release carries is dropped;
 - the apps that the exits serve must speak the new core, because a key derivation change has broken
   handshakes between versions before.
