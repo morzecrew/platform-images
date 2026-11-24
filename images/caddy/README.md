@@ -217,7 +217,7 @@ Every request passes [OWASP CRS](https://coreruleset.org/) at CRS's defaults: pa
 curl -s -o /dev/null -w '%{http_code}\n' "http://localhost:8080/x?id=1'%20OR%20'1'='1"   # 403
 ```
 
-`PUT`, `PATCH` and `DELETE` are allowed along with CRS's own `GET HEAD POST OPTIONS`; any other method gets `403` (rule 911100).
+`PUT`, `PATCH` and `DELETE` are allowed along with CRS's own `GET HEAD POST OPTIONS`; any other method gets `403` (rule 911100). An `overrides/` file that sets `tx.allowed_methods` or `tx.allowed_http_versions` wraps each entry in pipes, `|GET| |PUT|` and `|HTTP/1.1| |HTTP/2|`: since CRS 4.31 a space-separated list gets every request `403`.
 
 **Upgrading.** Images built before [#69](https://github.com/morzecrew/platform-images/pull/69) (2026-10-18) did not load the CRS rules (their include named a directory that did not exist), so only `coraza.conf`'s own rules ran. An application moving to a newer tag meets CRS for the first time and should look for false positives in its own traffic, JSON bodies above all. The first images with CRS, built before [#77](https://github.com/morzecrew/platform-images/pull/77) (2026-10-20), also refused every `PUT`, `PATCH` and `DELETE`.
 
