@@ -48,6 +48,7 @@ variable "DESCRIPTIONS" {
     "caddy-acmedns"     = "Upstream's Caddy with the acme-dns DNS module, for certificates, wildcards included, through a DNS-01 check delegated by one CNAME."
     "caddy-l4"          = "Upstream's Caddy with the layer4 module, to pass chosen TLS server names through untouched while the HTTP app serves the rest."
     "proxy-warm"        = "A SOCKS5 front for upstream proxies that keeps connections to them open and logged in, so a new connection's data leaves at once, not four round trips to the proxy later."
+    "openflux"          = "OpenFlux's core, a tunnel over services a network still lets through, built from a release tag's source as uid 65532: its exit's UDP leaves through its upstream proxy or not at all."
   }
 }
 
@@ -606,10 +607,40 @@ target "proxy-warm" {
 
 # ....................... #
 
+# OpenFlux's releases (images/openflux/README.md), never automerged
+# (.github/renovate.json): the commit the tag names moves with the version,
+# patches go once a release carries them, and the apps the exits serve must
+# speak the new core. The nightly-* prereleases are not versions, and the
+# pattern skips them. The commit, by hand:
+#
+#   git ls-remote https://github.com/p1neappleXpress/OpenFlux.git 'refs/tags/v<version>^{}'
+# renovate: datasource=github-releases depName=p1neappleXpress/OpenFlux extractVersion=^v(?<version>\d+\.\d+\.\d+)$
+variable "OPENFLUX_VERSION" {
+  default = "0.17.1"
+}
+
+target "openflux" {
+  inherits   = ["_attested"]
+  context    = "./images/openflux"
+  dockerfile = "Dockerfile"
+  tags       = tag("openflux", OPENFLUX_VERSION)
+  # OpenFlux is GPL-3.0-or-later, not this repository's MIT.
+  labels     = merge(label("openflux", OPENFLUX_VERSION), { "org.opencontainers.image.licenses" = "GPL-3.0-or-later" })
+  args = {
+    OPENFLUX_VERSION = OPENFLUX_VERSION
+    OPENFLUX_COMMIT  = "f492a1a33b7581ad8f88118f97e0b866adda3cdc"
+    # renovate: datasource=docker depName=golang extractVersion=^(?<version>\d+\.\d+\.\d+)-alpine$
+    GO_VERSION       = "1.27.4"
+    ALPINE_VERSION   = ALPINE_VERSION
+  }
+}
+
+# ....................... #
+
 group "default" {
   targets = [
     "flyway", "caddy", "postgres", "postgres-pgvector", "postgres-cron",
     "uv-builder", "npm-builder", "python-distroless", "valkey", "rustfs", "pgbouncer",
-    "xray", "mihomo", "openvpn", "caddy-acmedns", "caddy-l4", "proxy-warm",
+    "xray", "mihomo", "openvpn", "caddy-acmedns", "caddy-l4", "proxy-warm", "openflux",
   ]
 }
