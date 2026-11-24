@@ -1,0 +1,778 @@
+From c8f74a5bd0f0d6ab46bc383f59bc7c97d3fd570a Mon Sep 17 00:00:00 2001
+From: elizqmill <277845373+elizqmill@users.noreply.github.com>
+Date: Thu, 29 Oct 2026 20:41:53 +0300
+Subject: [PATCH 1/2] feat(exit): route L4 UDP through upstream SOCKS5 relay
+ (UDP ASSOCIATE) with strict fail-closed kill-switch
+
+---
+ main.go                   |   3 +
+ tunnel/socks5_udp.go      | 133 ++++++++++++++++++++++++++++++++++++++
+ tunnel/socks5_udp_test.go |  36 +++++++++++
+ tunnel/tunnel.go          |   2 +-
+ tunnel/upstream.go        |  16 ++++-
+ 5 files changed, 188 insertions(+), 2 deletions(-)
+ create mode 100644 tunnel/socks5_udp.go
+ create mode 100644 tunnel/socks5_udp_test.go
+
+diff --git a/main.go b/main.go
+index 2eb9e01..a413edc 100644
+--- a/main.go
++++ b/main.go
+@@ -688,6 +688,9 @@ DEPRECATED (removed in v2)
+ 			*inbound = inboundSOCKS5
+ 		}
+ 	}
++	if *upstreamProxy == "" && os.Getenv("OPENFLUX_EXIT_SOCKS5") != "" {
++		*upstreamProxy = os.Getenv("OPENFLUX_EXIT_SOCKS5")
++	}
+ 	if *mode == "" {
+ 		*mode = "l3"
+ 		// Only the l4 exit dials its own connections, so only it can use
+diff --git a/tunnel/socks5_udp.go b/tunnel/socks5_udp.go
+new file mode 100644
+index 0000000..0b53794
+--- /dev/null
++++ b/tunnel/socks5_udp.go
+@@ -0,0 +1,133 @@
++package tunnel
++
++import (
++	"encoding/binary"
++	"fmt"
++	"io"
++	"net"
++	"strconv"
++	"time"
++)
++
++type socks5UDPConn struct {
++	tcpControl net.Conn
++	udpConn    *net.UDPConn
++	header     []byte
++}
++
++func dialSOCKS5UDP(socksAddr, dest string) (net.Conn, error) {
++	dHost, dPortStr, err := net.SplitHostPort(dest)
++	if err != nil {
++		return nil, err
++	}
++	dPort, err := strconv.Atoi(dPortStr)
++	if err != nil {
++		return nil, err
++	}
++	dip := net.ParseIP(dHost).To4()
++	if dip == nil {
++		return nil, fmt.Errorf("only IPv4 supported for UDP")
++	}
++
++	tcpConn, err := net.DialTimeout("tcp", socksAddr, 10*time.Second)
++	if err != nil {
++		return nil, err
++	}
++
++	// SOCKS5 auth: no auth
++	if _, err := tcpConn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
++		tcpConn.Close()
++		return nil, err
++	}
++	authResp := make([]byte, 2)
++	if _, err := io.ReadFull(tcpConn, authResp); err != nil || authResp[0] != 0x05 || authResp[1] != 0x00 {
++		tcpConn.Close()
++		return nil, fmt.Errorf("socks5 auth failed: %v", authResp)
++	}
++
++	// UDP ASSOCIATE
++	if _, err := tcpConn.Write([]byte{0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
++		tcpConn.Close()
++		return nil, err
++	}
++	resp := make([]byte, 10)
++	if _, err := io.ReadFull(tcpConn, resp); err != nil || resp[1] != 0x00 {
++		tcpConn.Close()
++		return nil, fmt.Errorf("udp associate failed, resp: %v", resp)
++	}
++
++	sHost, _, _ := net.SplitHostPort(socksAddr)
++	relayIP := net.IP(resp[4:8])
++	if relayIP.IsUnspecified() || relayIP.String() == "0.0.0.0" {
++		relayIP = net.ParseIP(sHost)
++	}
++	relayPort := binary.BigEndian.Uint16(resp[8:10])
++	relayAddr := &net.UDPAddr{IP: relayIP, Port: int(relayPort)}
++
++	uConn, err := net.DialUDP("udp", nil, relayAddr)
++	if err != nil {
++		tcpConn.Close()
++		return nil, err
++	}
++
++	hdr := make([]byte, 10)
++	hdr[0] = 0 // RSV
++	hdr[1] = 0 // RSV
++	hdr[2] = 0 // FRAG
++	hdr[3] = 1 // ATYP IPv4
++	copy(hdr[4:8], dip)
++	binary.BigEndian.PutUint16(hdr[8:10], uint16(dPort))
++
++	return &socks5UDPConn{
++		tcpControl: tcpConn,
++		udpConn:    uConn,
++		header:     hdr,
++	}, nil
++}
++
++func (c *socks5UDPConn) Read(b []byte) (int, error) {
++	buf := make([]byte, 65535)
++	n, err := c.udpConn.Read(buf)
++	if err != nil {
++		return 0, err
++	}
++	if n < 10 {
++		return 0, fmt.Errorf("socks5 udp packet too short")
++	}
++	atyp := buf[3]
++	headerLen := 10
++	if atyp == 3 {
++		domainLen := int(buf[4])
++		headerLen = 5 + domainLen + 2
++	} else if atyp == 4 {
++		headerLen = 22
++	}
++	if n < headerLen {
++		return 0, fmt.Errorf("socks5 udp packet too short for header")
++	}
++	payload := buf[headerLen:n]
++	copied := copy(b, payload)
++	return copied, nil
++}
++
++func (c *socks5UDPConn) Write(b []byte) (int, error) {
++	pkt := make([]byte, len(c.header)+len(b))
++	copy(pkt, c.header)
++	copy(pkt[len(c.header):], b)
++	_, err := c.udpConn.Write(pkt)
++	if err != nil {
++		return 0, err
++	}
++	return len(b), nil
++}
++
++func (c *socks5UDPConn) Close() error {
++	_ = c.tcpControl.Close()
++	return c.udpConn.Close()
++}
++
++func (c *socks5UDPConn) LocalAddr() net.Addr                { return c.udpConn.LocalAddr() }
++func (c *socks5UDPConn) RemoteAddr() net.Addr               { return c.udpConn.RemoteAddr() }
++func (c *socks5UDPConn) SetDeadline(t time.Time) error      { return c.udpConn.SetDeadline(t) }
++func (c *socks5UDPConn) SetReadDeadline(t time.Time) error  { return c.udpConn.SetReadDeadline(t) }
++func (c *socks5UDPConn) SetWriteDeadline(t time.Time) error { return c.udpConn.SetWriteDeadline(t) }
+diff --git a/tunnel/socks5_udp_test.go b/tunnel/socks5_udp_test.go
+new file mode 100644
+index 0000000..73dd328
+--- /dev/null
++++ b/tunnel/socks5_udp_test.go
+@@ -0,0 +1,36 @@
++package tunnel
++
++import (
++	"testing"
++	"time"
++)
++
++func TestSOCKS5UDPUnit(t *testing.T) {
++	conn, err := dialSOCKS5UDP("127.0.0.1:40001", "1.1.1.1:53")
++	if err != nil {
++		t.Skipf("No local SOCKS5 proxy on 40001: %v", err)
++		return
++	}
++	defer conn.Close()
++
++	// DNS query for cloudflare.com
++	dnsQuery := []byte{
++		0x12, 0x34, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
++		0x0a, 'c', 'l', 'o', 'u', 'd', 'f', 'l', 'a', 'r', 'e', 0x03, 'c', 'o', 'm', 0x00,
++		0x00, 0x01, 0x00, 0x01,
++	}
++
++	conn.SetDeadline(time.Now().Add(5 * time.Second))
++	if _, err := conn.Write(dnsQuery); err != nil {
++		t.Fatalf("Write failed: %v", err)
++	}
++
++	resp := make([]byte, 512)
++	n, err := conn.Read(resp)
++	if err != nil {
++		t.Fatalf("Read failed: %v", err)
++	}
++	if n < 12 || resp[0] != 0x12 || resp[1] != 0x34 {
++		t.Fatalf("Unexpected DNS response: %x", resp[:n])
++	}
++}
+diff --git a/tunnel/tunnel.go b/tunnel/tunnel.go
+index f4f0561..013deb2 100644
+--- a/tunnel/tunnel.go
++++ b/tunnel/tunnel.go
+@@ -253,7 +253,7 @@ func (t *TCPTunnel) handleExitUDP(r *udp.ForwarderRequest) bool {
+ 	}
+ 	local := gonet.NewUDPConn(&wq, ep)
+ 	noteUDPBypassesUpstream()
+-	remote, err := net.DialTimeout("udp", dest, 10*time.Second)
++	remote, err := dialExitUDP(dest)
+ 	if err != nil {
+ 		utils.Debugf("[EXIT] UDP dial %s failed: %v", dest, err)
+ 		local.Close()
+diff --git a/tunnel/upstream.go b/tunnel/upstream.go
+index 238ce09..1f1a03e 100644
+--- a/tunnel/upstream.go
++++ b/tunnel/upstream.go
+@@ -5,6 +5,7 @@ import (
+ 	"fmt"
+ 	"net"
+ 	"net/url"
++	"os"
+ 	"strings"
+ 	"sync"
+ 	"sync/atomic"
+@@ -95,9 +96,22 @@ func dialExitTCP(dest string) (net.Conn, error) {
+ 		defer cancel()
+ 		return u.d.DialContext(ctx, "tcp", dest)
+ 	}
++	if os.Getenv("OPENFLUX_STRICT_PROXY") == "1" || os.Getenv("OPENFLUX_EXIT_SOCKS5") != "" {
++		return nil, fmt.Errorf("kill-switch: upstream SOCKS5 required but not configured or failed")
++	}
+ 	return net.DialTimeout("tcp", dest, 10*time.Second)
+ }
+ 
++func dialExitUDP(dest string) (net.Conn, error) {
++	if u := exitUpstream.Load(); u != nil {
++		return dialSOCKS5UDP(u.addr, dest)
++	}
++	if os.Getenv("OPENFLUX_STRICT_PROXY") == "1" || os.Getenv("OPENFLUX_EXIT_SOCKS5") != "" {
++		return nil, fmt.Errorf("kill-switch: upstream SOCKS5 required for UDP but not configured or failed")
++	}
++	return net.DialTimeout("udp", dest, 10*time.Second)
++}
++
+ var udpBypassNote sync.Once
+ 
+ func noteUDPBypassesUpstream() {
+@@ -105,6 +119,6 @@ func noteUDPBypassesUpstream() {
+ 		return
+ 	}
+ 	udpBypassNote.Do(func() {
+-		utils.Infof("[EXIT] UDP is not sent through --upstream-proxy; it leaves this host directly")
++		utils.Infof("[EXIT] UDP is routed via upstream SOCKS5 UDP relay (UDP ASSOCIATE)")
+ 	})
+ }
+-- 
+2.55.0
+
+
+From 852da274f6fb8875e33c290bfbf426d5f94a5f10 Mon Sep 17 00:00:00 2001
+From: p1neappleXpress <p1ne@openflux.local>
+Date: Sat, 31 Oct 2026 09:50:58 +0100
+Subject: [PATCH 2/2] fix(exit): SOCKS5 UDP with credentials, IPv6/domain
+ relays and a real test
+
+- carry proxy user/password into UDP ASSOCIATE (RFC 1929), so exits with
+  --upstream-proxy socks5://user:pass@host keep UDP working;
+- parse the associate reply by ATYP (IPv4/IPv6/domain) instead of assuming 10 bytes;
+- encode the destination as IPv4/IPv6/domain, not IPv4 only;
+- deadline the SOCKS handshake so a stalled proxy cannot hang a UDP flow;
+- say in the log whether UDP really goes through the relay or leaves directly;
+- replace the skip-unless-a-proxy-exists test with an in-process fake SOCKS5
+  server covering no-auth, auth and a wrong password.
+---
+ tunnel/socks5_udp.go           | 225 +++++++++++++++++++++++++--------
+ tunnel/socks5_udp_fake_test.go | 132 +++++++++++++++++++
+ tunnel/socks5_udp_test.go      |   2 +-
+ tunnel/upstream.go             |  11 +-
+ 4 files changed, 312 insertions(+), 58 deletions(-)
+ create mode 100644 tunnel/socks5_udp_fake_test.go
+
+diff --git a/tunnel/socks5_udp.go b/tunnel/socks5_udp.go
+index 0b53794..44d3471 100644
+--- a/tunnel/socks5_udp.go
++++ b/tunnel/socks5_udp.go
+@@ -7,15 +7,47 @@ import (
+ 	"net"
+ 	"strconv"
+ 	"time"
++
++	"golang.org/x/net/proxy"
+ )
+ 
++// socks5UDPConn is one SOCKS5 UDP association: the TCP control connection that
++// keeps the relay alive, and the UDP socket that carries datagrams with the
++// RFC 1928 header of one fixed destination.
+ type socks5UDPConn struct {
+ 	tcpControl net.Conn
+ 	udpConn    *net.UDPConn
+ 	header     []byte
+ }
+ 
+-func dialSOCKS5UDP(socksAddr, dest string) (net.Conn, error) {
++// socksAddr encodes host:port as the ATYP, address and port fields of a SOCKS5
++// request: IPv4, IPv6 or a domain name (the relay resolves the last one).
++func socksAddr(host string, port int) ([]byte, error) {
++	if ip := net.ParseIP(host); ip != nil {
++		if ip4 := ip.To4(); ip4 != nil {
++			out := make([]byte, 1+4+2)
++			out[0] = 0x01
++			copy(out[1:5], ip4)
++			binary.BigEndian.PutUint16(out[5:7], uint16(port))
++			return out, nil
++		}
++		out := make([]byte, 1+16+2)
++		out[0] = 0x04
++		copy(out[1:17], ip.To16())
++		binary.BigEndian.PutUint16(out[17:19], uint16(port))
++		return out, nil
++	}
++	if len(host) == 0 || len(host) > 255 {
++		return nil, fmt.Errorf("socks5 udp: bad destination host %q", host)
++	}
++	out := make([]byte, 0, 1+1+len(host)+2)
++	out = append(out, 0x03, byte(len(host)))
++	out = append(out, host...)
++	out = binary.BigEndian.AppendUint16(out, uint16(port))
++	return out, nil
++}
++
++func dialSOCKS5UDP(proxyAddr string, auth *proxy.Auth, dest string) (net.Conn, error) {
+ 	dHost, dPortStr, err := net.SplitHostPort(dest)
+ 	if err != nil {
+ 		return nil, err
+@@ -24,65 +56,138 @@ func dialSOCKS5UDP(socksAddr, dest string) (net.Conn, error) {
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	dip := net.ParseIP(dHost).To4()
+-	if dip == nil {
+-		return nil, fmt.Errorf("only IPv4 supported for UDP")
++	dst, err := socksAddr(dHost, dPort)
++	if err != nil {
++		return nil, err
+ 	}
+ 
+-	tcpConn, err := net.DialTimeout("tcp", socksAddr, 10*time.Second)
++	tcpConn, err := net.DialTimeout("tcp", proxyAddr, 10*time.Second)
+ 	if err != nil {
+ 		return nil, err
+ 	}
++	closeTCP := func() { _ = tcpConn.Close() }
++	// The handshake must not hang a UDP flow if the proxy stalls.
++	if err := tcpConn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
++		closeTCP()
++		return nil, err
++	}
+ 
+-	// SOCKS5 auth: no auth
+-	if _, err := tcpConn.Write([]byte{0x05, 0x01, 0x00}); err != nil {
+-		tcpConn.Close()
++	// Greeting: no-auth, plus user/password when the proxy was configured with them.
++	methods := []byte{0x00}
++	if auth != nil {
++		methods = []byte{0x00, 0x02}
++	}
++	if _, err := tcpConn.Write(append([]byte{0x05, byte(len(methods))}, methods...)); err != nil {
++		closeTCP()
+ 		return nil, err
+ 	}
+-	authResp := make([]byte, 2)
+-	if _, err := io.ReadFull(tcpConn, authResp); err != nil || authResp[0] != 0x05 || authResp[1] != 0x00 {
+-		tcpConn.Close()
+-		return nil, fmt.Errorf("socks5 auth failed: %v", authResp)
++	sel := make([]byte, 2)
++	if _, err := io.ReadFull(tcpConn, sel); err != nil || sel[0] != 0x05 {
++		closeTCP()
++		return nil, fmt.Errorf("socks5 auth: %v", err)
++	}
++	switch sel[1] {
++	case 0x00:
++	case 0x02:
++		if auth == nil {
++			closeTCP()
++			return nil, fmt.Errorf("socks5: proxy wants user/password, none configured")
++		}
++		user, pass := []byte(auth.User), []byte(auth.Password)
++		if len(user) > 255 || len(pass) > 255 {
++			closeTCP()
++			return nil, fmt.Errorf("socks5: credentials too long")
++		}
++		req := append([]byte{0x01, byte(len(user))}, user...)
++		req = append(req, byte(len(pass)))
++		req = append(req, pass...)
++		if _, err := tcpConn.Write(req); err != nil {
++			closeTCP()
++			return nil, err
++		}
++		rr := make([]byte, 2)
++		if _, err := io.ReadFull(tcpConn, rr); err != nil || rr[1] != 0x00 {
++			closeTCP()
++			return nil, fmt.Errorf("socks5: user/password rejected (%v)", rr)
++		}
++	default:
++		closeTCP()
++		return nil, fmt.Errorf("socks5: no acceptable auth method (server chose %#x)", sel[1])
+ 	}
+ 
+-	// UDP ASSOCIATE
++	// UDP ASSOCIATE: the relay address comes back in the reply, whatever its ATYP.
+ 	if _, err := tcpConn.Write([]byte{0x05, 0x03, 0x00, 0x01, 0, 0, 0, 0, 0, 0}); err != nil {
+-		tcpConn.Close()
++		closeTCP()
++		return nil, err
++	}
++	hdr := make([]byte, 4)
++	if _, err := io.ReadFull(tcpConn, hdr); err != nil {
++		closeTCP()
+ 		return nil, err
+ 	}
+-	resp := make([]byte, 10)
+-	if _, err := io.ReadFull(tcpConn, resp); err != nil || resp[1] != 0x00 {
+-		tcpConn.Close()
+-		return nil, fmt.Errorf("udp associate failed, resp: %v", resp)
++	if hdr[0] != 0x05 || hdr[1] != 0x00 {
++		closeTCP()
++		return nil, fmt.Errorf("socks5: udp associate failed (rep=%#x)", hdr[1])
+ 	}
+-
+-	sHost, _, _ := net.SplitHostPort(socksAddr)
+-	relayIP := net.IP(resp[4:8])
+-	if relayIP.IsUnspecified() || relayIP.String() == "0.0.0.0" {
++	relayIP, relayPort, err := readSocksAddr(tcpConn, hdr[3])
++	if err != nil {
++		closeTCP()
++		return nil, err
++	}
++	if relayIP == nil || relayIP.IsUnspecified() {
++		sHost, _, _ := net.SplitHostPort(proxyAddr)
+ 		relayIP = net.ParseIP(sHost)
++		if relayIP == nil {
++			closeTCP()
++			return nil, fmt.Errorf("socks5: relay address unusable")
++		}
+ 	}
+-	relayPort := binary.BigEndian.Uint16(resp[8:10])
+-	relayAddr := &net.UDPAddr{IP: relayIP, Port: int(relayPort)}
++	_ = tcpConn.SetDeadline(time.Time{})
+ 
+-	uConn, err := net.DialUDP("udp", nil, relayAddr)
++	uConn, err := net.DialUDP("udp", nil, &net.UDPAddr{IP: relayIP, Port: relayPort})
+ 	if err != nil {
+-		tcpConn.Close()
++		closeTCP()
+ 		return nil, err
+ 	}
+ 
+-	hdr := make([]byte, 10)
+-	hdr[0] = 0 // RSV
+-	hdr[1] = 0 // RSV
+-	hdr[2] = 0 // FRAG
+-	hdr[3] = 1 // ATYP IPv4
+-	copy(hdr[4:8], dip)
+-	binary.BigEndian.PutUint16(hdr[8:10], uint16(dPort))
++	header := make([]byte, 0, 3+len(dst))
++	header = append(header, 0, 0, 0) // RSV, RSV, FRAG
++	header = append(header, dst...)
++	return &socks5UDPConn{tcpControl: tcpConn, udpConn: uConn, header: header}, nil
++}
+ 
+-	return &socks5UDPConn{
+-		tcpControl: tcpConn,
+-		udpConn:    uConn,
+-		header:     hdr,
+-	}, nil
++// readSocksAddr reads the address that follows a 4-byte SOCKS5 reply header.
++func readSocksAddr(r io.Reader, atyp byte) (net.IP, int, error) {
++	switch atyp {
++	case 0x01:
++		b := make([]byte, 4+2)
++		if _, err := io.ReadFull(r, b); err != nil {
++			return nil, 0, err
++		}
++		return net.IP(b[:4]), int(binary.BigEndian.Uint16(b[4:6])), nil
++	case 0x04:
++		b := make([]byte, 16+2)
++		if _, err := io.ReadFull(r, b); err != nil {
++			return nil, 0, err
++		}
++		return net.IP(b[:16]), int(binary.BigEndian.Uint16(b[16:18])), nil
++	case 0x03:
++		l := make([]byte, 1)
++		if _, err := io.ReadFull(r, l); err != nil {
++			return nil, 0, err
++		}
++		b := make([]byte, int(l[0])+2)
++		if _, err := io.ReadFull(r, b); err != nil {
++			return nil, 0, err
++		}
++		host := string(b[:len(b)-2])
++		ips, err := net.LookupIP(host)
++		if err != nil || len(ips) == 0 {
++			return nil, 0, fmt.Errorf("socks5: relay host %q: %v", host, err)
++		}
++		return ips[0], int(binary.BigEndian.Uint16(b[len(b)-2:])), nil
++	}
++	return nil, 0, fmt.Errorf("socks5: unsupported reply ATYP %#x", atyp)
+ }
+ 
+ func (c *socks5UDPConn) Read(b []byte) (int, error) {
+@@ -91,31 +196,43 @@ func (c *socks5UDPConn) Read(b []byte) (int, error) {
+ 	if err != nil {
+ 		return 0, err
+ 	}
+-	if n < 10 {
+-		return 0, fmt.Errorf("socks5 udp packet too short")
++	skip, err := socksHeaderLen(buf[:n])
++	if err != nil {
++		return 0, err
+ 	}
+-	atyp := buf[3]
+-	headerLen := 10
+-	if atyp == 3 {
+-		domainLen := int(buf[4])
+-		headerLen = 5 + domainLen + 2
+-	} else if atyp == 4 {
+-		headerLen = 22
++	return copy(b, buf[skip:n]), nil
++}
++
++// socksHeaderLen returns how many bytes of a relayed datagram are header.
++func socksHeaderLen(b []byte) (int, error) {
++	if len(b) < 4 {
++		return 0, fmt.Errorf("socks5 udp: packet too short")
+ 	}
+-	if n < headerLen {
+-		return 0, fmt.Errorf("socks5 udp packet too short for header")
++	switch b[3] {
++	case 0x01:
++		if len(b) < 10 {
++			return 0, fmt.Errorf("socks5 udp: short ipv4 header")
++		}
++		return 10, nil
++	case 0x04:
++		if len(b) < 22 {
++			return 0, fmt.Errorf("socks5 udp: short ipv6 header")
++		}
++		return 22, nil
++	case 0x03:
++		if len(b) < 5 || len(b) < 5+int(b[4])+2 {
++			return 0, fmt.Errorf("socks5 udp: short domain header")
++		}
++		return 5 + int(b[4]) + 2, nil
+ 	}
+-	payload := buf[headerLen:n]
+-	copied := copy(b, payload)
+-	return copied, nil
++	return 0, fmt.Errorf("socks5 udp: unsupported ATYP %#x", b[3])
+ }
+ 
+ func (c *socks5UDPConn) Write(b []byte) (int, error) {
+ 	pkt := make([]byte, len(c.header)+len(b))
+ 	copy(pkt, c.header)
+ 	copy(pkt[len(c.header):], b)
+-	_, err := c.udpConn.Write(pkt)
+-	if err != nil {
++	if _, err := c.udpConn.Write(pkt); err != nil {
+ 		return 0, err
+ 	}
+ 	return len(b), nil
+diff --git a/tunnel/socks5_udp_fake_test.go b/tunnel/socks5_udp_fake_test.go
+new file mode 100644
+index 0000000..d5161cc
+--- /dev/null
++++ b/tunnel/socks5_udp_fake_test.go
+@@ -0,0 +1,132 @@
++package tunnel
++
++import (
++	"encoding/binary"
++	"io"
++	"net"
++	"testing"
++	"time"
++
++	"golang.org/x/net/proxy"
++)
++
++// fakeSOCKS5UDP runs a minimal SOCKS5 server with UDP ASSOCIATE: it echoes
++// every relayed datagram back, stripping nothing, so a round trip proves the
++// header is written and parsed the way RFC 1928 says.
++func fakeSOCKS5UDP(t *testing.T, want *proxy.Auth) string {
++	t.Helper()
++	ln, err := net.Listen("tcp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatal(err)
++	}
++	t.Cleanup(func() { _ = ln.Close() })
++
++	go func() {
++		for {
++			c, err := ln.Accept()
++			if err != nil {
++				return
++			}
++			go func(c net.Conn) {
++				defer c.Close()
++				greet := make([]byte, 2)
++				if _, err := io.ReadFull(c, greet); err != nil || greet[0] != 0x05 {
++					return
++				}
++				methods := make([]byte, greet[1])
++				if _, err := io.ReadFull(c, methods); err != nil {
++					return
++				}
++				if want != nil {
++					_, _ = c.Write([]byte{0x05, 0x02})
++					ver := make([]byte, 2)
++					if _, err := io.ReadFull(c, ver); err != nil || ver[0] != 0x01 {
++						return
++					}
++					u := make([]byte, int(ver[1]))
++					if _, err := io.ReadFull(c, u); err != nil {
++						return
++					}
++					pl := make([]byte, 1)
++					if _, err := io.ReadFull(c, pl); err != nil {
++						return
++					}
++					pw := make([]byte, int(pl[0]))
++					if _, err := io.ReadFull(c, pw); err != nil {
++						return
++					}
++					if string(u) != want.User || string(pw) != want.Password {
++						_, _ = c.Write([]byte{0x01, 0x01})
++						return
++					}
++					_, _ = c.Write([]byte{0x01, 0x00})
++				} else {
++					_, _ = c.Write([]byte{0x05, 0x00})
++				}
++				req := make([]byte, 10)
++				if _, err := io.ReadFull(c, req); err != nil || req[1] != 0x03 {
++					return
++				}
++				u, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
++				if err != nil {
++					return
++				}
++				defer u.Close()
++				addr := u.LocalAddr().(*net.UDPAddr)
++				reply := []byte{0x05, 0x00, 0x00, 0x01}
++				reply = append(reply, addr.IP.To4()...)
++				reply = binary.BigEndian.AppendUint16(reply, uint16(addr.Port))
++				if _, err := c.Write(reply); err != nil {
++					return
++				}
++				buf := make([]byte, 2048)
++				for {
++					n, from, err := u.ReadFromUDP(buf)
++					if err != nil {
++						return
++					}
++					if _, err := u.WriteToUDP(buf[:n], from); err != nil {
++						return
++					}
++				}
++			}(c)
++		}
++	}()
++	return ln.Addr().String()
++}
++
++func roundTrip(t *testing.T, proxyAddr string, auth *proxy.Auth) {
++	t.Helper()
++	conn, err := dialSOCKS5UDP(proxyAddr, auth, "1.1.1.1:53")
++	if err != nil {
++		t.Fatalf("dial: %v", err)
++	}
++	defer conn.Close()
++	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
++	msg := []byte("openflux-udp")
++	if _, err := conn.Write(msg); err != nil {
++		t.Fatalf("write: %v", err)
++	}
++	got := make([]byte, 256)
++	n, err := conn.Read(got)
++	if err != nil {
++		t.Fatalf("read: %v", err)
++	}
++	if string(got[:n]) != string(msg) {
++		t.Fatalf("echo mismatch: %q", got[:n])
++	}
++}
++
++func TestSOCKS5UDPNoAuth(t *testing.T) { roundTrip(t, fakeSOCKS5UDP(t, nil), nil) }
++
++func TestSOCKS5UDPWithAuth(t *testing.T) {
++	auth := &proxy.Auth{User: "u", Password: "p"}
++	roundTrip(t, fakeSOCKS5UDP(t, auth), auth)
++}
++
++func TestSOCKS5UDPWrongAuthFails(t *testing.T) {
++	addr := fakeSOCKS5UDP(t, &proxy.Auth{User: "u", Password: "p"})
++	if _, err := dialSOCKS5UDP(addr, &proxy.Auth{User: "u", Password: "x"}, "1.1.1.1:53"); err == nil {
++		t.Fatal("a wrong password was accepted")
++	}
++}
+diff --git a/tunnel/socks5_udp_test.go b/tunnel/socks5_udp_test.go
+index 73dd328..0b91f56 100644
+--- a/tunnel/socks5_udp_test.go
++++ b/tunnel/socks5_udp_test.go
+@@ -6,7 +6,7 @@ import (
+ )
+ 
+ func TestSOCKS5UDPUnit(t *testing.T) {
+-	conn, err := dialSOCKS5UDP("127.0.0.1:40001", "1.1.1.1:53")
++	conn, err := dialSOCKS5UDP("127.0.0.1:40001", nil, "1.1.1.1:53")
+ 	if err != nil {
+ 		t.Skipf("No local SOCKS5 proxy on 40001: %v", err)
+ 		return
+diff --git a/tunnel/upstream.go b/tunnel/upstream.go
+index 1f1a03e..87088e1 100644
+--- a/tunnel/upstream.go
++++ b/tunnel/upstream.go
+@@ -24,6 +24,7 @@ import (
+ 
+ type upstreamDialer struct {
+ 	addr string
++	auth *proxy.Auth
+ 	d    proxy.ContextDialer
+ }
+ 
+@@ -50,7 +51,7 @@ func SetExitUpstream(spec string) error {
+ 	if !ok {
+ 		return fmt.Errorf("upstream proxy %s: dialer has no DialContext", addr)
+ 	}
+-	exitUpstream.Store(&upstreamDialer{addr: addr, d: cd})
++	exitUpstream.Store(&upstreamDialer{addr: addr, auth: auth, d: cd})
+ 	return nil
+ }
+ 
+@@ -104,7 +105,7 @@ func dialExitTCP(dest string) (net.Conn, error) {
+ 
+ func dialExitUDP(dest string) (net.Conn, error) {
+ 	if u := exitUpstream.Load(); u != nil {
+-		return dialSOCKS5UDP(u.addr, dest)
++		return dialSOCKS5UDP(u.addr, u.auth, dest)
+ 	}
+ 	if os.Getenv("OPENFLUX_STRICT_PROXY") == "1" || os.Getenv("OPENFLUX_EXIT_SOCKS5") != "" {
+ 		return nil, fmt.Errorf("kill-switch: upstream SOCKS5 required for UDP but not configured or failed")
+@@ -119,6 +120,10 @@ func noteUDPBypassesUpstream() {
+ 		return
+ 	}
+ 	udpBypassNote.Do(func() {
+-		utils.Infof("[EXIT] UDP is routed via upstream SOCKS5 UDP relay (UDP ASSOCIATE)")
++		if ExitUpstream() != "" {
++			utils.Infof("[EXIT] UDP is routed via upstream SOCKS5 UDP relay (UDP ASSOCIATE)")
++			return
++		}
++		utils.Infof("[EXIT] UDP is not sent through --upstream-proxy; it leaves this host directly")
+ 	})
+ }
+-- 
+2.55.0
+

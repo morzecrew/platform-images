@@ -51,6 +51,13 @@
                 "alpine"
             ],
             "automerge": false
+        },
+        {
+            "description": "An OpenFlux release moves OPENFLUX_COMMIT too, which Renovate cannot, so its pull request fails the build until a person moves it; the same person drops the patches the release carries and checks the apps speak the new core (images/openflux/README.md). Never merged on its own.",
+            "matchPackageNames": [
+                "p1neappleXpress/OpenFlux"
+            ],
+            "automerge": false
         }
     ],
     "customManagers": [
