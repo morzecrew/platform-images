@@ -530,9 +530,11 @@ variable "ALPINE_VERSION" {
   default = "3.22"
 }
 
-# renovate: datasource=repology depName=alpine_3_22/openvpn versioning=loose
+# Repology spells Alpine's package revision too (2.6.23-r0); the tag and
+# the build's check take the version alone.
+# renovate: datasource=repology depName=alpine_3_22/openvpn versioning=loose extractVersion=^(?<version>\d+\.\d+\.\d+)
 variable "OPENVPN_VERSION" {
-  default = "2.6.20"
+  default = "2.6.23"
 }
 
 target "openvpn" {
