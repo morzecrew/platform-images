@@ -9,8 +9,10 @@ ARG ALPINE_VERSION=3.22
 # release too: moving ALPINE_VERSION moves the depName with it. Alpine keeps
 # one version per branch, so the build below refuses a package that has moved
 # on rather than ship it under this tag.
-# renovate: datasource=repology depName=alpine_3_22/openvpn versioning=loose
-ARG OPENVPN_VERSION=2.6.20
+# Repology spells Alpine's package revision too (2.6.23-r0); the tag and
+# the build's check take the version alone.
+# renovate: datasource=repology depName=alpine_3_22/openvpn versioning=loose extractVersion=^(?<version>\d+\.\d+\.\d+)
+ARG OPENVPN_VERSION=2.6.23
 
 FROM alpine:${ALPINE_VERSION}
 ARG ALPINE_VERSION
