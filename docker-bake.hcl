@@ -532,7 +532,7 @@ variable "ALPINE_VERSION" {
 
 # renovate: datasource=repology depName=alpine_3_22/openvpn versioning=loose
 variable "OPENVPN_VERSION" {
-  default = "2.6.20"
+  default = "2.6.23-r0"
 }
 
 target "openvpn" {

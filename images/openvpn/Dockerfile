@@ -10,7 +10,7 @@ ARG ALPINE_VERSION=3.22
 # one version per branch, so the build below refuses a package that has moved
 # on rather than ship it under this tag.
 # renovate: datasource=repology depName=alpine_3_22/openvpn versioning=loose
-ARG OPENVPN_VERSION=2.6.20
+ARG OPENVPN_VERSION=2.6.23-r0
 
 FROM alpine:${ALPINE_VERSION}
 ARG ALPINE_VERSION
