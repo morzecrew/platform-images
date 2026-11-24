@@ -57,8 +57,11 @@ files="$("${ENGINE}" export "${CTR}-exit" | tar -tvf -)"
 line="$(printf '%s\n' "${files}" | awk '$NF == "var/lib/openflux/"')"
 case "${line}" in "drwx------ 65532/65532 "*) ;; *) fail "/var/lib/openflux is not 65532's, mode 0700: ${line}" ;; esac
 echo "ok: /var/lib/openflux is 65532's, mode 0700"
+# A here-string, not a pipe: grep -q stops at the first match, and under
+# pipefail the writer it leaves behind fails on SIGPIPE.
+names="$(printf '%s\n' "${files}" | awk '{ print $NF }')"
 for f in LICENSE COPYRIGHT NOTICE; do
-	printf '%s\n' "${files}" | awk '{ print $NF }' | grep -qx "usr/local/share/doc/openflux/${f}" ||
+	grep -qx "usr/local/share/doc/openflux/${f}" <<<"${names}" ||
 		fail "${f} is not in /usr/local/share/doc/openflux"
 done
 echo "ok: OpenFlux's licence and notices are in /usr/local/share/doc/openflux"
