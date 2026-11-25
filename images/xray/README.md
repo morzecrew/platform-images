@@ -139,19 +139,24 @@ array, so each device has its own id and one is revoked by deleting its line.
 The file is UTF-8 text, one client per line:
 
 ```text
-# <uuid> [name]
+# <uuid> [name [desktop|mobile]]
 3f2c1f0e-8a4b-4c1d-9e2f-0a1b2c3d4e5f
 6b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e phone
+9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d laptop desktop
 ```
 
 ```json
-[{"id": "3f2c1f0e-8a4b-4c1d-9e2f-0a1b2c3d4e5f"}, {"id": "6b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e", "email": "phone"}]
+[{"id": "3f2c1f0e-8a4b-4c1d-9e2f-0a1b2c3d4e5f"}, {"id": "6b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e", "email": "phone"},
+ {"id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d", "email": "laptop"}]
 ```
 
 - The id and the optional name are separated by spaces or tabs. Whitespace
   around them, blank lines and lines starting with `#` are ignored.
 - The id is lower-cased. The name becomes `email`, which Xray shows as the
   user's label in its logs and stats.
+- A named line may end in the device's kind, `desktop` or `mobile`. Xray
+  never sees it; the tools that make devices' links from the same file read
+  it. Any other word there is refused, so a name with a space in it still is.
 - A single bare UUID, as morzer's `uuid` generator writes one, is a list of one.
 - The clients carry no `flow`. Set the inbound's `settings.flow`, which Xray
   gives every client without its own, so one file serves a REALITY + Vision
