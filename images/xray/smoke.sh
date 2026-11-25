@@ -258,7 +258,7 @@ ID_B="$("${ENGINE}" run --rm "${IMAGE}" uuid)"
 printf '%s\n' "${ID_B}" >"${WORK}/secrets/vless_uuid_b"
 # Two devices as an operator keeps them: a comment, a blank line, a tab, and a
 # name on the second.
-printf '# <uuid> [name]\n\n%s\n\t%s\tphone\n' "${uuid}" "${ID_B}" >"${WORK}/secrets/vless_clients"
+printf '# <uuid> [name [desktop|mobile]]\n\n%s\n\t%s\tphone mobile\n' "${uuid}" "${ID_B}" >"${WORK}/secrets/vless_clients"
 # Client lists section 9 refuses, each naming the line at fault.
 printf '# devices\n%s phone spare\n' "${uuid}" >"${WORK}/secrets/clients_three_fields"
 printf '%s\n%s\n' "${uuid}" "${ID_B:0:35}g" >"${WORK}/secrets/clients_not_uuid"
@@ -759,7 +759,7 @@ refuse "a seed of 127 hex characters" \
 	"inbounds[1].settings.decryption: /run/secrets/seed_127 does not hold a seed" "${WORK}/short-seed"
 
 # label:file:message, the message after the path. ids must not be in any.
-for case in "three fields:three_fields:line 2: 3 fields" \
+for case in "a name with a space:three_fields:line 2: the field after the name is not desktop or mobile" \
 	"an id that is not a UUID:not_uuid:line 2: the id is not a UUID" \
 	"a name outside the allowed characters:bad_name:line 1: the name is not 1 to 64" \
 	"the same id twice, in another case:same_id:line 3: the id is the one on line 1" \

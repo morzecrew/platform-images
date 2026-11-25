@@ -285,9 +285,14 @@ type vlessClient struct {
 var (
 	uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	nameRE = regexp.MustCompile(`^[A-Za-z0-9._@+-]{1,64}$`)
+	// The kinds of device a line may end in, after the name: Xray never sees
+	// them, the tools that make devices' links from the same file do. A fixed
+	// pair, so a name with a space in it is still refused.
+	deviceKinds = map[string]bool{"desktop": true, "mobile": true}
 )
 
-// A client list holds one client per line, "<uuid> [name]", so one device is
+// A client list holds one client per line, "<uuid> [name [desktop|mobile]]",
+// so one device is
 // revoked by deleting its line and the others keep their ids. The flow is the
 // inbound's "settings.flow", which Xray gives every client without its own.
 func vlessClients(name string) (envconf.Resolution, error) {
@@ -344,8 +349,11 @@ func parseClients(s string) ([]vlessClient, error) {
 			continue
 		}
 		f := strings.Fields(line)
-		if len(f) > 2 {
-			return nil, fmt.Errorf(`line %d: %d fields, where a client is "<uuid> [name]"`, n, len(f))
+		if len(f) > 3 {
+			return nil, fmt.Errorf(`line %d: %d fields, where a client is "<uuid> [name [desktop|mobile]]"`, n, len(f))
+		}
+		if len(f) == 3 && !deviceKinds[f[2]] {
+			return nil, fmt.Errorf("line %d: the field after the name is not desktop or mobile, nor part of a name, which has no spaces", n)
 		}
 		if !uuidRE.MatchString(f[0]) {
 			return nil, fmt.Errorf("line %d: the id is not a UUID, 8-4-4-4-12 hex digits", n)
@@ -355,7 +363,7 @@ func parseClients(s string) ([]vlessClient, error) {
 			return nil, fmt.Errorf("line %d: the id is the one on line %d", n, first)
 		}
 		idLine[c.ID] = n
-		if len(f) == 2 {
+		if len(f) >= 2 {
 			if !nameRE.MatchString(f[1]) {
 				return nil, fmt.Errorf("line %d: the name is not 1 to 64 of the characters A-Z a-z 0-9 . _ @ + -", n)
 			}

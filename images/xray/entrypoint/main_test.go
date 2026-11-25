@@ -300,9 +300,16 @@ func TestVlessClients(t *testing.T) {
 		t.Errorf("values to redact = %v", c.Values)
 	}
 
+	// A kind after the name, which Xray never sees.
+	kinds := write(t, filepath.Join(dir, "kinds"), clientA+" laptop desktop\n"+clientB+"\tphone\tmobile\n", 0o400)
+	r, err := vlessClients(kinds)
+	if err != nil || !slices.Equal(r.Value.([]vlessClient), []vlessClient{{ID: clientA, Email: "laptop"}, {ID: clientB, Email: "phone"}}) {
+		t.Errorf("kinds after the names: %+v, %v", r, err)
+	}
+
 	// What morzer's uuid generator writes at init.
 	bare := write(t, filepath.Join(dir, "bare"), clientA+"\n", 0o400)
-	r, err := vlessClients(bare)
+	r, err = vlessClients(bare)
 	if err != nil || r.Note != "(1 client)" || !slices.Equal(r.Value.([]vlessClient), []vlessClient{{ID: clientA}}) {
 		t.Errorf("a bare UUID: %+v, %v", r, err)
 	}
@@ -333,7 +340,9 @@ func TestHysteriaUsers(t *testing.T) {
 func TestVlessClientsRefusals(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct{ name, content, want string }{
-		{"three fields", "# devices\n" + clientA + " phone spare\n", "line 2: 3 fields"},
+		{"a name with a space", "# devices\n" + clientA + " phone spare\n", "line 2: the field after the name is not desktop or mobile"},
+		{"a kind in capitals", clientA + " phone Desktop", "line 1: the field after the name is not desktop or mobile"},
+		{"four fields", clientA + " phone desktop spare", "line 1: 4 fields"},
 		{"not hex", clientA[:35] + "g", "line 1: the id is not a UUID"},
 		{"no dashes", strings.ReplaceAll(clientA, "-", ""), "line 1: the id is not a UUID"},
 		{"braces", "{" + clientA + "}", "line 1: the id is not a UUID"},
