@@ -11,7 +11,10 @@ each on its own device, for a proxy beside it to dial out through one at a
 time ([Several tunnels](#several-tunnels-from-an-upstreams-list)).
 
 openvpn is Alpine's package, unchanged. The image adds a POSIX sh entrypoint,
-`/usr/local/bin/openvpn-entrypoint`, on the shared `envconf.sh`.
+`/usr/local/bin/openvpn-entrypoint`, on the shared `envconf.sh`. It carries
+iproute2's `ip` and nftables' `nft` too, for a consumer that runs its own
+routing rules or redirects from this image's shell; the entrypoint uses `ip`
+alone.
 
 | | |
 |---|---|
@@ -263,6 +266,6 @@ package that release ships.
 
 | Path | |
 |---|---|
-| `Dockerfile` | Alpine, openvpn and iproute2, the version check, the entrypoint |
+| `Dockerfile` | Alpine, openvpn, iproute2 and nftables, the version check, the entrypoint |
 | `rootfs/entrypoint.sh` | the checks, the kill switch, openvpn started again when it exits, a list's tunnels, the healthcheck |
-| `smoke.sh` | refusals, then the kill switch against a stand-in server: a fresh start with it down, the tunnel up, openvpn killed and started again in place, the server gone again, and a stop; then a list of three tunnels, two up and one dead, each reached through its device |
+| `smoke.sh` | refusals, then the kill switch against a stand-in server: a fresh start with it down, the tunnel up, openvpn killed and started again in place, the server gone again, and a stop; then a list of three tunnels, two up and one dead, each reached through its device; then `nft` adding a NAT redirect |
