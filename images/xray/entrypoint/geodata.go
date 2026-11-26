@@ -411,7 +411,7 @@ func geoGet(g *geoFile, proxy *url.URL) (_ string, err error) {
 	var stalled atomic.Bool
 	idle := time.AfterFunc(geoIdle, func() { stalled.Store(true); cancel() })
 	defer idle.Stop()
-	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(idleReader{resp.Body, idle}, geoMax+1))
+	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(idleReader{resp.Body, idle, geoIdle}, geoMax+1))
 	switch {
 	case err != nil && stalled.Load():
 		return "", fmt.Errorf("stalled: nothing came for %s", geoIdle)
@@ -436,15 +436,16 @@ func geoGet(g *geoFile, proxy *url.URL) (_ string, err error) {
 	return f.Name(), nil
 }
 
-// idleReader pushes its timer back on every read.
+// idleReader pushes its timer back by d on every read.
 type idleReader struct {
 	r io.Reader
 	t *time.Timer
+	d time.Duration
 }
 
 func (i idleReader) Read(p []byte) (int, error) {
 	n, err := i.r.Read(p)
-	i.t.Reset(geoIdle)
+	i.t.Reset(i.d)
 	return n, err
 }
 

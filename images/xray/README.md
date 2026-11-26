@@ -601,6 +601,49 @@ inbound. `http`, `https`, `socks5` and `socks5h` proxy URLs work.
   your config can declare. Add the `healthcheck:` block shown under
   [Usage](#usage).
 
+## Fetch
+
+`xray-entrypoint fetch` makes one request through a proxy and reports how
+much of the body came and how long it took. It is for a probe that measures
+the tunnel itself, such as a freeze check or a speed test. The binary is
+static, so a probe in another image with a shell can run it from a read-only
+mount of this one.
+
+```sh
+xray-entrypoint fetch -proxy http://127.0.0.1:10809 [-read-timeout 10s] [-timeout 1m] [-upload <bytes>] <url>
+```
+
+- **`-proxy`** is required: an `http`, `https`, `socks5` or `socks5h` URL.
+  Without a proxy, the request would leave through the machine's own network,
+  which is what such a probe must never measure.
+- **The URL** is `http` or `https`. An `https` URL goes through the proxy by
+  CONNECT, and its certificate is checked against the image's CA bundle. An
+  `http` URL is sent to the proxy as is.
+- **`-read-timeout`**: when nothing moves in either direction for this long,
+  the request ends.
+- **`-timeout`** caps the whole request.
+- **`-upload N`** sends N zero bytes as a POST body instead of a GET. 0, the
+  default, sends a GET.
+
+Redirects are not followed, and no compression is asked for, so the bytes
+counted are the bytes sent. Whatever the outcome, `<bytes> <milliseconds>` is
+printed on stdout: the bytes of the body received, and the time since the
+request began. What ended the request goes to stderr. The exit code says how
+it ended:
+
+| Exit | |
+|---|---|
+| 0 | complete: a 2xx whose body arrived whole |
+| 1 | nothing: no byte of a body, from no connection, a certificate that fails, a status other than 2xx, or no answer within `-read-timeout` |
+| 2 | usage |
+| 3 | cut short: some bytes, then the connection closed early, nothing came for `-read-timeout`, or `-timeout` was reached |
+
+```sh
+if out=$(/opt/xray/xray-entrypoint fetch -proxy http://reality:10809 "$url"); then
+	bytes=${out% *} ms=${out#* }
+fi
+```
+
 ## Environment
 
 | Variable | Default | |
@@ -657,8 +700,9 @@ and in the healthcheck's output.
 
 ## Other commands
 
-Any first argument other than `run`, `healthcheck`, `vless-encryption` or
-`reality-password` goes straight to `xray`, so upstream's tools work:
+Any first argument other than `run`, `healthcheck`, `fetch`,
+`vless-encryption` or `reality-password` goes straight to `xray`, so
+upstream's tools work:
 
 ```sh
 docker run --rm ghcr.io/morzecrew/xray:26.10.31 uuid
@@ -702,7 +746,8 @@ and tzdata current.
 - `Dockerfile`: the upstream stage pinned by digest, the entrypoint build
   (its tests run there), and the distroless runtime.
 - `entrypoint/`: `xray-entrypoint`, standard library only, and its tests,
-  which cover every seed, client list and proxy refusal above. The resolver
+  which cover every seed, client list and proxy refusal above, and each way
+  a `fetch` can end, against a test server and proxy. The resolver
   and its file checks, the summary and the healthcheck live in
   [`shared/go/envconf`](../../shared/go/envconf), with their tests, which
   mihomo uses too.
@@ -711,5 +756,6 @@ and tzdata current.
 - `smoke.sh`: rootless Podman. Covers the references, the seeded key pair end
   to end, both client-side commands against upstream's own derivation, a socks
   and an http upstream with a password holding `:` and `@`, the healthcheck,
-  the refusals an operator is most likely to meet, and the absence of every
-  secret from the output.
+  `fetch` through the probe inbound and through a dead proxy, the refusals an
+  operator is most likely to meet, and the absence of every secret from the
+  output.

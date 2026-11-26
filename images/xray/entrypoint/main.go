@@ -4,6 +4,8 @@
 //	                                           (or, with $subscription, run it
 //	                                           and keep the subscription current)
 //	xray-entrypoint healthcheck                probe egress through Xray
+//	xray-entrypoint fetch -proxy <url> <url>   time and count one request
+//	                                           through a proxy (fetchcmd.go)
 //	xray-entrypoint vless-encryption <seed>    print the client's VLESS encryption
 //	xray-entrypoint reality-password <key>     print the client's REALITY password
 //	xray-entrypoint <anything else...>         exec xray with those arguments
@@ -85,6 +87,9 @@ func main() {
 	args := os.Args[1:]
 	if len(args) > 0 && args[0] == "healthcheck" {
 		os.Exit(img.Healthcheck(img.Get("XRAY_RUNTIME_DIR"), "*.json"))
+	}
+	if len(args) > 0 && args[0] == "fetch" {
+		os.Exit(fetchCmd(args[1:], os.Stdout, os.Stderr))
 	}
 	if len(args) > 0 {
 		if derive, ok := clientValues[args[0]]; ok {
