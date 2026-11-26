@@ -111,6 +111,7 @@ func fetchCmd(args []string, stdout, stderr io.Writer) int {
 			return fetchNothing
 		}
 		defer resp.Body.Close()
+		idle.Reset(*readTimeout) // the headers came
 		if resp.StatusCode < 200 || resp.StatusCode > 299 {
 			fmt.Fprintf(stderr, "fetch: %s %s through %s: %s\n", method, envconf.Shown(target), envconf.Shown(proxy), resp.Status)
 			return fetchNothing

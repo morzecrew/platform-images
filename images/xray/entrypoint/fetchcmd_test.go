@@ -124,6 +124,24 @@ func TestFetchStalledAfterSomeBytes(t *testing.T) {
 	}
 }
 
+// The headers count as something coming: a body that follows them within
+// -read-timeout is not a stall, however long the headers took.
+func TestFetchHeadersPushTheReadTimeoutBack(t *testing.T) {
+	proxy, _ := fetchProxy(t)
+	target := fetchTarget(t, func(w http.ResponseWriter, r *http.Request, _ <-chan struct{}) {
+		time.Sleep(200 * time.Millisecond)
+		w.Header().Set("Content-Length", "5")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write([]byte("hello"))
+	})
+	code, n, _, stderr := runFetch(t, "-proxy", proxy, "-read-timeout", "300ms", target)
+	if code != fetchWhole || n != 5 {
+		t.Fatalf("exit %d, %d bytes: %s", code, n, stderr)
+	}
+}
+
 func TestFetchCappedWhileBytesTrickle(t *testing.T) {
 	proxy, _ := fetchProxy(t)
 	target := fetchTarget(t, func(w http.ResponseWriter, r *http.Request, done <-chan struct{}) {
