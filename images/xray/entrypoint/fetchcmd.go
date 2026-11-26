@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -34,7 +33,7 @@ func fetchCmd(args []string, stdout, stderr io.Writer) int {
 	proxyFlag := fs.String("proxy", "", "the proxy to go through, such as http://127.0.0.1:10809 (required)")
 	readTimeout := fs.Duration("read-timeout", 10*time.Second, "nothing either way for this long ends it")
 	timeout := fs.Duration("timeout", time.Minute, "the most the whole request may take")
-	upload := fs.Int64("upload", 0, "send this many bytes as a POST body, in place of a GET")
+	upload := fs.Int64("upload", 0, "send this many bytes as a POST body; 0, the default, sends a GET")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "usage: xray-entrypoint fetch -proxy <url> [-read-timeout 10s] [-timeout 1m] [-upload <bytes>] <http or https URL>")
 		fs.PrintDefaults()
@@ -73,9 +72,7 @@ func fetchCmd(args []string, stdout, stderr io.Writer) int {
 	if *upload > 0 {
 		// Each read of the body is a write about to happen: a write that
 		// blocks stalls it as a read that waits does.
-		// ponytail: the body is held in memory, fine for a probe's few KB; a
-		// zero reader if anyone uploads gigabytes.
-		method, body = http.MethodPost, idleReader{bytes.NewReader(make([]byte, *upload)), idle, *readTimeout}
+		method, body = http.MethodPost, idleReader{io.LimitReader(zeros{}, *upload), idle, *readTimeout}
 	}
 	req, err := http.NewRequestWithContext(ctx, method, target.String(), body)
 	if err != nil {
@@ -131,4 +128,12 @@ func fetchCmd(args []string, stdout, stderr io.Writer) int {
 	}()
 	fmt.Fprintf(stdout, "%d %d\n", n, time.Since(start).Milliseconds())
 	return code
+}
+
+// zeros is an endless body of zero bytes, held in no buffer of its own.
+type zeros struct{}
+
+func (zeros) Read(p []byte) (int, error) {
+	clear(p)
+	return len(p), nil
 }

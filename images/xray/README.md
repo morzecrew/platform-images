@@ -622,7 +622,8 @@ xray-entrypoint fetch -proxy http://127.0.0.1:10809 [-read-timeout 10s] [-timeou
 - **`-read-timeout`**: when nothing moves in either direction for this long,
   the request ends.
 - **`-timeout`** caps the whole request.
-- **`-upload N`** sends N bytes as a POST body instead of a GET.
+- **`-upload N`** sends N zero bytes as a POST body instead of a GET. 0, the
+  default, sends a GET.
 
 Redirects are not followed, and no compression is asked for, so the bytes
 counted are the bytes sent. Whatever the outcome, `<bytes> <milliseconds>` is
