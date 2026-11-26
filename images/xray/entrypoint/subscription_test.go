@@ -239,6 +239,24 @@ func TestSubscriptionOnItsCacheIsRetriedTillAFetch(t *testing.T) {
 	srv.Close()
 }
 
+// A subscription retried every subRetry doesn't take another, which holds its
+// outbounds, along before that one's interval.
+func TestRetryFetchesOnlyTheWaitingSubscription(t *testing.T) {
+	_, waiting, nw := subServer(t, 200, subConfig)
+	_, healthy, nh := subServer(t, 200, subConfig)
+	w, h := urlFile(t, waiting), urlFile(t, healthy)
+	subs = map[string][]byte{w: nil, h: []byte(`[]`)}
+	defer func() { subs, subsDue = map[string][]byte{}, time.Time{} }()
+	due := time.Now().Add(time.Hour)
+	subsDue = due
+	// Its outbounds changed, so the source would be resolved again: the test
+	// stops at a source that isn't there.
+	refreshSubs(filepath.Join(t.TempDir(), "none"), t.TempDir(), nil, subSettings{interval: time.Hour})
+	if *nw != 1 || *nh != 0 || !subsDue.Equal(due) {
+		t.Fatalf("waiting %d, healthy %d fetches; due moved %v", *nw, *nh, !subsDue.Equal(due))
+	}
+}
+
 func TestSubscriptionURLAndSettings(t *testing.T) {
 	if _, err := subscriptionURL(urlFile(t, "ftp://x/y")); err == nil || strings.Contains(err.Error(), "ftp") {
 		t.Fatalf("ftp: %v", err)

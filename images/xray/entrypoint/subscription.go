@@ -393,21 +393,26 @@ func refresh(src, run string, extra []string, s subSettings) bool {
 	return refreshGeo(run, extra, s.proxy) || restart
 }
 
-// refreshSubs fetches every subscription, when due, and reports whether one
-// changed and the runtime directory now holds the config resolved on it, and
-// whether the runtime directory holds a whole config, the old one or the new.
+// refreshSubs fetches each subscription that is due, every one once their
+// interval came round, and reports whether one changed and the runtime
+// directory now holds the config resolved on it, and whether the runtime
+// directory holds a whole config, the old one or the new.
 func refreshSubs(src, run string, extra []string, s subSettings) (bool, bool) {
-	due := !time.Now().Before(subsDue)
-	for name, b := range subs {
-		due = due || b == nil || subStale[name]
-	}
-	if !due || len(subs) == 0 {
+	// Before their interval, only those holding nothing or only their cache;
+	// the rest keep their due time.
+	all := !time.Now().Before(subsDue)
+	names := slices.DeleteFunc(slices.Sorted(maps.Keys(subs)), func(name string) bool {
+		return !all && subs[name] != nil && !subStale[name]
+	})
+	if len(names) == 0 {
 		return false, true
 	}
-	subsDue = time.Now().Add(s.interval)
+	if all {
+		subsDue = time.Now().Add(s.interval)
+	}
 	old := maps.Clone(subs)
 	changed := false
-	for _, name := range slices.Sorted(maps.Keys(subs)) {
+	for _, name := range names {
 		u, err := subscriptionURL(name)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "subscription: %s %v\n", name, err)
