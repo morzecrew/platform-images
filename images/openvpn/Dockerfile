@@ -19,7 +19,9 @@ ARG ALPINE_VERSION
 ARG OPENVPN_VERSION
 
 # iproute2 rather than busybox's ip: the entrypoint reads `ip -o route get`.
-RUN apk add --no-cache openvpn iproute2 \
+# nftables for a consumer's own rules run from this image's shell, such as
+# dotdash-client's kill switch and its DNS redirect; the entrypoint uses none.
+RUN apk add --no-cache openvpn iproute2 nftables \
     && installed="$(openvpn --version | sed -n '1s/^OpenVPN \([0-9][0-9.]*\) .*/\1/p')" \
     && { [ "${installed}" = "${OPENVPN_VERSION}" ] \
          || { echo "Alpine ${ALPINE_VERSION} ships openvpn ${installed}, not ${OPENVPN_VERSION}: move OPENVPN_VERSION in docker-bake.hcl" >&2; exit 1; }; }

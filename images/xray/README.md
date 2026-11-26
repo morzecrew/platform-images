@@ -463,9 +463,10 @@ the container with Xray's status.
 - **At start, unreachable.** The copy in `XRAY_SUBSCRIPTION_CACHE`, the last
   outbounds `xray run -test` passed, kept as `<file name>.json` there (two
   subscriptions whose files share a name are refused). With no
-  cache, the array is empty, so Xray starts on the rest of the config alone,
-  and the URL is tried every 30 seconds until it answers. A local config whose
-  first outbound blocks fails closed until then.
+  cache, the array is empty, so Xray starts on the rest of the config alone.
+  Either way the URL is tried every 30 seconds until it answers, and every
+  interval from then on. A local config whose first outbound blocks fails
+  closed until then.
 - **What is accepted.** A `200` with at most 4 MiB of JSON, an object whose
   `outbounds` array holds at least one object with a `protocol`. A redirect is
   not followed. Anything else keeps what Xray has.

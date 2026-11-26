@@ -349,4 +349,16 @@ took=$(($(date +%s) - t0))
 [ "$("${ENGINE}" inspect -f '{{.State.ExitCode}}' "${LCLI}")" = 0 ] || fail "the list client exited non-zero on a stop"
 echo "ok: a list: no key in its log, and a stop ends every tunnel at once, with 0"
 
+# --- 11. nft ------------------------------------------------------------------
+
+# For a consumer's own rules run from this image's shell, such as a kill
+# switch's DNS redirect: a NAT output chain sending port 53 to a local port,
+# but root's. The entrypoint itself uses none.
+out="$("${ENGINE}" run --rm --cap-add NET_ADMIN --entrypoint sh "${IMAGE}" -c '
+	nft add table inet smoke && nft add chain inet smoke out "{ type nat hook output priority -100; }" &&
+	nft add rule inet smoke out meta skuid != 0 udp dport 53 redirect to :5353 && nft list ruleset' 2>&1)" ||
+	fail "nft could not add a NAT redirect: ${out}"
+case "${out}" in *"meta skuid != 0 udp dport 53 redirect to :5353"*) ;; *) fail "nft does not list the redirect it added: ${out}" ;; esac
+echo "ok: nft adds a NAT redirect and lists it"
+
 echo "PASS: openvpn smoke (${IMAGE})"
