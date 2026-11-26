@@ -30,7 +30,7 @@ import (
 const (
 	subTimeout = 30 * time.Second // one fetch, the body included
 	subMax     = 4 << 20          // the most a subscription may serve
-	subRetry   = 30 * time.Second // between fetches while one has given nothing yet
+	subRetry   = 30 * time.Second // between fetches while one has given nothing yet, or only its cache
 	subStop    = 10 * time.Second // for Xray to exit before it is killed
 )
 
@@ -39,6 +39,11 @@ const (
 // there is none. The resolver reads it when set, and fetches only when not,
 // which is at start.
 var subs = map[string][]byte{}
+
+// The subscriptions that started on their cache, the start's fetch having
+// failed: fetched every subRetry, as one holding nothing is, until a fetch
+// succeeds, so a start while the URL is down doesn't wait out the interval.
+var subStale = map[string]bool{}
 
 // XRAY_SUBSCRIPTION_PROXY, set by start before anything is resolved, so the
 // first fetch goes the way every later one does.
@@ -56,7 +61,8 @@ var subPlain = map[string]bool{"protocol": true, "network": true, "security": tr
 // subscription resolves {"$subscription": path}: the outbounds array of the
 // Xray config the http or https URL in that file serves. A fetch that fails at
 // start falls back to the copy in XRAY_SUBSCRIPTION_CACHE, and with none the
-// array is empty, so Xray starts on the rest of the config alone. Its errors
+// array is empty, so Xray starts on the rest of the config alone; either way
+// the URL is fetched again every subRetry until it answers. Its errors
 // never show the URL: its path is the credential.
 func subscription(name string) (envconf.Resolution, error) {
 	u, err := subscriptionURL(name)
@@ -75,6 +81,7 @@ func subscription(name string) (envconf.Resolution, error) {
 		if body, err = get(name, u, subProxy); err != nil {
 			fmt.Fprintf(os.Stderr, "subscription: %s: %v\n", name, err)
 			if body = readCache(name); body != nil {
+				subStale[name] = true
 				fmt.Fprintf(os.Stderr, "subscription: %s: starting on the copy in XRAY_SUBSCRIPTION_CACHE\n", name)
 			}
 		}
@@ -300,13 +307,14 @@ func subscriptionSettings() (subSettings, error) {
 }
 
 // supervise runs Xray on the runtime directory and, every interval (subRetry
-// while a subscription holds nothing or a pinned geodata file is still to be
-// fetched), fetches each subscription again, and each such file:
-// through XRAY_SUBSCRIPTION_PROXY first when set, directly when that fails.
-// When one changed, the whole source is resolved again and tested in a
-// directory beside the running config; Xray restarts on it only if it passes,
-// and the cache is written only then. A signal goes on to Xray, a refresh
-// under way or not, and Xray's exit ends the container with its status.
+// while a subscription holds nothing or only its cache, or a pinned geodata
+// file is still to be fetched), fetches each subscription again, and each
+// such file: through XRAY_SUBSCRIPTION_PROXY first when set, directly when
+// that fails. When one changed, the whole source is resolved again and tested
+// in a directory beside the running config; Xray restarts on it only if it
+// passes, and the cache is written only then. A signal goes on to Xray, a
+// refresh under way or not, and Xray's exit ends the container with its
+// status.
 func supervise(src, run string, extra []string, s subSettings) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
@@ -356,8 +364,8 @@ func next(s subSettings) time.Duration {
 	if geoWaiting() {
 		return min(subRetry, s.interval)
 	}
-	for _, b := range subs {
-		if b == nil {
+	for name, b := range subs {
+		if b == nil || subStale[name] {
 			return min(subRetry, s.interval)
 		}
 	}
@@ -390,8 +398,8 @@ func refresh(src, run string, extra []string, s subSettings) bool {
 // whether the runtime directory holds a whole config, the old one or the new.
 func refreshSubs(src, run string, extra []string, s subSettings) (bool, bool) {
 	due := !time.Now().Before(subsDue)
-	for _, b := range subs {
-		due = due || b == nil
+	for name, b := range subs {
+		due = due || b == nil || subStale[name]
 	}
 	if !due || len(subs) == 0 {
 		return false, true
@@ -410,6 +418,7 @@ func refreshSubs(src, run string, extra []string, s subSettings) (bool, bool) {
 			fmt.Fprintf(os.Stderr, "subscription: %s: %v; Xray keeps what it has\n", name, err)
 			continue
 		}
+		delete(subStale, name)
 		if !bytes.Equal(b, subs[name]) {
 			subs[name], changed = b, true
 		}

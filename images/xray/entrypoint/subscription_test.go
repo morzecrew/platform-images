@@ -193,6 +193,52 @@ func TestSubscriptionFallsBackToTheCacheThenToNothing(t *testing.T) {
 	}
 }
 
+// A start on the cache, its URL down, is fetched again every subRetry, not a
+// whole interval later, until a fetch succeeds; then the interval is back.
+func TestSubscriptionOnItsCacheIsRetriedTillAFetch(t *testing.T) {
+	subs, subStale = map[string][]byte{}, map[string]bool{}
+	defer func() { subs, subStale, subsDue = map[string][]byte{}, map[string]bool{}, time.Time{} }()
+	t.Setenv("XRAY_SUBSCRIPTION_CACHE", t.TempDir())
+	srv, u, n := subServer(t, 200, subConfig)
+	f := urlFile(t, u)
+	if _, err := subscription(f); err != nil {
+		t.Fatal(err)
+	}
+	writeCaches()
+
+	subs = map[string][]byte{}
+	gone, down, _ := subServer(t, 200, subConfig)
+	gone.Close()
+	if err := os.WriteFile(f, []byte(down), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := subscription(f); err != nil || res.Note != "2 outbound(s)" {
+		t.Fatalf("from the cache: %q, %v", res.Note, err)
+	}
+	hour := subSettings{interval: time.Hour}
+	subsDue = time.Now().Add(time.Hour) // as supervise sets it at start
+	if next(hour) != subRetry {
+		t.Fatal("a start on the cache is not retried sooner")
+	}
+	if restart, _ := refreshSubs(t.TempDir(), t.TempDir(), nil, hour); restart || next(hour) != subRetry {
+		t.Fatal("a failed retry ended the retries")
+	}
+
+	// The URL answers, with what the cache holds: no restart, and the
+	// subscription's own interval again.
+	if err := os.WriteFile(f, []byte(u), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := *n
+	if restart, _ := refreshSubs(t.TempDir(), t.TempDir(), nil, hour); restart || *n != before+1 {
+		t.Fatalf("the retry: restart %v, %d fetches", restart, *n-before)
+	}
+	if d := next(hour); d < 59*time.Minute {
+		t.Fatalf("after a fetch: next in %s, want the interval", d)
+	}
+	srv.Close()
+}
+
 func TestSubscriptionURLAndSettings(t *testing.T) {
 	if _, err := subscriptionURL(urlFile(t, "ftp://x/y")); err == nil || strings.Contains(err.Error(), "ftp") {
 		t.Fatalf("ftp: %v", err)
