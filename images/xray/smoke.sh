@@ -313,6 +313,7 @@ printf 'ss://%s:%s@127.0.0.1:8388\n' "${PROXY_USER}" "${PROXY_PASS}" >"${WORK}/s
 chmod 0400 "${WORK}/secrets/"*
 mkdir "${WORK}/secrets/a_directory"
 touch "${WORK}/www/generate_204"
+head -c 100000 /dev/zero >"${WORK}/www/down"
 printf '203.0.113.7\n' >"${WORK}/www/ip"
 SECRETS=("${uuid}" "${uuid^^}" "${ID_B}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}"
 	"${PROXY_USER}" "${PROXY_PASS}" "${PROXY_PASS_LONE}" "${PROXY_PASS##*@}" "${WG_CLIENT_KEY}" "${WG_PEER_KEY}")
@@ -549,6 +550,22 @@ expect_in "a changed exit IP exits 1 and shows the body" "${out}" \
 out="$(hc -e XRAY_HEALTHCHECK_PROXY=)" || fail "liveness: ${out}"
 expect_in "without a proxy it checks liveness and says egress was not probed" \
 	"${out}" "egress was not probed"
+
+# fetch: one request through a proxy, printed as "<bytes> <milliseconds>",
+# the exit code saying how it ended (fetchcmd.go's tests cover the stalls).
+fetch() { "${ENGINE}" exec "${CTR}" /usr/local/bin/xray-entrypoint fetch "$@"; }
+out="$(fetch -proxy "http://127.0.0.1:${PROBE_PORT}" "http://127.0.0.1:${TARGET_PORT}/down")" ||
+	fail "fetch through the probe inbound: ${out}"
+[ "${out%% *}" = 100000 ] || fail "fetch through the probe inbound printed '${out}', not 100000 bytes"
+expect_in "fetch's request reached the target" "$(cat "${WORK}/httpd.log")" '"GET /down HTTP/1.1" 200'
+echo "ok: fetch through the probe inbound counts the whole body (${out})"
+rc=0
+out="$(fetch -proxy http://127.0.0.1:1 "http://127.0.0.1:${TARGET_PORT}/down" 2>/dev/null)" || rc=$?
+[ "${rc}" = 1 ] && [ "${out%% *}" = 0 ] || fail "fetch through a dead proxy: exited ${rc}, printed '${out}'"
+rc=0
+out="$(fetch "http://127.0.0.1:${TARGET_PORT}/down" 2>&1)" || rc=$?
+[ "${rc}" = 2 ] || fail "fetch without -proxy: exited ${rc}: ${out}"
+echo "ok: fetch goes only through a proxy: a dead one exits 1, none at all 2"
 
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
