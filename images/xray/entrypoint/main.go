@@ -341,13 +341,27 @@ type hysteriaUser struct {
 	Email string `json:"email,omitempty"`
 }
 
-// The errors name a line, never what is on it. An id must be a UUID as
+// The errors name a line, never an id. An id must be a UUID as
 // written: Xray maps any other string of 1 to 30 bytes to a UUIDv5, so a typo
 // would become a valid id that locks its device out. Names are compared
-// ignoring case, as Xray compares emails, which refuses the second.
+// ignoring case, as Xray compares emails, which refuses the second. Ids are
+// compared with bytes 6 and 7, the third group, zeroed: Xray zeroes them
+// before it looks an id up (ProcessUUID, proxy/vless/validator.go) and keeps
+// the last client added, so two ids that differ only there would be one
+// device to it, logged and routed as whichever is listed last.
 func parseClients(s string) ([]vlessClient, error) {
+	type seen struct {
+		line     int
+		id, name string
+	}
 	var clients []vlessClient
-	idLine, nameLine := map[string]int{}, map[string]int{}
+	idLine, nameLine := map[string]seen{}, map[string]int{}
+	named := func(name string) string {
+		if name == "" {
+			return ""
+		}
+		return " (" + name + ")"
+	}
 	for i, line := range strings.Split(s, "\n") {
 		n, line := i+1, strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -364,10 +378,6 @@ func parseClients(s string) ([]vlessClient, error) {
 			return nil, fmt.Errorf("line %d: the id is not a UUID, 8-4-4-4-12 hex digits", n)
 		}
 		c := vlessClient{ID: strings.ToLower(f[0])}
-		if first, ok := idLine[c.ID]; ok {
-			return nil, fmt.Errorf("line %d: the id is the one on line %d", n, first)
-		}
-		idLine[c.ID] = n
 		if len(f) >= 2 {
 			if !nameRE.MatchString(f[1]) {
 				return nil, fmt.Errorf("line %d: the name is not 1 to 64 of the characters A-Z a-z 0-9 . _ @ + -", n)
@@ -378,6 +388,15 @@ func parseClients(s string) ([]vlessClient, error) {
 			nameLine[strings.ToLower(f[1])] = n
 			c.Email = f[1]
 		}
+		key := c.ID[:14] + "0000" + c.ID[18:]
+		if first, ok := idLine[key]; ok {
+			if first.id == c.ID {
+				return nil, fmt.Errorf("line %d: the id is the one on line %d", n, first.line)
+			}
+			return nil, fmt.Errorf("line %d%s: the id differs from line %d's%s only in bytes 6 and 7, its third group, which Xray ignores, so it would take both devices for the one listed last",
+				n, named(c.Email), first.line, named(first.name))
+		}
+		idLine[key] = seen{n, c.ID, c.Email}
 		clients = append(clients, c)
 	}
 	if len(clients) == 0 {

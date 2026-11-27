@@ -184,7 +184,7 @@ carries the UUID its VLESS links do:
 [{"auth": "3f2c1f0e-8a4b-4c1d-9e2f-0a1b2c3d4e5f"}, {"auth": "6b1d2c3e-4f5a-4b6c-8d7e-9f0a1b2c3d4e", "email": "phone"}]
 ```
 
-Each of these exits 78. The message names the line, never what is on it:
+Each of these exits 78. The message names the line, never an id:
 
 - An id that is not a UUID written as 8-4-4-4-12 hex digits. Xray itself maps
   any other string of 1 to 30 bytes to a UUIDv5, so a typo would become a
@@ -193,6 +193,11 @@ Each of these exits 78. The message names the line, never what is on it:
 - A line with more than two fields.
 - An id or a name that appears twice, ignoring case. Xray compares emails
   ignoring case and refuses the second.
+- Two ids that differ only in bytes 6 and 7, their third group. Xray zeroes
+  those bytes before it looks an id up (and hands them to routing as
+  `vlessRoute`), keeping the client listed last, so both devices would be
+  logged and routed as that one. The message names both lines, with their
+  names.
 - No client at all once comments and blank lines are skipped.
 
 The summary shows the count, not the ids, and the ids are redacted from

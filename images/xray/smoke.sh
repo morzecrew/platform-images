@@ -265,6 +265,9 @@ printf '%s\n%s\n' "${uuid}" "${ID_B:0:35}g" >"${WORK}/secrets/clients_not_uuid"
 printf '%s ph/one\n' "${uuid}" >"${WORK}/secrets/clients_bad_name"
 printf '%s\n\n%s phone\n' "${uuid}" "${uuid^^}" >"${WORK}/secrets/clients_same_id"
 printf '%s phone\n%s Phone\n' "${uuid}" "${ID_B}" >"${WORK}/secrets/clients_same_name"
+# The first id but for bytes 6 and 7, which Xray zeroes before it looks one up.
+ID_67="${uuid:0:14}ffff${uuid:18}"
+printf '%s phone@a\n%s phone@b\n' "${uuid}" "${ID_67}" >"${WORK}/secrets/clients_bytes_67"
 printf '# nobody yet\n\n' >"${WORK}/secrets/clients_none"
 # An upstream's user and password, which its inbounds read as two files and
 # its outbounds as one line each. The password holds ":" and "@", which only
@@ -315,7 +318,7 @@ mkdir "${WORK}/secrets/a_directory"
 touch "${WORK}/www/generate_204"
 head -c 100000 /dev/zero >"${WORK}/www/down"
 printf '203.0.113.7\n' >"${WORK}/www/ip"
-SECRETS=("${uuid}" "${uuid^^}" "${ID_B}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}"
+SECRETS=("${uuid}" "${uuid^^}" "${ID_67}" "${ID_B}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}"
 	"${PROXY_USER}" "${PROXY_PASS}" "${PROXY_PASS_LONE}" "${PROXY_PASS##*@}" "${WG_CLIENT_KEY}" "${WG_PEER_KEY}")
 
 # client_value <command> <path>: one of the helper's client-side subcommands,
@@ -781,6 +784,7 @@ for case in "a name with a space:three_fields:line 2: the field after the name i
 	"a name outside the allowed characters:bad_name:line 1: the name is not 1 to 64" \
 	"the same id twice, in another case:same_id:line 3: the id is the one on line 1" \
 	"the same name twice, in another case:same_name:line 2: the name is the one on line 1" \
+	"ids that differ only in bytes 6 and 7:bytes_67:line 2 (phone@b): the id differs from line 1's (phone@a) only in bytes 6 and 7" \
 	"only comments and blank lines:none:lists no client"; do
 	label="${case%%:*}" rest="${case#*:}"
 	file="clients_${rest%%:*}" needle="${rest#*:}"

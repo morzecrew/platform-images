@@ -339,6 +339,9 @@ func TestHysteriaUsers(t *testing.T) {
 
 func TestVlessClientsRefusals(t *testing.T) {
 	dir := t.TempDir()
+	// clientA but for bytes 6 and 7, the third group, which Xray zeroes before
+	// it looks an id up.
+	clientA67 := clientA[:14] + "4fff" + clientA[18:]
 	for _, tc := range []struct{ name, content, want string }{
 		{"a name with a space", "# devices\n" + clientA + " phone spare\n", "line 2: the field after the name is not desktop or mobile"},
 		{"a kind in capitals", clientA + " phone Desktop", "line 1: the field after the name is not desktop or mobile"},
@@ -351,7 +354,10 @@ func TestVlessClientsRefusals(t *testing.T) {
 		{"a name with a slash", clientA + " ph/one", "line 1: the name is not 1 to 64"},
 		{"a name of 65 characters", clientA + " " + strings.Repeat("n", 65), "line 1: the name is not 1 to 64"},
 		{"a name that is not ASCII", clientA + " t\u00e9l\u00e9phone", "line 1: the name is not 1 to 64"},
+		{"the same id", clientA + " laptop\n" + clientA + " phone", "line 2: the id is the one on line 1"},
 		{"the same id in another case", clientA + "\n\n" + strings.ToUpper(clientA) + " phone", "line 3: the id is the one on line 1"},
+		{"an id that differs only in bytes 6 and 7", clientA + " phone@a\n" + clientB + "\n" + clientA67 + " phone@b", "line 3 (phone@b): the id differs from line 1's (phone@a) only in bytes 6 and 7"},
+		{"in capitals, against an unnamed line", strings.ToUpper(clientA67) + "\n" + clientA + " phone", "line 2 (phone): the id differs from line 1's only in bytes 6 and 7"},
 		{"the same name in another case", clientA + " phone\n" + clientB + " Phone", "line 2: the name is the one on line 1"},
 		{"only comments", "# " + clientA + "\n\n", "lists no client"},
 		{"empty", "", "lists no client"},
@@ -363,12 +369,16 @@ func TestVlessClientsRefusals(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "inbounds[0].settings.clients: "+list+" "+tc.want) {
 				t.Fatalf("err = %v\nwant %q", err, tc.want)
 			}
-			for _, id := range []string{clientA, clientB, clientA[:35], strings.ToUpper(clientA)} {
+			for _, id := range []string{clientA, clientB, clientA[:35], strings.ToUpper(clientA), clientA67, strings.ToUpper(clientA67)} {
 				if strings.Contains(err.Error(), id) {
 					t.Errorf("error %q carries an id", err)
 				}
 			}
 		})
+	}
+	// Ids that differ in the bytes either side of 6 and 7 are distinct to Xray.
+	if c, err := parseClients(clientA + "\n" + clientA[:12] + "0" + clientA[13:] + "\n" + clientA[:19] + "0" + clientA[20:]); err != nil || len(c) != 3 {
+		t.Errorf("ids that differ in byte 5 or 8: %v, %v", c, err)
 	}
 	// A name of exactly 64 characters, every allowed one included.
 	name := strings.Repeat("x", 52) + "Az09._@+-Q.Z"
