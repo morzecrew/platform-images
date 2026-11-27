@@ -124,6 +124,16 @@ func TestResolveValueTargets(t *testing.T) {
 	if !strings.Contains(out.String(), "o <- $pair (an object)   (") {
 		t.Errorf("summary:\n%s", out.String())
 	}
+	top := write(t, filepath.Join(dir, "top.json"), `{"$pair": {"x": 1}}`, 0o600)
+	if c, err := ResolveFile(top, refs); err != nil || string(c.Out) != "1\n" {
+		t.Errorf("a top-level reference: %v", err)
+	} else {
+		out.Reset()
+		demo.Summary(&out, "v", []*Config{c})
+		if !strings.Contains(out.String(), "the top level <- $pair (an object)   (") {
+			t.Errorf("summary:\n%s", out.String())
+		}
+	}
 	src = write(t, filepath.Join(dir, "c.json"), `{"a": {"$pair": 7}}`, 0o600)
 	if _, err := ResolveFile(src, refs); err == nil || err.Error() != src+": a: takes a path or an object" {
 		t.Errorf("err = %v", err)

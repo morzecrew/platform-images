@@ -80,6 +80,8 @@ of these. Everything else in the config stays as written.
 | `{"$wireguard": "/abs/path"}` | a wireguard outbound's `settings`, from the wg-quick client config in the file (see below) |
 | `{"$upstreams": "/abs/path"}` | an `outbounds` array, one socks, http or wireguard outbound per line of the file (see below) |
 | `{"$subscription": "/abs/path"}` | the `outbounds` array of the Xray config the URL in the file serves, kept current (see below) |
+| `{"$gateway": {"servers": "/abs/path", …}}` | a whole config: a dotdash relay's inbounds, outbounds, routing and observatory to its server groups (see below) |
+| `{"$gatewayClients": "vless"}`, `"hysteria"` | a device inbound's `clients` or `users`: the gateway's devices (see below) |
 
 ```json
 "settings": {
@@ -116,8 +118,9 @@ file, the JSON path and the referenced path, never a value.
   checks the shared `_FILE` contract makes.
 - An object holding `$file`, `$vlessDecryption`, `$vlessClients`,
   `$hysteriaUsers`, `$proxy`, `$wireguard` or `$upstreams` and any other key, or a path that is not an absolute path in a string
-  (`$vlessClients` also takes [an object](#a-servers-relays), with its own
-  checks). A near miss would otherwise reach Xray as a literal.
+  (`$vlessClients` also takes [an object](#a-servers-relays), and `$gateway`
+  and `$gatewayClients` take [no path](#a-dotdash-relays-gateway), with their
+  own checks). A near miss would otherwise reach Xray as a literal.
 - A seed file that is not exactly 128 hex characters.
 - A client list with a line it refuses (see below).
 - A proxy file that is not one `[user:pass@]host:port` (see below).
@@ -545,6 +548,121 @@ the container with Xray's status.
   `protocol`, `network`, `security`, `flow`, `fingerprint`, `mode`, `tag` and
   `type`, is redacted from Xray's output.
 
+## A dotdash relay's gateway
+
+A dotdash relay carries devices of several server groups, each with its own
+servers and exit, and keeps each group's devices on that group's servers.
+`$gateway` builds that from two secrets: `servers`, one `server/1` line per
+group, as each server's `relay-config` prints it, and `via`, the relays this
+one goes through, as `relay/1` lines. It stands for a whole config, so it is
+alone in a file of its own; the device inbounds stay in the template's, their
+clients and users from `$gatewayClients`:
+
+```json
+{"$gateway": {"servers": "/run/secrets/servers", "via": "/run/secrets/via", "serverLink": "reality", "ipv6": "allow",
+              "probeURL": "https://www.gstatic.com/generate_204", "tunnelGroup": ""}}
+```
+
+```json
+"inbounds": [{"tag": "devices", "port": 8443, "protocol": "vless",
+              "settings": {"clients": {"$gatewayClients": "vless"}, "flow": "xtls-rprx-vision", "decryption": {"$vlessDecryption": "/run/secrets/vless_seed"}}, …},
+             {"tag": "devices-hy2", "port": 8448, "protocol": "hysteria",
+              "settings": {"version": 2, "users": {"$gatewayClients": "hysteria"}}, …}]
+```
+
+| Option | Default | |
+|---|---|---|
+| `servers` | required | The `server/1` lines. With none, the relay lets nobody in. |
+| `via` | none | The `relay/1` lines of the relays this one goes through, in place of the servers. |
+| `serverLink` | `reality` | `reality`: REALITY with Vision to each server. `xhttp-reality`: XHTTP with REALITY, on the port and path of a line's `xr=`; a line without `xr=` keeps REALITY. |
+| `viaLink` | `reality` | `reality`: REALITY with Vision to each relay in `via`. `xhttp`: XHTTP through each one's own site, which needs its `xhttp=`. |
+| `viaFingerprint` | `chrome` | The TLS hello of `viaLink` `xhttp`: `chrome`, `firefox`, `safari`, `edge`, `ios`, `android`, `random`, or `none` for Go's own. |
+| `ipv6` | `allow` | `block`: an IPv6 destination goes nowhere. |
+| `probeURL` | `https://www.gstatic.com/generate_204` | What the observatory fetches through each leg. |
+| `tunnelGroup` | the first group | The group the `tunnel` inbound goes to. One no line names is warned of, and the first group's. |
+
+**A server/1 line** is
+`server/1 <name> <host>[,<host>…] <port> <pbk> <sid> <enc> <relay id>`, then
+optional `xr=<port>,<path>` and `address=<ip>[,<ip>…]`, read as `relay/1`
+lines are: blank lines and `#` comments skipped, any other line refused by
+its number, an unknown `key=` left out with a warning. The name is the
+group's, 1 to 16 lowercase letters and digits starting with a letter, unique;
+it has no dash, because a balancer's selector is a prefix of its legs' tags.
+The hosts are the group's servers, which share their keys: DNS names or IPv4
+addresses. The relay id is this relay's id on them, as a server derives it
+([`$vlessClients`](#a-servers-relays)). `address=` gives one IP per host, in
+order, which the relay dials in place of the name.
+
+**What it makes.**
+
+- **Outbounds.** First `block`, a blackhole: Xray's default outbound. Then a
+  leg per server, tagged `<group>-<n>`, as this relay's id on the group; or,
+  with `via`, a leg per relay there instead, `<group>-v<n>`, on port 443, still
+  as this relay's id on the group, which that relay's server lists for it.
+- **Inbounds.** `subscriptions` (http, `0.0.0.0:10810`) and `tunnel` (http,
+  `0.0.0.0:10811`), for the relay's Caddy on the project's network; and a
+  `probe-<leg>` per leg (http, `127.0.0.1`, from port 10900 in the legs'
+  order), for the agent.
+- **A balancer per group**, tagged with its name, `leastPing` over its legs
+  (selector `<group>-`), its `fallbackTag` its own first leg, and a
+  `burstObservatory` over every group, probing each leg every 30 seconds.
+- **The rules**, in order, each tagged:
+
+| `ruleTag` | Matches | Goes to |
+|---|---|---|
+| `ipv6` | `ip: ::/0` (`ipv6` `block` only) | `block` |
+| `internal` | a device (`user: regexp:@`) asking for a `dotdash.internal` name | `block` |
+| `probe-<leg>` | that leg's probe inbound | that leg |
+| `tunnel` | the `tunnel` inbound | the tunnel group |
+| `sub-<group>` | the `subscriptions` inbound, for `<prefix>.sub.dotdash.internal`, a prefix of the group's | the group |
+| `users-<group>` | a device named `<device>@<group>` | the group |
+| `block` | anything else (`network: tcp,udp`) | `block` |
+
+Three of these fail closed, and no template can drop them: the default
+outbound is a blackhole; a group whose legs are all down, or not probed yet,
+falls back to its own first leg, never to that default and so never to
+another group's server; and the last rule blocks what no other took. A device
+reaches its server as the relay, which may ask a server for its internal
+names: `internal` keeps devices from asking.
+
+**`$gatewayClients`** is `"vless"` in a VLESS inbound's `settings.clients`
+or `"hysteria"` in a Hysteria2 inbound's `settings.users`: the gateway's
+devices, each named `<device>@<group>`, none at the first start. The inbound's
+`settings.flow` gives a VLESS client its flow, as for `$vlessClients`.
+
+**What the rest of the config holds.** Xray merges `-confdir` files, a later
+file's outbounds before the earlier ones' and its routing in place of theirs,
+so no other file may hold `outbounds`, `routing`, `observatory` or
+`burstObservatory`. The devices are added and removed through Xray's API, and
+a removed device still connected is told by its online count, so the config
+needs:
+
+```json
+"api": {"tag": "api", "listen": "127.0.0.1:10085", "services": ["HandlerService", "RoutingService", "StatsService"]},
+"stats": {},
+"policy": {"levels": {"0": {"statsUserOnline": true}}}
+```
+
+Each of these exits 78. The message names the file and the line, never what
+is on the line:
+
+- A `servers` line whose first field is not `server/1`, such as a `relay/1`
+  line; a head of fewer than 8 fields, or a field outside its shape; two lines
+  with one name; an `xr=` that is not `<port>,<path>`; an `address=` that is
+  not one IP per host.
+- A `via` line `$vlessClients` would refuse; with `viaLink` `xhttp`, a line
+  without `xhttp=`.
+- An option not listed above, one that is not a string, or a value outside
+  its list; no `servers`.
+- `$gateway` anywhere but a file's top level, or in two files; `outbounds`,
+  `routing`, `observatory` or `burstObservatory` in another file.
+- No API on a loopback address with the three services, no `stats`, or no
+  `statsUserOnline` at level 0, taking the file Xray takes each from: the last
+  in name order.
+- `$gatewayClients` with no `$gateway`; a word other than `vless` and
+  `hysteria`; anywhere but a VLESS inbound's `settings.clients` or a Hysteria2
+  inbound's `settings.users`, of an inbound with a tag and a port.
+
 ## Geodata from a URL
 
 `XRAY_GEOIP` and `XRAY_GEOSITE` replace the image's `geoip.dat` and
@@ -837,7 +955,8 @@ and tzdata current.
   (its tests run there), and the distroless runtime.
 - `entrypoint/`: `xray-entrypoint`, standard library only, and its tests,
   which cover every seed, client list and proxy refusal above, and each way
-  a `fetch` can end, against a test server and proxy. The resolver
+  a `fetch` can end, against a test server and proxy, and check that every
+  shape of a gateway's config keeps its three rules that fail closed. The resolver
   and its file checks, the summary and the healthcheck live in
   [`shared/go/envconf`](../../shared/go/envconf), with their tests, which
   mihomo uses too.
@@ -851,4 +970,4 @@ and tzdata current.
   and an http upstream with a password holding `:` and `@`, the healthcheck,
   `fetch` through the probe inbound and through a dead proxy, the refusals an
   operator is most likely to meet, and the absence of every secret from the
-  output.
+  output, and that Xray takes each shape of a gateway's config.

@@ -131,7 +131,7 @@ func TestParseRelays(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	for _, want := range []string{"/run/secrets/relays line 1: no field is named future=; ignored", "line 1: a field with no =", "line 1: a field with a key that is not one"} {
+	for _, want := range []string{"/run/secrets/relays line 1: no field is named future=; ignored", "line 1: a word with no = that this reader doesn't know", "line 1: a field with a key that is not one"} {
 		if !strings.Contains(warned, want) {
 			t.Errorf("warnings %q lack %q", warned, want)
 		}

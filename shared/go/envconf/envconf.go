@@ -116,7 +116,11 @@ func (im *Image) Summary(w io.Writer, version string, configs []*Config) {
 			if r.Note != "" {
 				from += " " + r.Note
 			}
-			fmt.Fprintf(w, "[envconf]   source=%-14s %s <- %s   (%s)\n", "file", r.Path, from, c.Src)
+			path := r.Path
+			if path == "" {
+				path = "the top level"
+			}
+			fmt.Fprintf(w, "[envconf]   source=%-14s %s <- %s   (%s)\n", "file", path, from, c.Src)
 		}
 	}
 	fmt.Fprintln(w, "[envconf] precedence: image default < environment")
