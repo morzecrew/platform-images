@@ -671,7 +671,8 @@ second after Xray starts and every `XRAY_GATEWAY_INTERVAL` from then on:
    logged in, so when a removed device is still online
    (`statsgetallonlineusers`), Xray restarts on the config resolved again from
    the lists in memory, tested first as a subscription's is. Every device's
-   connections drop. Xray counts nobody online from `127.0.0.1`.
+   connections drop. A restart whose config fails is tried again every round
+   till it passes. Xray counts nobody online from `127.0.0.1`.
 
 Lists live in memory and in the runtime directory's resolved config, both
 gone when the container stops: after a start, each group's devices get in
@@ -747,7 +748,9 @@ is on the line:
   `hysteria`; anywhere but a VLESS inbound's `settings.clients` or a Hysteria2
   inbound's `settings.users`, of an inbound with a tag and a port.
 - `XRAY_GATEWAY_INTERVAL` under a second; an `XRAY_GATEWAY_STATUS` that is
-  not an absolute path, or whose directory 65532 cannot write.
+  not an absolute path, in a directory in or around `XRAY_SOURCE_DIR` or
+  `XRAY_RUNTIME_DIR` (Xray would read it there as config), or whose
+  directory 65532 cannot write.
 
 ## Geodata from a URL
 
