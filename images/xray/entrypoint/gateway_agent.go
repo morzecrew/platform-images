@@ -392,28 +392,31 @@ func gatewayUnion(groups []gwGroup) ([]gwUser, map[string][]string, []string) {
 			}
 		}
 	}
+	// Each group's claim on a prefix counts from every entry, dropped or not:
+	// a prefix two groups list is theirs both, so no route, whichever entry
+	// went. One group's goes to it while an entry it keeps has it.
 	var users []gwUser
-	groupsOf := map[string][]string{}
-	namesOf := map[string][]string{}
+	groupsOf, namesOf, kept := map[string][]string{}, map[string][]string{}, map[string]bool{}
 	for i, it := range items {
-		if drop[i] {
-			continue
+		if !drop[i] {
+			users = append(users, it.u)
 		}
-		users = append(users, it.u)
 		if it.prefix != "" {
 			if !slices.Contains(groupsOf[it.prefix], it.group) {
 				groupsOf[it.prefix] = append(groupsOf[it.prefix], it.group)
 			}
 			namesOf[it.prefix] = append(namesOf[it.prefix], it.u.email)
+			kept[it.prefix] = kept[it.prefix] || !drop[i]
 		}
 	}
 	prefixes := map[string][]string{}
 	for _, p := range slices.Sorted(maps.Keys(groupsOf)) {
-		if len(groupsOf[p]) > 1 {
+		switch {
+		case len(groupsOf[p]) > 1:
 			dropped = append(dropped, "the subscription prefix of "+strings.Join(namesOf[p], ", ")+": in two groups, so it has no route")
-			continue
+		case kept[p]:
+			prefixes[groupsOf[p][0]] = append(prefixes[groupsOf[p][0]], p)
 		}
-		prefixes[groupsOf[p][0]] = append(prefixes[groupsOf[p][0]], p)
 	}
 	slices.Sort(dropped)
 	return users, prefixes, dropped

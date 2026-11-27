@@ -242,6 +242,22 @@ func TestGatewayUnion(t *testing.T) {
 	if _, prefixes, _ := gatewayUnion(groups); !slices.Equal(prefixes["a"], []string{"aaaaaaaaaaaa", "cccccccccccc"}) {
 		t.Errorf("prefixes %v", prefixes)
 	}
+	// b claims laptop@a's prefix on an entry its id has dropped (with
+	// phone@a): still b's as well as a's, so no route; and phone@a's, whose
+	// only entry went, none either.
+	groupState("b").list = []gwEntry{{devA67, "phone", "cccccccccccc"}}
+	_, prefixes, dropped = gatewayUnion(groups)
+	if len(prefixes) != 0 {
+		t.Errorf("a prefix two groups claim, one of them on a dropped entry: %v", prefixes)
+	}
+	if !slices.Contains(dropped, "the subscription prefix of laptop@a, phone@b: in two groups, so it has no route") {
+		t.Errorf("dropped %q", dropped)
+	}
+	// A prefix only a dropped entry has gets no route either.
+	groupState("b").list = []gwEntry{{devA67, "phone", "dddddddddddd"}}
+	if _, prefixes, _ := gatewayUnion(groups); slices.Contains(prefixes["b"], "dddddddddddd") {
+		t.Errorf("the prefix of a dropped entry routed: %v", prefixes)
+	}
 }
 
 func TestGatewayRounds(t *testing.T) {
