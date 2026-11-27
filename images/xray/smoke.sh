@@ -975,7 +975,7 @@ echo "ok: no secret value in any log, summary or refusal"
 
 # --- 12. a dotdash relay's gateway, end to end --------------------------------
 
-# Its own pod, stand-in servers and devices: smoke-gateway.sh.
+# Stand-in servers and devices around a relay, on loopback: smoke-gateway.sh.
 ENGINE="${ENGINE}" bash "$(dirname "$0")/smoke-gateway.sh" "${IMAGE}"
 
 echo "PASS: xray smoke (${IMAGE})"

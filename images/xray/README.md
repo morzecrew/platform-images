@@ -580,6 +580,7 @@ clients and users from `$gatewayClients`:
 | `ipv6` | `allow` | `block`: an IPv6 destination goes nowhere. |
 | `probeURL` | `https://www.gstatic.com/generate_204` | What the observatory fetches through each leg. |
 | `tunnelGroup` | the first group | The group the `tunnel` inbound goes to. One no line names is warned of, and the first group's. |
+| `listen` | `0.0.0.0` | The address the `subscriptions` and `tunnel` inbounds listen on, such as the container's address on the network it shares with Caddy alone. |
 
 **A server/1 line** is
 `server/1 <name> <host>[,<host>…] <port> <pbk> <sid> <enc> <relay id>`, then
@@ -599,8 +600,8 @@ order, which the relay dials in place of the name.
   leg per server, tagged `<group>-<n>`, as this relay's id on the group; or,
   with `via`, a leg per relay there instead, `<group>-v<n>`, on port 443, still
   as this relay's id on the group, which that relay's server lists for it.
-- **Inbounds.** `subscriptions` (http, `0.0.0.0:10810`) and `tunnel` (http,
-  `0.0.0.0:10811`), for the relay's Caddy on the project's network; and a
+- **Inbounds.** `subscriptions` (http, port 10810) and `tunnel` (http,
+  port 10811), on `listen`, for the relay's Caddy on the project's network; and a
   `probe-<leg>` per leg (http, `127.0.0.1`, from port 10900 in the legs'
   order), for the agent.
 - **A balancer per group**, tagged with its name, `leastPing` over its legs
@@ -1064,13 +1065,15 @@ and tzdata current.
   operator is most likely to meet, and the absence of every secret from the
   output, and that Xray takes each shape of a gateway's config; then
   `smoke-gateway.sh`.
-- `smoke-gateway.sh`: a gateway end to end, in a pod with no network: a
-  relay of this image in front of two stand-in server groups, each an Xray of
-  this image letting the relay in by its derived id, with its own exit and a
-  Python stand-in for its internal endpoint. Devices of each group get in
+- `smoke-gateway.sh`: a gateway end to end, on loopback, with no image but
+  this one: a relay in front of two stand-in server groups, each an Xray of
+  this image letting the relay in by its derived id, with its own exit and,
+  on the host, a Python stand-in for its internal endpoint. Devices of each group get in
   through the API by REALITY and Hysteria2 with no restart, reach their own
   group's exit and subscriptions, and are kept from the internal names; a
   device added gets in; an id two groups share is dropped from both; one
   removed while connected restarts Xray and loses its open download; a group
   whose server is down, also before the first round, or answers it has no
-  list, gets nothing while the other is unaffected.
+  list, gets nothing while the other is unaffected. Each refusal is checked
+  to have reached the client, beside a request known to work. It needs the
+  gateway's fixed ports, 10810, 10811 and 10900 up, free on loopback.

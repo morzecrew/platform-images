@@ -136,6 +136,7 @@ type gwOptions struct {
 	ipv6           string // allow, or block
 	probeURL       string
 	tunnelGroup    string // "": the first group
+	listen         string // the subscriptions and tunnel inbounds'
 }
 
 var gwEnums = map[string][]string{
@@ -147,7 +148,7 @@ var gwEnums = map[string][]string{
 
 func gatewayOptions(target any) (gwOptions, error) {
 	o := gwOptions{serverLink: "reality", viaLink: "reality", viaFingerprint: "chrome", ipv6: "allow",
-		probeURL: "https://www.gstatic.com/generate_204"}
+		probeURL: "https://www.gstatic.com/generate_204", listen: "0.0.0.0"}
 	obj, ok := target.(map[string]any)
 	if !ok {
 		return o, errors.New(`"$gateway" takes an object: {"servers": "<absolute path>", ...}`)
@@ -183,13 +184,18 @@ func gatewayOptions(target any) (gwOptions, error) {
 				return o, errors.New(`"$gateway": "probeURL" is not an http or https URL`)
 			}
 			o.probeURL = s
+		case "listen":
+			if net.ParseIP(s) == nil {
+				return o, errors.New(`"$gateway": "listen" is not an IP address`)
+			}
+			o.listen = s
 		case "tunnelGroup":
 			if s != "" && !upstreamGroupRE.MatchString(s) {
 				return o, errors.New(`"$gateway": "tunnelGroup" is not a group's name`)
 			}
 			o.tunnelGroup = s
 		default:
-			return o, fmt.Errorf(`"$gateway" takes servers, via, serverLink, viaLink, viaFingerprint, ipv6, probeURL and tunnelGroup, and this one also holds %q`, k)
+			return o, fmt.Errorf(`"$gateway" takes servers, via, serverLink, viaLink, viaFingerprint, ipv6, probeURL, tunnelGroup and listen, and this one also holds %q`, k)
 		}
 	}
 	if o.servers == "" {
@@ -371,8 +377,8 @@ func gatewayGroups(lines []serverLine, hops []relayLine, o gwOptions) []gwGroup 
 // subscription prefixes routed to it.
 func gatewayDoc(groups []gwGroup, o gwOptions, prefixes map[string][]string) map[string]any {
 	inbounds := []any{
-		map[string]any{"tag": "subscriptions", "listen": "0.0.0.0", "port": gwSubscriptionsPort, "protocol": "http"},
-		map[string]any{"tag": "tunnel", "listen": "0.0.0.0", "port": gwTunnelPort, "protocol": "http"},
+		map[string]any{"tag": "subscriptions", "listen": o.listen, "port": gwSubscriptionsPort, "protocol": "http"},
+		map[string]any{"tag": "tunnel", "listen": o.listen, "port": gwTunnelPort, "protocol": "http"},
 	}
 	outbounds := []any{map[string]any{"tag": "block", "protocol": "blackhole"}}
 	var selectors []string

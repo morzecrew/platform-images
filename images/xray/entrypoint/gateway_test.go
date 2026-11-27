@@ -360,6 +360,22 @@ func TestGatewayResolves(t *testing.T) {
 	}
 	failsClosed(t, asJSON(t, configs[0]), []string{"a", "b"})
 
+	// Caddy's inbounds on every address unless listen names one.
+	for _, in := range asJSON(t, configs[0])["inbounds"].([]any)[:2] {
+		if in.(map[string]any)["listen"] != "0.0.0.0" {
+			t.Errorf("by default: %v", in)
+		}
+	}
+	_, configs, err = gwSource(t, server1("a", "a.example.com", clientA), "", `"listen": "127.0.0.1"`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range asJSON(t, configs[0])["inbounds"].([]any)[:2] {
+		if in := in.(map[string]any); in["listen"] != "127.0.0.1" || (in["tag"] != "subscriptions" && in["tag"] != "tunnel") {
+			t.Errorf("with listen 127.0.0.1: %v", in)
+		}
+	}
+
 	// An unknown tunnelGroup: said, and the first group's.
 	warned := stderr(t, func() {
 		if _, _, err := gwSource(t, server1("a", "a.example.com", clientA), "", `"tunnelGroup": "zz"`); err != nil {
@@ -378,6 +394,7 @@ func TestGatewayRefusals(t *testing.T) {
 		{"a link it doesn't know", ok, "", `"serverLink": "quic"`, `"$gateway": "serverLink" is none of reality, xhttp-reality`},
 		{"an option that is not a string", ok, "", `"ipv6": true`, `"$gateway": "ipv6" is not a string`},
 		{"a probe URL that is not one", ok, "", `"probeURL": "ftp://x"`, `"$gateway": "probeURL" is not an http or https URL`},
+		{"a listen address that is a name", ok, "", `"listen": "caddy"`, `"$gateway": "listen" is not an IP address`},
 		{"a malformed server line", ok + "\n\n" + server1("b-c", "b.example.com", clientB), "", "", "servers line 3: the name is not 1 to 16"},
 		{"a legacy via line", ok, "r1.example.net site.example " + strings.Repeat("P", 43) + " ab none", "", "via line 1: not a relay/1 line"},
 		{"an xhttp via with no path", ok, relay1("y", "0123456789abcdef"), `"viaLink": "xhttp"`, "via line 1: viaLink xhttp goes through each relay's own site"},
