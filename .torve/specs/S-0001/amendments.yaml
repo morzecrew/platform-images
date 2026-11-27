@@ -746,11 +746,53 @@ amendments:
     md: >-
       dotdash adds Hysteria2, which Xray runs natively, beside its VLESS inbounds,
       and each device's Hysteria2 login is the UUID its VLESS links carry, so one
-      file still adds and revokes a device everywhere. A Hysteria2 inbound's
-      `users` take an `auth` where VLESS clients take an `id`, and a template can't
-      read the file, so `$hysteriaUsers` reads the same file as `$vlessClients`,
-      through the same parser and refusals, and writes each client as `{"auth":
-      <uuid>, "email": <name>}`.
+      file still adds and revokes a device everywhere. A Hysteria2 inbound's `users`
+      take an `auth` where VLESS clients take an `id`, and a template can't read the
+      file, so `$hysteriaUsers` reads the same file as `$vlessClients`, through the
+      same parser and refusals, and writes each client as `{"auth": <uuid>, "email":
+      <name>}`.
+  - id: A-23
+    at: '2026-11-27T17:54:14Z'
+    title: >-
+      xray takes an object for $vlessClients: the devices file, a server's relay/1
+      lines and its relay seed
+    changes:
+      - subject: D-18
+        field: text
+        before: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's and mihomo's servers have none,
+          so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
+          path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}`, `{"$hysteriaUsers":
+          "<absolute path>"}`, `{"$proxy": "<absolute path>"}`, `{"$wireguard": "<absolute
+          path>"}`, `{"$upstreams": "<absolute path>"}` or `{"$subscription": "<absolute
+          path>"}`, and substitute nothing else.
+        after: >-
+          No entrypoint renders configuration through a templating engine; each image
+          uses its server's native expansion. xray's and mihomo's servers have none,
+          so their entrypoints replace a JSON object that is exactly `{"$file": "<absolute
+          path>"}` with the value that file yields, xray's also `{"$vlessDecryption":
+          "<absolute path>"}`, `{"$vlessClients": "<absolute path>"}` or `{"$vlessClients":
+          {"devices": "<absolute path>", "relays": "<absolute path>" or an array of
+          relay/1 lines, "seed": "<absolute path>"}}`, `{"$hysteriaUsers": "<absolute
+          path>"}`, `{"$proxy": "<absolute path>"}`, `{"$wireguard": "<absolute path>"}`,
+          `{"$upstreams": "<absolute path>"}` or `{"$subscription": "<absolute path>"}`,
+          and substitute nothing else.
+      - subject: D-18
+        field: fingerprint
+        before: c6c1ec0cfb07a507/9e62c124a404b61d
+        after: 20229015ab864db2/9e62c124a404b61d
+    md: >-
+      dotdash's relays stop being typed into a server's `vless_clients`: a server
+      works its relay's id out of a relay seed of its own and the relay's name and
+      nonce, from the relay/1 line it keeps for it. A template sees secret paths,
+      never values, so the image makes the union: `$vlessClients` also takes an
+      object naming the devices file, the relay lines (a file, or the lines a
+      template writes out of a parameter) and the seed, and yields the devices and
+      one client per relay. The derivation has a test vector, which dotdash's
+      server and manager check theirs against, and a `relay-id` command for the
+      server's tasks.
 editorial:
   - subject: D-5
     field: text

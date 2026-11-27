@@ -1,0 +1,47 @@
+{
+  "about": "A relay's id on a server and its list token. relay id = the version 4 UUID made of the first 16 bytes of sha256(\"<seed>:relay:<name>:<nonce>\"): byte 6 = (byte 6 & 0x0f) | 0x40, byte 8 = (byte 8 & 0x3f) | 0x80, written lowercase 8-4-4-4-12. list token = the first 32 hex characters of sha256(\"<relay id>:list\"). seed: 64 lowercase hex characters, hashed as text; name: 1 to 24 of A-Z a-z 0-9 . _ -; nonce: 16 lowercase hex characters. Every implementation (xray-entrypoint relay-id, dotdash's server and manager) is tested against these.",
+  "vectors": [
+    {
+      "seed": "0000000000000000000000000000000000000000000000000000000000000000",
+      "name": "r1",
+      "nonce": "0000000000000000",
+      "id": "390beed3-6317-40cf-9569-75bea7f4a3a1",
+      "list_token": "65120faee083a6ac58282bbc3130ee16"
+    },
+    {
+      "seed": "cfd1e43a16cc1f396e255bd80b0f79d33367ea0dda58e15236b1c5c183264a1a",
+      "name": "r1",
+      "nonce": "0123456789abcdef",
+      "id": "7709cd06-d159-422a-8691-176c8f9504b0",
+      "list_token": "04eb72277275ecb65eb273605cef8d89"
+    },
+    {
+      "seed": "cfd1e43a16cc1f396e255bd80b0f79d33367ea0dda58e15236b1c5c183264a1a",
+      "name": "r2",
+      "nonce": "0123456789abcdef",
+      "id": "a7b5da93-abab-478b-8082-49e781a58164",
+      "list_token": "01381ed5ccd0d0b4bc1c02d64a70b7b9"
+    },
+    {
+      "seed": "45d970499027a062c939533ab9e97f374fbbcf1f879add829a1483a121ea2ad5",
+      "name": "r1",
+      "nonce": "0123456789abcdef",
+      "id": "9762166e-eb4b-4fdb-b800-01704a9ff854",
+      "list_token": "4030a5e6710fafe533c9190d8fb28000"
+    },
+    {
+      "seed": "45d970499027a062c939533ab9e97f374fbbcf1f879add829a1483a121ea2ad5",
+      "name": "Relay_2.b-x",
+      "nonce": "fedcba9876543210",
+      "id": "6b779d0d-d3f3-4923-8331-b89fa4f0a791",
+      "list_token": "445332ab2f9db510e1479ad328ace366"
+    },
+    {
+      "seed": "65b1d335c9c0b71452a99da94f778217397b759f2092a3fb7a9dc870542a6148",
+      "name": "abcdefghijklmnopqrstuvwx",
+      "nonce": "a1b2c3d4e5f60718",
+      "id": "4ba55395-bfb2-48d4-953b-ed99cfc375ef",
+      "list_token": "3826ea841b3a047a766b7f5a28b5a270"
+    }
+  ]
+}

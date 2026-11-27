@@ -31,6 +31,7 @@ PROBE_WG_PORT=$((BASE + 13))
 PROBE_UP0_PORT=$((BASE + 14))
 PROBE_UP1_PORT=$((BASE + 15))
 PROBE_UP2_PORT=$((BASE + 16))
+PROBE_R_PORT=$((BASE + 17))
 HTTPD_PID=""
 TLSD_PID=""
 ALL_OUTPUT=""
@@ -92,8 +93,10 @@ RUN_ARGS=(--network host --userns keep-id:uid=65532,gid=65532)
 # - a VLESS + REALITY inbound whose clients are a $vlessClients reference and
 #   whose flow, Vision, is the inbound's "settings.flow". Two more probe
 #   inbounds connect to it through Vision, one as each client, so a 2xx from
-#   either proves that client and the flow Xray gave it. Its REALITY target is
-#   a TLS server this script runs on loopback;
+#   either proves that client and the flow Xray gave it, and a third as a
+#   dotdash relay, with the id relay-id derives for it, which only the
+#   object form of $vlessClients lets in. Its REALITY target is a TLS server
+#   this script runs on loopback;
 # - a socks and an http inbound that ask for a user and a password, each the
 #   upstream of an outbound of the same kind whose settings are a $proxy
 #   reference, and a probe inbound routed to each outbound, so a 2xx from
@@ -139,6 +142,7 @@ config() {
 		                                            "privateKey": {"\$file": "/run/secrets/reality_key"}, "shortIds": [""]}}},
 		    {"tag": "probe-a", "listen": "127.0.0.1", "port": ${PROBE_A_PORT}, "protocol": "http"},
 		    {"tag": "probe-b", "listen": "127.0.0.1", "port": ${PROBE_B_PORT}, "protocol": "http"},
+		    {"tag": "probe-r", "listen": "127.0.0.1", "port": ${PROBE_R_PORT}, "protocol": "http"},
 		    {"tag": "upstream-socks", "listen": "127.0.0.1", "port": ${UP_SOCKS_PORT}, "protocol": "socks",
 		     "settings": {"auth": "password", "accounts": [${account}]}},
 		    {"tag": "upstream-http", "listen": "127.0.0.1", "port": ${UP_HTTP_PORT}, "protocol": "http",
@@ -171,12 +175,17 @@ config() {
 		    {"tag": "to-http", "protocol": "http", "settings": {"\$proxy": "/run/secrets/proxy_http"}},
 		    {"tag": "to-target", "protocol": "freedom",
 		     "settings": {"redirect": "127.0.0.1:${TARGET_PORT}", "finalRules": [{"action": "allow"}]}},
-		    {"tag": "to-wg", "protocol": "wireguard", "settings": ${wireguard}}
+		    {"tag": "to-wg", "protocol": "wireguard", "settings": ${wireguard}},
+		    {"tag": "to-r", "protocol": "vless",
+		     "settings": {"vnext": [{"address": "127.0.0.1", "port": ${CLIENTS_PORT},
+		                             "users": [{"id": {"\$file": "/run/secrets/relay_id"}, "encryption": "none", "flow": "xtls-rprx-vision"}]}]},
+		     "streamSettings": {"network": "raw", "security": "reality", "realitySettings": ${reality_client}}}
 		  ],
 		  "routing": {"rules": [
 		    {"inboundTag": ["probe"], "outboundTag": "to-seeded"},
 		    {"inboundTag": ["probe-a"], "outboundTag": "to-a"},
 		    {"inboundTag": ["probe-b"], "outboundTag": "to-b"},
+		    {"inboundTag": ["probe-r"], "outboundTag": "to-r"},
 		    {"inboundTag": ["probe-socks"], "outboundTag": "to-socks"},
 		    {"inboundTag": ["probe-http"], "outboundTag": "to-http"},
 		    {"inboundTag": ["probe-wg"], "outboundTag": "to-wg"},
@@ -269,6 +278,17 @@ printf '%s phone\n%s Phone\n' "${uuid}" "${ID_B}" >"${WORK}/secrets/clients_same
 ID_67="${uuid:0:14}ffff${uuid:18}"
 printf '%s phone@a\n%s phone@b\n' "${uuid}" "${ID_67}" >"${WORK}/secrets/clients_bytes_67"
 printf '# nobody yet\n\n' >"${WORK}/secrets/clients_none"
+# A server's relay seed and its relays, as a vector of
+# testdata/relay-id.json has them: the image's relay-id must print the id a
+# separate implementation computed there.
+read -r RELAY_SEED RELAY_NAME RELAY_NONCE RELAY_VECTOR_ID < <(python3 -c 'import json, sys
+v = json.load(open(sys.argv[1]))["vectors"][1]
+print(v["seed"], v["name"], v["nonce"], v["id"])' "$(dirname "$0")/entrypoint/testdata/relay-id.json")
+printf '%s\n' "${RELAY_SEED}" >"${WORK}/secrets/relay_seed"
+RELAY_LINE="relay/1 ${RELAY_NAME} ${RELAY_NONCE} relay.test relay.test $(printf 'P%.0s' $(seq 43)) 0a1b none xhttp=0a1b2c"
+printf '# One relay per line, as its relay-entry task prints it\n%s\n' "${RELAY_LINE}" >"${WORK}/secrets/relays"
+# Refused: a relay line of today's format, with no tag.
+printf 'relay.test relay.test %s 0a1b none\n' "$(printf 'P%.0s' $(seq 43))" >"${WORK}/secrets/relays_legacy"
 # An upstream's user and password, which its inbounds read as two files and
 # its outbounds as one line each. The password holds ":" and "@", which only
 # a split at the last @ and the first colon before it gets right.
@@ -318,14 +338,14 @@ mkdir "${WORK}/secrets/a_directory"
 touch "${WORK}/www/generate_204"
 head -c 100000 /dev/zero >"${WORK}/www/down"
 printf '203.0.113.7\n' >"${WORK}/www/ip"
-SECRETS=("${uuid}" "${uuid^^}" "${ID_67}" "${ID_B}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}"
+SECRETS=("${uuid}" "${uuid^^}" "${ID_67}" "${ID_B}" "${decryption}" "${XHTTP_PATH}" "${SEED}" "${SEED_B64}" "${REALITY_KEY}" "${RELAY_SEED}" "${RELAY_VECTOR_ID}"
 	"${PROXY_USER}" "${PROXY_PASS}" "${PROXY_PASS_LONE}" "${PROXY_PASS##*@}" "${WG_CLIENT_KEY}" "${WG_PEER_KEY}")
 
-# client_value <command> <path>: one of the helper's client-side subcommands,
-# with the secrets mounted.
+# client_value <command> <path> [args...]: one of the helper's client-side
+# subcommands, with the secrets mounted.
 client_value() {
 	"${ENGINE}" run --rm "${RUN_ARGS[@]}" -v "${WORK}/secrets:/run/secrets:ro" \
-		"${IMAGE}" "$1" "$2"
+		"${IMAGE}" "$@"
 }
 encryption="$(client_value vless-encryption /run/secrets/vless_seed)"
 client="$("${ENGINE}" run --rm "${IMAGE}" mlkem768 -i "${SEED_B64}" | sed -n 's/^Client: //p')"
@@ -336,10 +356,10 @@ echo "ok: vless-encryption is the Client key xray mlkem768 -i derives from the s
 printf '%s\n' "${encryption}" >"${WORK}/secrets/vless_encryption"
 chmod 0400 "${WORK}/secrets/vless_encryption"
 
-# client_refuses <command> <file>: exit 78, naming the path.
+# client_refuses <command> <file> [args...]: exit 78, naming the path.
 client_refuses() {
 	local rc=0 out
-	out="$(client_value "$1" "/run/secrets/$2" 2>&1)" || rc=$?
+	out="$(client_value "$1" "/run/secrets/$2" "${@:3}" 2>&1)" || rc=$?
 	ALL_OUTPUT+="${out}"
 	[ "${rc}" = 78 ] || fail "$1 on $2: exited ${rc}, expected 78: ${out}"
 	expect_in "$1 refuses $2 (78)" "${out}" "/run/secrets/$2 "
@@ -347,6 +367,13 @@ client_refuses() {
 for bad in seed_127 seed_not_hex a_directory; do
 	client_refuses vless-encryption "${bad}"
 done
+relay_id="$("${ENGINE}" run --rm "${RUN_ARGS[@]}" -v "${WORK}/secrets:/run/secrets:ro" \
+	"${IMAGE}" relay-id /run/secrets/relay_seed "${RELAY_NAME}" "${RELAY_NONCE}")"
+[ "${relay_id}" = "${RELAY_VECTOR_ID}" ] || fail "relay-id printed another id than testdata/relay-id.json holds"
+echo "ok: relay-id prints the id of testdata/relay-id.json"
+printf '%s\n' "${relay_id}" >"${WORK}/secrets/relay_id"
+chmod 0400 "${WORK}/secrets/relay_id"
+client_refuses relay-id seed_127 "${RELAY_NAME}" "${RELAY_NONCE}"
 
 password="$(client_value reality-password /run/secrets/reality_key)"
 ALL_OUTPUT+="${password}"
@@ -488,6 +515,25 @@ code="$(via "${PROBE_B_PORT}")"
 echo "ok: the revoked client is refused (${code})"
 [ "$(via "${PROBE_A_PORT}")" = 200 ] || fail "the client left in the list no longer connects"
 echo "ok: the client left in the list still connects"
+code="$(via "${PROBE_R_PORT}")"
+[ "${code}" != 200 ] || fail "a relay's derived id connects with no relays given"
+echo "ok: a relay's derived id is refused while the clients are the file alone (${code})"
+
+# A server's relays: the same inbound's clients from the devices, its relays
+# and its relay seed, so the relay's derived id gets in.
+config "${WORK}/conf" "" "" '{"$vlessClients": {"devices": "/run/secrets/vless_clients", "relays": "/run/secrets/relays", "seed": "/run/secrets/relay_seed"}}'
+"${ENGINE}" restart "${CTR}" >/dev/null
+for _ in $(seq 1 30); do
+	logs="$("${ENGINE}" logs "${CTR}" 2>&1)"
+	[ "$(printf '%s\n' "${logs}" | grep -c "Xray ${VERSION} started")" -ge 3 ] && break
+	sleep 1
+done
+ALL_OUTPUT+="${logs}"
+expect_in "summary counts the devices and the relays" "${logs}" \
+	"inbounds[3].settings.clients <- \$vlessClients /run/secrets/vless_clients and 1 relay(s) from /run/secrets/relays, their ids from /run/secrets/relay_seed (2 clients)"
+[ "$(via "${PROBE_R_PORT}")" = 200 ] || fail "the relay did not connect with the id derived for it"
+[ "$(via "${PROBE_A_PORT}")" = 200 ] || fail "the device no longer connects beside a relay"
+echo "ok: a relay's derived id and the device both connect through the object form"
 
 # --- 5. an upstream proxy from one secret -------------------------------------
 
@@ -792,6 +838,10 @@ for case in "a name with a space:three_fields:line 2: the field after the name i
 	refuse "a client list with ${label}" \
 		"inbounds[3].settings.clients: /run/secrets/${file} ${needle}" "${WORK}/${file}"
 done
+
+config "${WORK}/relays_legacy" "" "" '{"$vlessClients": {"devices": "/run/secrets/vless_clients", "relays": "/run/secrets/relays_legacy", "seed": "/run/secrets/relay_seed"}}'
+refuse "a relay line with no relay/1 tag" \
+	"inbounds[3].settings.clients: /run/secrets/relays_legacy line 1: not a relay/1 line" "${WORK}/relays_legacy"
 
 # label:file:message, as above. Neither the user nor the password may be in any.
 for case in "a scheme:scheme:holds a URL. Write user:pass@host:port, without the scheme" \

@@ -8,6 +8,9 @@
 //	                                           through a proxy (fetchcmd.go)
 //	xray-entrypoint vless-encryption <seed>    print the client's VLESS encryption
 //	xray-entrypoint reality-password <key>     print the client's REALITY password
+//	xray-entrypoint relay-id <seed> <name> <nonce>
+//	                                           print a relay's id on this server
+//	                                           (relays.go)
 //	xray-entrypoint <anything else...>         exec xray with those arguments
 //
 // Xray reads no value from a file and expands no variable, so a secret can
@@ -16,6 +19,8 @@
 // exactly {"$vlessDecryption": "/absolute/path"} with the VLESS Encryption
 // server key derived from the seed in that file, or exactly
 // {"$vlessClients": "/absolute/path"} with the VLESS clients that file lists,
+// or an object naming that file, a server's relay/1 lines and its relay seed,
+// with those clients and one per relay (relays.go),
 // or exactly {"$hysteriaUsers": "/absolute/path"} with the same clients as a
 // Hysteria2 inbound's users, or exactly {"$proxy": "/absolute/path"} with a socks or http outbound's
 // settings, split from the [user:pass@]host:port in that file, or exactly
@@ -90,6 +95,9 @@ func main() {
 	}
 	if len(args) > 0 && args[0] == "fetch" {
 		os.Exit(fetchCmd(args[1:], os.Stdout, os.Stderr))
+	}
+	if len(args) > 0 && args[0] == "relay-id" {
+		os.Exit(relayIDCmd(args[1:]))
 	}
 	if len(args) > 0 {
 		if derive, ok := clientValues[args[0]]; ok {
@@ -176,7 +184,7 @@ var running []*envconf.Config
 var references = []envconf.Reference{
 	envconf.File,
 	{Key: "$vlessDecryption", Resolve: envconf.Secret(vlessDecryption)},
-	{Key: "$vlessClients", Resolve: vlessClients},
+	{Key: "$vlessClients", Resolve: vlessClients, Value: vlessClientsWithRelays},
 	{Key: "$hysteriaUsers", Resolve: hysteriaUsers},
 	{Key: "$proxy", Resolve: proxy},
 	{Key: "$wireguard", Resolve: wireguard},
@@ -391,7 +399,7 @@ func parseClients(s string) ([]vlessClient, error) {
 			nameLine[strings.ToLower(f[1])] = n
 			c.Email = f[1]
 		}
-		key := c.ID[:14] + "0000" + c.ID[18:]
+		key := zeroed(c.ID)
 		if first, ok := idLine[key]; ok {
 			if first.id == c.ID {
 				return nil, fmt.Errorf("line %d: the id is the one on line %d", n, first.line)

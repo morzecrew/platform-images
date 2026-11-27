@@ -21,9 +21,12 @@ const MaxSecret = 64 << 10
 
 // A Reference is one form of file reference: a JSON object whose one key is
 // Key, naming an absolute path, replaced by what Resolve makes of that file.
+// Value, when set, takes any other target instead, such as an object naming
+// several files, and its errors name what they read themselves.
 type Reference struct {
 	Key     string
 	Resolve func(file string) (Resolution, error)
+	Value   func(target any) (Resolution, error)
 }
 
 // What a reference resolves to.
@@ -34,7 +37,7 @@ type Resolution struct {
 }
 
 // File is {"$file": "<absolute path>"}: the file's content, as a string.
-var File = Reference{"$file", Secret(ReadSecret)}
+var File = Reference{Key: "$file", Resolve: Secret(ReadSecret)}
 
 // Secret makes a resolver for a reference that yields one string, which is
 // itself the secret.
@@ -140,12 +143,20 @@ func (c *Config) reference(obj map[string]any, r Reference, target any, path str
 		return nil, c.errorf(path, `an object holding %q holds nothing else, and this one also holds %s`, r.Key, strings.Join(others, ", "))
 	}
 	file, ok := target.(string)
-	if !ok || !filepath.IsAbs(file) {
+	var res Resolution
+	var err error
+	switch {
+	case ok && filepath.IsAbs(file):
+		if res, err = r.Resolve(file); err != nil {
+			return nil, c.errorf(path, "%s %v", file, err)
+		}
+	case r.Value != nil:
+		file = ""
+		if res, err = r.Value(target); err != nil {
+			return nil, c.errorf(path, "%v", err)
+		}
+	default:
 		return nil, c.errorf(path, `%q must be an absolute path, as a string`, r.Key)
-	}
-	res, err := r.Resolve(file)
-	if err != nil {
-		return nil, c.errorf(path, "%s %v", file, err)
 	}
 	c.Refs = append(c.Refs, Ref{path, r.Key, file, res.Note})
 	c.Values = append(c.Values, res.Secrets...)
