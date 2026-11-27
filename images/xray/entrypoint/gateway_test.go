@@ -114,7 +114,7 @@ func failsClosed(t *testing.T, doc map[string]any, groups []string) {
 				t.Errorf("rule %v sends a group's devices elsewhere", r)
 			}
 		case strings.HasPrefix(tag, "sub-"):
-			g := strings.TrimPrefix(tag, "sub-")
+			g, _, _ := strings.Cut(strings.TrimPrefix(tag, "sub-"), "-")
 			if fmt.Sprint(r["inboundTag"]) != "[subscriptions]" || r["balancerTag"] != g {
 				t.Errorf("rule %v sends a group's subscriptions elsewhere", r)
 			}
@@ -351,7 +351,7 @@ func TestGatewayResolves(t *testing.T) {
 	}
 	var sub map[string]any
 	for _, r := range asJSON(t, configs[0])["routing"].(map[string]any)["rules"].([]any) {
-		if r := r.(map[string]any); r["ruleTag"] == "sub-a" {
+		if r := r.(map[string]any); strings.HasPrefix(r["ruleTag"].(string), "sub-a-") {
 			sub = r
 		}
 	}

@@ -185,7 +185,7 @@ func gwAgent(t *testing.T) (*fakeAPI, fakeLists, string) {
 		t.Fatal(err)
 	}
 	f := &fakeAPI{users: map[string]map[string]string{}, flows: map[string]string{}, online: map[string]bool{}, silent: map[string]bool{}}
-	gwPending = map[string]string{}
+	gwPending, geoRestartDue = map[string]string{}, false
 	lists := fakeLists{}
 	oldAPI, oldFetch, oldReload := xrayAPI, gwFetch, gwReload
 	xrayAPI, gwFetch = f.api, lists.fetch
@@ -327,7 +327,7 @@ func TestGatewayRounds(t *testing.T) {
 	if f.flows["phone@a"] != "xtls-rprx-vision" {
 		t.Errorf("a VLESS client added without the inbound's flow: %q", f.flows["phone@a"])
 	}
-	if want := []string{"internal", "probe-a-0", "probe-a-1", "probe-b-0", "tunnel", "sub-a", "users-a", "users-b", "block"}; !slices.Equal(f.rules, want) {
+	if want := []string{"internal", "probe-a-0", "probe-a-1", "probe-b-0", "tunnel", "sub-a-" + f.rules[5][6:], "users-a", "users-b", "block"}; !slices.Equal(f.rules, want) || len(f.rules[5]) != 14 {
 		t.Errorf("rules %v", f.rules)
 	}
 	st := readStatus(t, status)
@@ -574,11 +574,26 @@ func TestGeodataRestartTakesTheGatewaysDevices(t *testing.T) {
 		t.Fatal(err)
 	}
 	fakeXray(t, "pinned data")
-	if !refresh(gwTestSrc, run, nil, subSettings{interval: time.Hour}) {
-		t.Fatal("no restart for a pinned file fetched")
+	// The gateway's resolve fails at first: no restart, and it is asked for
+	// again, sooner, till it passes.
+	servers := filepath.Join(filepath.Dir(gwTestSrc), "servers")
+	good := read(t, servers)
+	os.Remove(servers)
+	write(t, servers, "not a server line", 0o400)
+	s := subSettings{interval: time.Hour}
+	if refresh(gwTestSrc, run, nil, s) || next(s) != subRetry {
+		t.Fatalf("a restart on a gateway that does not resolve, or no retry soon: next %v", next(s))
+	}
+	os.Remove(servers)
+	write(t, servers, good, 0o400)
+	if !refresh(gwTestSrc, run, nil, s) {
+		t.Fatal("the geodata restart held back was not asked for again")
 	}
 	if strings.Contains(read(t, filepath.Join(run, "xray.json")), "laptop@b") {
 		t.Error("Xray would restart on a config that lets laptop@b back in")
+	}
+	if refresh(gwTestSrc, run, nil, s) || next(s) == subRetry {
+		t.Error("asked for again once done")
 	}
 }
 
@@ -596,6 +611,20 @@ func TestGatewayRoutingReadBack(t *testing.T) {
 	logs := stderr(t, func() { restart = gatewayRound("", "", nil) })
 	if !restart || !strings.Contains(logs, "not the one sent, after a replace: restarting Xray") {
 		t.Errorf("restart %v, logs %q", restart, logs)
+	}
+	// A prefix that moves, with a replace Xray answers and doesn't make: the
+	// tags differ, so it shows, and the routing is not taken as installed.
+	f.ignored = false
+	gatewayRound("", "", nil)
+	installed := gw.routing
+	lists[10902] = struct {
+		code int
+		body string
+	}{200, list(devB + " tablet ba9876543210")}
+	f.ignored, f.calls = true, nil
+	logs = stderr(t, func() { restart = gatewayRound("", "", nil) })
+	if !restart || gw.routing != installed {
+		t.Errorf("a prefix's replace that did not take: restart %v, logs %q", restart, logs)
 	}
 	// A rule changed behind the agent's back is put back.
 	f.ignored = false

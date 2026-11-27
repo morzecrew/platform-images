@@ -518,13 +518,13 @@ func gatewayApply() (bool, error) {
 			if _, err := xrayAPI(body, "adrules", "stdin:"); err != nil {
 				return false, err
 			}
-			gw.routing = string(sent)
 		}
 		same, err := rulesHeld(routing)
 		if err != nil {
 			return false, err
 		}
 		if same {
+			gw.routing = string(sent) // installed once read back
 			break
 		}
 		if try > 0 {

@@ -13,6 +13,8 @@ package main
 // named <device>@<group>, which the rules route by.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -407,7 +409,7 @@ func gatewayDoc(groups []gwGroup, o gwOptions, prefixes map[string][]string) map
 //	internal   a device asking for a dotdash.internal name: block
 //	probe-<leg> the agent's probe of one leg: that leg
 //	tunnel     a cover app's tunnel host: the tunnel group
-//	sub-<g>    a subscription whose token's prefix is <g>'s: <g>
+//	sub-<g>-<digest> a subscription whose token's prefix is <g>'s: <g>
 //	users-<g>  a device of <g>, named <device>@<g>: <g>
 //	block      anything else: block
 func gatewayRouting(groups []gwGroup, o gwOptions, prefixes map[string][]string) map[string]any {
@@ -436,7 +438,11 @@ func gatewayRouting(groups []gwGroup, o gwOptions, prefixes map[string][]string)
 			for i := range p {
 				names[i] = "full:" + p[i] + "." + subZone
 			}
-			rule("sub-"+g.name, map[string]any{"inboundTag": []string{"subscriptions"}, "domain": names, "balancerTag": g.name})
+			// Xray reads a rule back as its tag and outbound, never its
+			// domains: the tag carries a digest of the prefixes, so a
+			// replace that did not take shows.
+			sum := sha256.Sum256([]byte(strings.Join(p, ",")))
+			rule("sub-"+g.name+"-"+hex.EncodeToString(sum[:4]), map[string]any{"inboundTag": []string{"subscriptions"}, "domain": names, "balancerTag": g.name})
 		}
 	}
 	for _, g := range groups {

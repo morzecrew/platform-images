@@ -615,7 +615,7 @@ order, which the relay dials in place of the name.
 | `internal` | a device (`user: regexp:@`) asking for a `dotdash.internal` name | `block` |
 | `probe-<leg>` | that leg's probe inbound | that leg |
 | `tunnel` | the `tunnel` inbound | the tunnel group |
-| `sub-<group>` | the `subscriptions` inbound, for `<prefix>.sub.dotdash.internal`, a prefix of the group's | the group |
+| `sub-<group>-<digest>` | the `subscriptions` inbound, for `<prefix>.sub.dotdash.internal`, a prefix of the group's; the digest, of the prefixes, is how a replace is read back, as Xray lists a rule by its tag and outbound alone | the group |
 | `users-<group>` | a device named `<device>@<group>` | the group |
 | `block` | anything else (`network: tcp,udp`) | `block` |
 

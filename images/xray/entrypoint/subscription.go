@@ -389,7 +389,7 @@ func exitCode(ps *os.ProcessState) int {
 }
 
 func next(s subSettings) time.Duration {
-	if geoWaiting() {
+	if geoWaiting() || geoRestartDue {
 		return min(subRetry, s.interval)
 	}
 	for name, b := range subs {
@@ -418,11 +418,18 @@ func refresh(src, run string, extra []string, s subSettings) bool {
 		fmt.Fprintln(os.Stderr, "xray-entrypoint: XRAY_RUNTIME_DIR could not be put back; Xray keeps running on the config it loaded, and geodata waits")
 		return false
 	}
-	if refreshGeo(run, extra, s.proxy) && !restart {
+	if (refreshGeo(run, extra, s.proxy) || geoRestartDue) && !restart {
+		// Kept till Xray starts on the files installed: they are ready, so
+		// no later refresh would ask for it again.
 		restart = geoRestart(src, run, extra)
+		geoRestartDue = !restart
 	}
 	return restart
 }
+
+// A restart geodata asked for and a gateway's resolve held back, tried again
+// every subRetry till one passes.
+var geoRestartDue bool
 
 // geoRestart says whether Xray may restart on a geodata file alone. With a
 // gateway, the runtime directory holds the devices of the last resolve, and
@@ -521,7 +528,8 @@ func reload(src, run string, extra []string) (bool, bool, error) {
 		return false, writeRuntime(run, running) == nil, err
 	}
 	running = configs
-	gatewayInstall() // each caller restarts Xray on it
+	gatewayInstall()      // each caller restarts Xray on it,
+	geoRestartDue = false // and on the geodata files installed
 	return true, true, nil
 }
 
