@@ -770,7 +770,7 @@ ALL_OUTPUT+="${logs}"
 # A relay's config as its template writes it: $gateway alone in a file, and
 # the device inbounds, the API and the online counts beside it. With no
 # network: what is proved here is that Xray takes every shape the generator
-# makes.
+# makes; section 12 carries traffic through one.
 # gw_config <dir> <gateway options>
 gw_config() {
 	mkdir -p "$1"
@@ -972,5 +972,10 @@ for s in "${SECRETS[@]}"; do
 	esac
 done
 echo "ok: no secret value in any log, summary or refusal"
+
+# --- 12. a dotdash relay's gateway, end to end --------------------------------
+
+# Its own pod, stand-in servers and devices: smoke-gateway.sh.
+ENGINE="${ENGINE}" bash "$(dirname "$0")/smoke-gateway.sh" "${IMAGE}"
 
 echo "PASS: xray smoke (${IMAGE})"

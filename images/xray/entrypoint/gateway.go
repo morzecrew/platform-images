@@ -13,6 +13,7 @@ package main
 // named <device>@<group>, which the rules route by.
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -224,6 +225,7 @@ var gw struct {
 	api      string
 	users    []gwUser            // the devices of every group, as Xray holds them
 	prefixes map[string][]string // each group's subscription token prefixes
+	routing  string              // the routing Xray holds, as JSON
 }
 
 // A device as the gateway holds it: its id, and its name tagged @<group>.
@@ -273,7 +275,10 @@ func gateway(target any) (envconf.Resolution, error) {
 		o.tunnelGroup = groups[0].name
 	}
 	gw.groups, gw.opts = groups, o
-	r := envconf.Resolution{Value: gatewayDoc(groups, o, gw.prefixes)}
+	doc := gatewayDoc(groups, o, gw.prefixes)
+	routing, _ := json.Marshal(doc["routing"])
+	gw.routing = string(routing)
+	r := envconf.Resolution{Value: doc}
 	var notes []string
 	for _, g := range groups {
 		r.Secrets = append(r.Secrets, g.id, g.sid, g.enc, g.pbk, g.xrPath)

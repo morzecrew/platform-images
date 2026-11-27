@@ -28,7 +28,7 @@ COPY --from=shared go/ /src/shared/go/
 COPY entrypoint/ ./
 RUN CGO_ENABLED=0 go test ./... github.com/morzecrew/platform-images/shared/go/... \
     && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -buildid=" -o /out/xray-entrypoint . \
-    && mkdir -p /out/run/xray /out/var/lib/xray
+    && mkdir -p /out/run/xray /out/run/gateway /out/var/lib/xray
 
 # Upstream's own base, but not upstream's image: its two VOLUMEs and the
 # placeholder configs under /usr/local/etc/xray, one of which sends the log to
@@ -41,6 +41,9 @@ COPY --from=upstream --chown=0:0 /usr/local/share/xray/ /usr/local/share/xray/
 COPY --from=entrypoint /out/xray-entrypoint /usr/local/bin/xray-entrypoint
 # Writable without a tmpfs. With a read-only root, mount one here.
 COPY --from=entrypoint --chown=65532:65532 --chmod=0700 /out/run/xray /run/xray
+# Where a gateway's agent writes its status (XRAY_GATEWAY_STATUS), for a
+# tmpfs shared with the tasks that read it.
+COPY --from=entrypoint --chown=65532:65532 --chmod=0755 /out/run/gateway /run/gateway
 # Empty, for a volume to keep state in, such as XRAY_SUBSCRIPTION_CACHE: a
 # new volume takes this directory's owner, so 65532 can write to it.
 COPY --from=entrypoint --chown=65532:65532 --chmod=0700 /out/var/lib/xray /var/lib/xray
