@@ -530,7 +530,7 @@ for _ in $(seq 1 30); do
 done
 ALL_OUTPUT+="${logs}"
 expect_in "summary counts the devices and the relays" "${logs}" \
-	"inbounds[3].settings.clients <- \$vlessClients /run/secrets/vless_clients and 1 relay(s) from /run/secrets/relays (2 clients)"
+	"inbounds[3].settings.clients <- \$vlessClients /run/secrets/vless_clients and 1 relay(s) from /run/secrets/relays, their ids from /run/secrets/relay_seed (2 clients)"
 [ "$(via "${PROBE_R_PORT}")" = 200 ] || fail "the relay did not connect with the id derived for it"
 [ "$(via "${PROBE_A_PORT}")" = 200 ] || fail "the device no longer connects beside a relay"
 echo "ok: a relay's derived id and the device both connect through the object form"

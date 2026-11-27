@@ -230,7 +230,7 @@ an array of strings, as a template writes them out of a parameter (only the
   `key=value` fields in any order. Blank lines and `#` comments are skipped.
   The name is 1 to 24 of `A-Z a-z 0-9 . _ -`, unique ignoring case; the nonce
   16 lowercase hex characters; the host a DNS name, an IPv4 or an IPv6
-  address; the site a DNS name; the public key 43 base64url characters; the
+  address; the site a DNS name, not an address; the public key 43 base64url characters; the
   short id 1 to 16 lowercase hex characters; the encryption `none` or
   `mlkem768x25519plus.<…>`; `xhttp=` 1 to 128 of `A-Z a-z 0-9 . _ ~ -`.
   `kcp=`, `hy2=`, `cdn=`, `cdnpath=`, `origin=` and `cdn-only` are the
@@ -619,7 +619,7 @@ so it never shows on a command line.
 
 ```sh
 docker run --rm -v ./secrets/relay_seed:/run/secrets/relay_seed:ro \
-  ghcr.io/morzecrew/xray:26.10.31 relay-id /run/secrets/relay_seed r1 0123456789abcdef
+  ghcr.io/morzecrew/xray:26.11.9 relay-id /run/secrets/relay_seed r1 0123456789abcdef
 ```
 
 A seed file that is not 64 lowercase hex characters exits 78; a name or a

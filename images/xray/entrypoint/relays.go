@@ -141,7 +141,7 @@ func (r relayLine) malformed() string {
 		return "the nonce is not 16 lowercase hex characters"
 	case !validHost(r.host) && !isIPv6(r.host):
 		return "the host is not a DNS name, an IPv4 address or an IPv6 address"
-	case !validHost(r.site):
+	case !validHost(r.site) || numericRE.MatchString(r.site):
 		return "the site is not a DNS name"
 	case !pbkRE.MatchString(r.pbk):
 		return "the public key is not 43 base64url characters"
@@ -261,8 +261,11 @@ func vlessClientsWithRelays(target any) (envconf.Resolution, error) {
 		}
 		r.Value = clients
 	}
-	r.Note = fmt.Sprintf("%s and %d relay(s) from %s (%d clients)", devices, len(relays),
-		strings.TrimSuffix(from, ", at"), len(r.Value.([]vlessClient)))
+	src := strings.TrimSuffix(from, ", at")
+	if len(relays) > 0 {
+		src += ", their ids from " + seedFile
+	}
+	r.Note = fmt.Sprintf("%s and %d relay(s) from %s (%d clients)", devices, len(relays), src, len(r.Value.([]vlessClient)))
 	return r, nil
 }
 

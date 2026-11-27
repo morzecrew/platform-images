@@ -108,8 +108,10 @@ func (im *Image) Summary(w io.Writer, version string, configs []*Config) {
 		fmt.Fprintf(w, "[envconf]   source=%-14s %s\n", "config", c.Src)
 		for _, r := range c.Refs {
 			from := r.File
-			if r.Kind != File.Key {
-				from = strings.TrimSpace(r.Kind + " " + r.File)
+			if r.Kind != File.Key && r.File == "" {
+				from = r.Kind
+			} else if r.Kind != File.Key {
+				from = r.Kind + " " + r.File
 			}
 			if r.Note != "" {
 				from += " " + r.Note

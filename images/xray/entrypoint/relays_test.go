@@ -160,6 +160,7 @@ func TestParseRelaysRefusals(t *testing.T) {
 		{"a short nonce", field(2, "0123"), "line 1: the nonce is not"},
 		{"a host with a quote", field(3, `r1".example`), "line 1: the host is not"},
 		{"a site that is an IPv6 address", field(4, "2001:db8::1"), "line 1: the site is not a DNS name"},
+		{"a site that is an IPv4 address", field(4, "192.0.2.1"), "line 1: the site is not a DNS name"},
 		{"a public key of 42", field(5, strings.Repeat("P", 42)), "line 1: the public key is not 43"},
 		{"a short id in capitals", field(6, "ABCD"), "line 1: the short id is not"},
 		{"an encryption with a brace", field(7, "mlkem768x25519plus.{x}"), "line 1: the encryption is neither"},
@@ -193,8 +194,8 @@ func TestVlessClientsWithRelays(t *testing.T) {
 	want := `{"inbounds":[{"settings":{"clients":[{"id":"` + clientA + `"},{"id":"` + clientB + `","email":"phone"},{"id":"` + id1 + `","email":"relay-r1"},{"id":"` + id2 + `","email":"relay-r2"}],"flow":"xtls-rprx-vision"}}]}` + "\n"
 
 	for _, tc := range []struct{ name, relays, note string }{
-		{"a file", `"` + relays + `"`, devices + " and 2 relay(s) from " + relays + " (4 clients)"},
-		{"the lines", `["# One relay per line", "` + relay1("r1", "0123456789abcdef") + `", "` + relay1("r2", "fedcba9876543210", "xhttp=ab") + `"]`, devices + " and 2 relay(s) from the relays array (4 clients)"},
+		{"a file", `"` + relays + `"`, devices + " and 2 relay(s) from " + relays + ", their ids from " + seed + " (4 clients)"},
+		{"the lines", `["# One relay per line", "` + relay1("r1", "0123456789abcdef") + `", "` + relay1("r2", "fedcba9876543210", "xhttp=ab") + `"]`, devices + " and 2 relay(s) from the relays array, their ids from " + seed + " (4 clients)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			src := write(t, filepath.Join(dir, "c.json"), `{"inbounds": [{"settings": {"clients": {"$vlessClients": {"devices": "`+devices+`", "relays": `+tc.relays+`, "seed": "`+seed+`"}}, "flow": "xtls-rprx-vision"}}]}`, 0o600)
