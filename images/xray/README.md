@@ -197,7 +197,7 @@ Each of these exits 78. The message names the line, never an id:
   those bytes before it looks an id up (and hands them to routing as
   `vlessRoute`), keeping the client listed last, so both devices would be
   logged and routed as that one. The message names both lines, with their
-  names.
+  names, any UUID in a name shown as `<uuid>`.
 - No client at all once comments and blank lines are skipped.
 
 The summary shows the count, not the ids, and the ids are redacted from

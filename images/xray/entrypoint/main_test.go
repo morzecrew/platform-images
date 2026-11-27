@@ -357,6 +357,7 @@ func TestVlessClientsRefusals(t *testing.T) {
 		{"the same id", clientA + " laptop\n" + clientA + " phone", "line 2: the id is the one on line 1"},
 		{"the same id in another case", clientA + "\n\n" + strings.ToUpper(clientA) + " phone", "line 3: the id is the one on line 1"},
 		{"an id that differs only in bytes 6 and 7", clientA + " phone@a\n" + clientB + "\n" + clientA67 + " phone@b", "line 3 (phone@b): the id differs from line 1's (phone@a) only in bytes 6 and 7"},
+		{"against a line named by its own id", clientA + " " + clientA + "\n" + clientA67 + " x" + strings.ReplaceAll(clientA67, "-", ""), "line 2 (x<uuid>): the id differs from line 1's (<uuid>) only in bytes 6 and 7"},
 		{"in capitals, against an unnamed line", strings.ToUpper(clientA67) + "\n" + clientA + " phone", "line 2 (phone): the id differs from line 1's only in bytes 6 and 7"},
 		{"the same name in another case", clientA + " phone\n" + clientB + " Phone", "line 2: the name is the one on line 1"},
 		{"only comments", "# " + clientA + "\n\n", "lists no client"},
@@ -369,7 +370,7 @@ func TestVlessClientsRefusals(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "inbounds[0].settings.clients: "+list+" "+tc.want) {
 				t.Fatalf("err = %v\nwant %q", err, tc.want)
 			}
-			for _, id := range []string{clientA, clientB, clientA[:35], strings.ToUpper(clientA), clientA67, strings.ToUpper(clientA67)} {
+			for _, id := range []string{clientA, clientB, clientA[:35], strings.ToUpper(clientA), clientA67, strings.ToUpper(clientA67), strings.ReplaceAll(clientA67, "-", "")} {
 				if strings.Contains(err.Error(), id) {
 					t.Errorf("error %q carries an id", err)
 				}

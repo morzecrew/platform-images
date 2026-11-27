@@ -290,6 +290,9 @@ type vlessClient struct {
 var (
 	uuidRE = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 	nameRE = regexp.MustCompile(`^[A-Za-z0-9._@+-]{1,64}$`)
+	// A UUID inside a name, with or without its dashes, which an error
+	// showing the name leaves out: a name may hold an id.
+	uuidInRE = regexp.MustCompile(`[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}`)
 	// The kinds of device a line may end in, after the name: Xray never sees
 	// them, the tools that make devices' links from the same file do. A fixed
 	// pair, so a name with a space in it is still refused.
@@ -360,7 +363,7 @@ func parseClients(s string) ([]vlessClient, error) {
 		if name == "" {
 			return ""
 		}
-		return " (" + name + ")"
+		return " (" + uuidInRE.ReplaceAllString(name, "<uuid>") + ")"
 	}
 	for i, line := range strings.Split(s, "\n") {
 		n, line := i+1, strings.TrimSpace(line)
