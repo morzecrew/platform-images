@@ -29,8 +29,11 @@
 // {"$upstreams": "/absolute/path"} with an outbounds array, one outbound per
 // line of that file, or exactly {"$subscription": "/absolute/path"} with the
 // outbounds of the Xray config the URL in that file serves, fetched again
-// every XRAY_SUBSCRIPTION_INTERVAL (subscription.go), and changes nothing
-// else. The contract is in images/xray/README.md.
+// every XRAY_SUBSCRIPTION_INTERVAL (subscription.go), or exactly
+// {"$gateway": {...}} with a dotdash relay's config to its server groups,
+// and {"$gatewayClients": "vless"} or "hysteria" with their devices
+// (gateway.go), and changes nothing else. The contract is in
+// images/xray/README.md.
 package main
 
 import (
@@ -190,6 +193,8 @@ var references = []envconf.Reference{
 	{Key: "$wireguard", Resolve: wireguard},
 	{Key: "$upstreams", Resolve: upstreams},
 	{Key: "$subscription", Resolve: subscription},
+	{Key: "$gateway", Value: gateway},
+	{Key: "$gatewayClients", Value: gatewayClients},
 }
 
 func resolveDir(dir string) ([]*envconf.Config, error) {
@@ -217,6 +222,9 @@ func resolveDir(dir string) ([]*envconf.Config, error) {
 	}
 	if len(configs) == 0 {
 		return nil, fmt.Errorf("XRAY_SOURCE_DIR is %s, which holds no .json file. Mount the Xray config there", dir)
+	}
+	if err := gatewayCheck(configs); err != nil {
+		return nil, err
 	}
 	return configs, nil
 }

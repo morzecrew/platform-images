@@ -180,7 +180,7 @@ func warnField(from string, n int, opt string) {
 	case ok:
 		fmt.Fprintf(os.Stderr, "WARN: %s line %d: a field with a key that is not one; ignored\n", from, n)
 	default:
-		fmt.Fprintf(os.Stderr, "WARN: %s line %d: a field with no =, which no optional field is but cdn-only; ignored\n", from, n)
+		fmt.Fprintf(os.Stderr, "WARN: %s line %d: a word with no = that this reader doesn't know; ignored\n", from, n)
 	}
 }
 

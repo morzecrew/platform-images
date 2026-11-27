@@ -22,7 +22,8 @@ const MaxSecret = 64 << 10
 // A Reference is one form of file reference: a JSON object whose one key is
 // Key, naming an absolute path, replaced by what Resolve makes of that file.
 // Value, when set, takes any other target instead, such as an object naming
-// several files, and its errors name what they read themselves.
+// several files, and its errors name what they read themselves. A reference
+// with Value alone takes no path.
 type Reference struct {
 	Key     string
 	Resolve func(file string) (Resolution, error)
@@ -146,7 +147,7 @@ func (c *Config) reference(obj map[string]any, r Reference, target any, path str
 	var res Resolution
 	var err error
 	switch {
-	case ok && filepath.IsAbs(file):
+	case ok && filepath.IsAbs(file) && r.Resolve != nil:
 		if res, err = r.Resolve(file); err != nil {
 			return nil, c.errorf(path, "%s %v", file, err)
 		}

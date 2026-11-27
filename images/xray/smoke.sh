@@ -765,7 +765,80 @@ echo "ok: a rule naming a list of the pinned file starts on an empty XRAY_GEODAT
 ALL_OUTPUT+="${logs}"
 "${ENGINE}" rm -f "${CTR}" >/dev/null
 
-# --- 9. refusals --------------------------------------------------------------
+# --- 9. a dotdash relay's gateway ---------------------------------------------
+
+# A relay's config as its template writes it: $gateway alone in a file, and
+# the device inbounds, the API and the online counts beside it. With no
+# network: what is proved here is that Xray takes every shape the generator
+# makes.
+# gw_config <dir> <gateway options>
+gw_config() {
+	mkdir -p "$1"
+	printf '{"$gateway": {"servers": "/run/secrets/gw_servers"%s}}\n' "${2:+, $2}" >"$1/gateway.json"
+	cat >"$1/xray.json" <<-EOF
+		{"log": {"loglevel": "warning"},
+		 "api": {"tag": "api", "listen": "127.0.0.1:10085", "services": ["HandlerService", "RoutingService", "StatsService"]},
+		 "stats": {}, "policy": {"levels": {"0": {"statsUserOnline": true}}},
+		 "inbounds": [{"tag": "devices", "listen": "0.0.0.0", "port": 8443, "protocol": "vless",
+		   "settings": {"clients": {"\$gatewayClients": "vless"}, "flow": "xtls-rprx-vision", "decryption": {"\$vlessDecryption": "/run/secrets/vless_seed"}},
+		   "streamSettings": {"network": "raw", "security": "reality", "realitySettings": {"target": "127.0.0.1:${TLS_PORT}", "serverNames": ["relay.test"],
+		     "privateKey": {"\$file": "/run/secrets/reality_key"}, "shortIds": [""]}}},
+		  {"tag": "devices-xhttp", "listen": "0.0.0.0", "port": 8080, "protocol": "vless",
+		   "settings": {"clients": {"\$gatewayClients": "vless"}, "decryption": "none"},
+		   "streamSettings": {"network": "xhttp", "xhttpSettings": {"path": "/x", "mode": "auto"}}}]}
+	EOF
+}
+# gw_run <label> <conf-dir>: Xray starts on it.
+gw_run() {
+	"${ENGINE}" run -d --name "${CTR}" --network none --userns keep-id:uid=65532,gid=65532 --read-only --tmpfs /run/xray:rw,mode=1777 \
+		-v "$2:/etc/xray:ro" -v "${WORK}/secrets:/run/secrets:ro" "${IMAGE}" >/dev/null
+	for _ in $(seq 1 30); do
+		logs="$("${ENGINE}" logs "${CTR}" 2>&1)"
+		case "${logs}" in *"Xray ${VERSION} started"* | *FATAL*) break ;; esac
+		sleep 1
+	done
+	ALL_OUTPUT+="${logs}"
+	expect_in "Xray starts on a gateway: $1" "${logs}" "Xray ${VERSION} started"
+	"${ENGINE}" rm -f "${CTR}" >/dev/null
+}
+GW_ID_B="$("${ENGINE}" run --rm "${IMAGE}" uuid)"
+SECRETS+=("${GW_ID_B}")
+server1() { # <name> <hosts> <id> [fields...]
+	printf 'server/1 %s %s 443 %s 0a1b %s %s' "$1" "$2" "${password}" "${encryption}" "$3"
+	shift 3
+	[ $# = 0 ] || printf ' %s' "$@"
+	printf '\n'
+}
+{
+	echo "# server/1 lines, as each server's relay-config prints them"
+	server1 a a1.test,a2.test "${uuid}" xr=8444,0a1b2c address=127.0.0.1,127.0.0.2
+	server1 b b.test "${GW_ID_B}"
+} >"${WORK}/secrets/gw_servers"
+printf '%s\n' "relay/1 y 0123456789abcdef y.test y.test ${password} 0a1b ${encryption} xhttp=0a1b2c" \
+	"relay/1 z fedcba9876543210 z.test z.test ${password} 0a1b ${encryption} xhttp=0a1b2c" >"${WORK}/secrets/gw_via"
+printf '# none yet\n' >"${WORK}/secrets/gw_idle"
+# Refused: a group whose name has a dash, which another's selector would take.
+server1 a-b a.test "${uuid}" >"${WORK}/secrets/gw_dash"
+chmod 0400 "${WORK}/secrets/gw_"*
+
+gw_config "${WORK}/gw-reality"
+gw_run "two groups, one cloned, REALITY with Vision" "${WORK}/gw-reality"
+expect_in "summary counts the groups and their legs" "${logs}" \
+	"the top level <- \$gateway 2 group(s), each with its legs: a (2), b (1); 0 via hop(s)   (/etc/xray/gateway.json)"
+expect_in "summary counts the gateway's devices" "${logs}" \
+	"inbounds[0].settings.clients <- \$gatewayClients (0 clients now; the agent keeps them current)"
+gw_config "${WORK}/gw-xr" '"serverLink": "xhttp-reality", "ipv6": "block", "tunnelGroup": "b"'
+gw_run "XHTTP with REALITY to one group, ipv6 block" "${WORK}/gw-xr"
+gw_config "${WORK}/gw-via" '"via": "/run/secrets/gw_via", "viaLink": "xhttp", "viaFingerprint": "none"'
+gw_run "through two relays, by XHTTP" "${WORK}/gw-via"
+gw_config "${WORK}/gw-via-reality" '"via": "/run/secrets/gw_via"'
+gw_run "through two relays, by REALITY" "${WORK}/gw-via-reality"
+mkdir -p "${WORK}/gw-idle" && cp "${WORK}/gw-reality/"*.json "${WORK}/gw-idle/"
+sed -i 's#/run/secrets/gw_servers#/run/secrets/gw_idle#' "${WORK}/gw-idle/gateway.json"
+gw_run "idle, with no server yet" "${WORK}/gw-idle"
+expect_in "an idle relay says it lets nobody in" "${logs}" "no group yet: every device is refused"
+
+# --- 10. refusals -------------------------------------------------------------
 
 # refuse <label> <needle> <conf-dir> [run args...]: exit 78, needle in output.
 # Bounded, so a case that starts Xray instead fails rather than hangs.
@@ -843,6 +916,17 @@ config "${WORK}/relays_legacy" "" "" '{"$vlessClients": {"devices": "/run/secret
 refuse "a relay line with no relay/1 tag" \
 	"inbounds[3].settings.clients: /run/secrets/relays_legacy line 1: not a relay/1 line" "${WORK}/relays_legacy"
 
+mkdir -p "${WORK}/gw-dash" && cp "${WORK}/gw-reality/"*.json "${WORK}/gw-dash/"
+sed -i 's#/run/secrets/gw_servers#/run/secrets/gw_dash#' "${WORK}/gw-dash/gateway.json"
+refuse "a server line whose group name has a dash" \
+	"/etc/xray/gateway.json: the top level: /run/secrets/gw_dash line 1: the name is not 1 to 16 lowercase letters and digits" "${WORK}/gw-dash"
+mkdir -p "${WORK}/gw-routing" && cp "${WORK}/gw-reality/"*.json "${WORK}/gw-routing/"
+printf '{"routing": {"rules": [{"network": "tcp,udp", "outboundTag": "direct"}]}, "outbounds": [{"tag": "direct", "protocol": "freedom"}]}\n' >"${WORK}/gw-routing/zz.json"
+refuse "a gateway beside a file of its own routing" "/etc/xray/zz.json holds outbounds, which only \$gateway may" "${WORK}/gw-routing"
+mkdir -p "${WORK}/gw-online" && cp "${WORK}/gw-reality/"*.json "${WORK}/gw-online/"
+sed -i 's#"statsUserOnline": true#"statsUserUplink": true#' "${WORK}/gw-online/xray.json"
+refuse "a gateway without online counts" '"policy": {"levels": {"0": {"statsUserOnline": true}}}' "${WORK}/gw-online"
+
 # label:file:message, as above. Neither the user nor the password may be in any.
 for case in "a scheme:scheme:holds a URL. Write user:pass@host:port, without the scheme" \
 	"no port:no_port:does not hold [user:pass@]host:port: it does not end in a host, a colon and a port" \
@@ -880,7 +964,7 @@ refuse "a healthcheck expression that does not compile" \
 refuse "a read-only root without a tmpfs" "XRAY_RUNTIME_DIR is /run/xray, which is not writable by uid 65532" \
 	"${WORK}/conf" --read-only --read-only-tmpfs=false
 
-# --- 10. no secret anywhere ---------------------------------------------------
+# --- 11. no secret anywhere ---------------------------------------------------
 
 for s in "${SECRETS[@]}"; do
 	case "${ALL_OUTPUT}" in
