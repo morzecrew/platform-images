@@ -159,7 +159,7 @@ func gwAgent(t *testing.T) (*fakeAPI, fakeLists, string) {
 	status := filepath.Join(t.TempDir(), "gateway", "status.json")
 	t.Setenv("XRAY_GATEWAY_STATUS", status)
 	t.Setenv("XRAY_GATEWAY_INTERVAL", "")
-	gw.users, gw.prefixes, gwStates, gwDropped, gwLastErr, gwRound = nil, nil, map[string]*gwGroupState{}, nil, nil, time.Time{}
+	gw.users, gw.prefixes, gwStates, gwDropped, gwLastErr, gwRound, gwRestartDue = nil, nil, map[string]*gwGroupState{}, nil, nil, time.Time{}, false
 	_, configs, err := gwSource(t, server1("a", "a1.example.com,a2.example.com", clientA)+"\n"+server1("b", "b.example.com", clientB), "", "")
 	if err != nil || len(configs) != 2 {
 		t.Fatal(err)
@@ -335,6 +335,40 @@ func TestGatewayRounds(t *testing.T) {
 		t.Error("the restart's config would still hold laptop@a")
 	}
 
+	// A restart that fails is tried again the next round, which sees no
+	// removal of its own: laptop@a is gone from Xray's users by then.
+	f.calls = nil
+	reloads := 0
+	gwReload = func(string, string, []string) error {
+		if reloads++; reloads == 1 {
+			return errors.New("xray run -test refused the configuration")
+		}
+		return nil
+	}
+	lists[10901] = struct {
+		code int
+		body string
+	}{200, list(devC + " laptop")}
+	gatewayRound("", "", nil)
+	lists[10901] = struct {
+		code int
+		body string
+	}{200, list()}
+	logs = stderr(t, func() {
+		if gatewayRound("", "", nil) {
+			t.Error("a failed restart reported as one")
+		}
+	})
+	if !strings.Contains(logs, "the restart is tried again next round") {
+		t.Errorf("logs %q", logs)
+	}
+	if !gatewayRound("", "", nil) || reloads != 2 {
+		t.Errorf("the failed restart was not tried again: %d reloads", reloads)
+	}
+	if gatewayRound("", "", nil) || reloads != 2 {
+		t.Errorf("a restart once one succeeded: %d reloads", reloads)
+	}
+
 	// Round 5: b's server answers that it has no list for this relay: its
 	// devices go.
 	lists[10902] = struct {
@@ -445,6 +479,15 @@ func TestGatewaySettings(t *testing.T) {
 	t.Setenv("XRAY_GATEWAY_STATUS", "status.json")
 	if err := gatewaySettings(); err == nil || !strings.Contains(err.Error(), "not an absolute path") {
 		t.Errorf("err = %v", err)
+	}
+	src, run := t.TempDir(), t.TempDir()
+	t.Setenv("XRAY_SOURCE_DIR", src)
+	t.Setenv("XRAY_RUNTIME_DIR", run)
+	for _, p := range []string{filepath.Join(src, "gateway.json"), filepath.Join(run, "status.json"), filepath.Join(filepath.Dir(run), "status.json")} {
+		t.Setenv("XRAY_GATEWAY_STATUS", p)
+		if err := gatewaySettings(); err == nil || !strings.Contains(err.Error(), "is in or around XRAY_SOURCE_DIR or XRAY_RUNTIME_DIR") {
+			t.Errorf("%s: err = %v", p, err)
+		}
 	}
 	if os.Geteuid() != 0 {
 		dir := filepath.Join(t.TempDir(), "ro")

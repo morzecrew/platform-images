@@ -75,6 +75,10 @@ var (
 	gwDropped []string // what the last union dropped, as the status names it
 	gwLastErr error    // the last round's, which could not reach the API
 	gwRound   time.Time
+	// A restart that failed, tried again each round till it succeeds: the
+	// devices it was to cut are gone from Xray's users by then, so no later
+	// round would see them removed.
+	gwRestartDue bool
 )
 
 // The status file, for gateway-status, the relay's tasks and its facts.
@@ -129,6 +133,11 @@ func gatewaySettings() error {
 	if !filepath.IsAbs(p) {
 		return errors.New("XRAY_GATEWAY_STATUS is not an absolute path")
 	}
+	// The source would lose a file to it, and Xray would read it from the
+	// runtime directory as config.
+	if dir := filepath.Dir(p); envconf.Overlap(dir, img.Get("XRAY_SOURCE_DIR")) || envconf.Overlap(dir, img.Get("XRAY_RUNTIME_DIR")) {
+		return fmt.Errorf("XRAY_GATEWAY_STATUS (%s) is in or around XRAY_SOURCE_DIR or XRAY_RUNTIME_DIR, whose files it would replace or join: point it at a directory of its own", p)
+	}
 	if err := writeGatewayStatus(); err != nil {
 		return fmt.Errorf("XRAY_GATEWAY_STATUS is %s, which uid %d cannot write (%v). Mount a tmpfs on its directory that it owns", p, os.Getuid(), envconf.Cause(err))
 	}
@@ -162,10 +171,11 @@ func gatewayRound(src, run string, extra []string) bool {
 	} else {
 		gwRound = time.Now()
 	}
-	if restart {
+	if restart || gwRestartDue {
+		restart, gwRestartDue = true, false
 		if err := gwReload(src, run, extra); err != nil {
-			fmt.Fprintf(os.Stderr, "gateway: Xray could not be restarted on the new lists (%v): it keeps the config it runs\n", err)
-			restart = false
+			fmt.Fprintf(os.Stderr, "gateway: Xray could not be restarted on the new lists (%v): it keeps the config it runs, and the restart is tried again next round\n", err)
+			restart, gwRestartDue = false, true
 		}
 	}
 	if err := writeGatewayStatus(); err != nil {
