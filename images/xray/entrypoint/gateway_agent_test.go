@@ -27,6 +27,9 @@ type fakeAPI struct {
 	calls   []string
 	fail    string // a command that fails
 	ignored bool   // adrules answers ok and changes nothing
+	// Users whose rmu or adu fails on its own while the command exits 0, as
+	// Xray's CLI does when one user's call fails.
+	silent map[string]bool
 }
 
 func (f *fakeAPI) api(stdin []byte, args ...string) ([]byte, error) {
@@ -49,9 +52,17 @@ func (f *fakeAPI) api(stdin []byte, args ...string) ([]byte, error) {
 		}
 		return json.Marshal(r)
 	case "rmu":
-		tag := strings.TrimPrefix(args[1], "-tag=")
-		for _, e := range args[2:] {
-			delete(f.users[tag], e)
+		// Go's flag package, as Xray's: options until "--" or a word.
+		tag, rest := strings.TrimPrefix(args[1], "-tag="), args[2:]
+		if len(rest) > 0 && rest[0] == "--" {
+			rest = rest[1:]
+		} else if len(rest) > 0 && strings.HasPrefix(rest[0], "-") {
+			return nil, errors.New("xray api rmu failed (exit status 2): flag provided but not defined: " + rest[0])
+		}
+		for _, e := range rest {
+			if !f.silent[e] {
+				delete(f.users[tag], e)
+			}
 		}
 	case "adu":
 		var in struct {
@@ -75,10 +86,14 @@ func (f *fakeAPI) api(stdin []byte, args ...string) ([]byte, error) {
 				f.users[i.Tag] = map[string]string{}
 			}
 			for _, c := range i.Settings.Clients {
-				f.users[i.Tag][c.Email], f.flows[c.Email] = c.ID, c.Flow
+				if !f.silent[c.Email] {
+					f.users[i.Tag][c.Email], f.flows[c.Email] = c.ID, c.Flow
+				}
 			}
 			for _, u := range i.Settings.Users {
-				f.users[i.Tag][u.Email] = u.Auth
+				if !f.silent[u.Email] {
+					f.users[i.Tag][u.Email] = u.Auth
+				}
 			}
 		}
 	case "adrules":
@@ -167,7 +182,8 @@ func gwAgent(t *testing.T) (*fakeAPI, fakeLists, string) {
 	if err := gatewaySettings(); err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeAPI{users: map[string]map[string]string{}, flows: map[string]string{}, online: map[string]bool{}}
+	f := &fakeAPI{users: map[string]map[string]string{}, flows: map[string]string{}, online: map[string]bool{}, silent: map[string]bool{}}
+	gwPending = map[string]string{}
 	lists := fakeLists{}
 	oldAPI, oldFetch, oldReload := xrayAPI, gwFetch, gwReload
 	xrayAPI, gwFetch = f.api, lists.fetch
@@ -423,6 +439,58 @@ func TestGatewayRounds(t *testing.T) {
 	gatewayRound("", "", nil)
 	if gwNext() != time.Minute {
 		t.Errorf("next %v", gwNext())
+	}
+}
+
+// What Xray's CLI leaves undone with a 0 exit fails the round, which the
+// next one mends; a name may start with a dash; and a removed device stays
+// pending till an online check answers.
+func TestGatewayMutationsAreReadBack(t *testing.T) {
+	f, lists, status := gwAgent(t)
+	lists[10902] = struct {
+		code int
+		body string
+	}{200, list(devB+" -tablet", devC+" laptop")}
+	gatewayRound("", "", nil)
+	if f.users["devices"]["-tablet@b"] != devB || readStatus(t, status).Error != "" {
+		t.Fatalf("devices holds %v", f.users["devices"])
+	}
+
+	// laptop's removal does nothing, and the CLI says ok: the round fails.
+	before := readStatus(t, status).Round
+	f.silent["laptop@b"] = true
+	lists[10902] = struct {
+		code int
+		body string
+	}{200, list(devB + " -tablet")}
+	gatewayRound("", "", nil)
+	if st := readStatus(t, status); !st.Round.Equal(before) || st.Error != "the devices inbound does not hold the users sent to it" || gwNext() != gwRetry {
+		t.Errorf("a removal the CLI left undone: %+v", st)
+	}
+	delete(f.silent, "laptop@b")
+	gatewayRound("", "", nil)
+	if f.users["devices"]["laptop@b"] != "" || readStatus(t, status).Error != "" {
+		t.Errorf("the next round did not mend it: %v", f.users["devices"])
+	}
+
+	// -tablet goes, a name that starts with a dash, while the online check
+	// fails: pending, it is checked the round after, and is still connected.
+	lists[10902] = struct {
+		code int
+		body string
+	}{200, list()}
+	f.fail = "statsgetallonlineusers"
+	if gatewayRound("", "", nil) || f.users["devices"]["-tablet@b"] != "" {
+		t.Errorf("devices holds %v", f.users["devices"])
+	}
+	f.fail, f.online["-tablet@b"] = "", true
+	f.calls = nil
+	if !gatewayRound("", "", nil) || !slices.Contains(f.calls, "reload") {
+		t.Errorf("a removal whose online check failed was forgotten: %v", f.calls)
+	}
+	f.calls = nil
+	if gatewayRound("", "", nil) || slices.Contains(f.calls, "statsgetallonlineusers") {
+		t.Errorf("checked again once Xray was replaced: %v", f.calls)
 	}
 }
 

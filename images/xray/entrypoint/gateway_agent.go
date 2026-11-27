@@ -79,6 +79,10 @@ var (
 	// devices it was to cut are gone from Xray's users by then, so no later
 	// round would see them removed.
 	gwRestartDue bool
+	// The devices removed, or sent to be, and not yet found offline, with the
+	// id each had: kept from round to round till an online check answers, or
+	// Xray is replaced.
+	gwPending = map[string]string{}
 )
 
 // The status file, for gateway-status, the relay's tasks and its facts.
@@ -176,6 +180,8 @@ func gatewayRound(src, run string, extra []string) bool {
 		if err := gwReload(src, run, extra); err != nil {
 			fmt.Fprintf(os.Stderr, "gateway: Xray could not be restarted on the new lists (%v): it keeps the config it runs, and the restart is tried again next round\n", err)
 			restart, gwRestartDue = false, true
+		} else {
+			clear(gwPending) // the new Xray holds none of them
 		}
 	}
 	if err := writeGatewayStatus(); err != nil {
@@ -448,8 +454,8 @@ func gatewayApply() (bool, error) {
 	for _, u := range gw.users {
 		want[u.email] = u.id
 	}
-	var removed []string
 	var adds []any
+	var touched []string
 	for _, in := range gw.inbounds {
 		held, err := inboundUsers(in.tag)
 		if err != nil {
@@ -467,26 +473,41 @@ func gatewayApply() (bool, error) {
 				add = append(add, u)
 			}
 		}
+		// Pending before the call, which may remove some and fail.
+		for _, e := range rm {
+			gwPending[e] = held[e]
+		}
 		// ponytail: one rmu per inbound with every email on its command line;
-		// split it once removals run into the thousands.
+		// split it once removals run into the thousands. "--" ends the
+		// options: a name may start with a dash.
 		if len(rm) > 0 {
-			if _, err := xrayAPI(nil, append([]string{"rmu", "-tag=" + in.tag}, rm...)...); err != nil {
+			if _, err := xrayAPI(nil, append([]string{"rmu", "-tag=" + in.tag, "--"}, rm...)...); err != nil {
 				return false, err
-			}
-			for _, e := range rm {
-				if !slices.Contains(removed, e) {
-					removed = append(removed, e)
-				}
 			}
 		}
 		if len(add) > 0 {
 			adds = append(adds, in.adding(add))
+		}
+		if len(rm)+len(add) > 0 {
+			touched = append(touched, in.tag)
 		}
 	}
 	if len(adds) > 0 {
 		body, _ := json.Marshal(map[string]any{"inbounds": adds})
 		if _, err := xrayAPI(body, "adu", "stdin:"); err != nil {
 			return false, err
+		}
+	}
+	// Xray's CLI exits 0 when the call for one user fails, so what each
+	// inbound holds is read back; a round that left it otherwise fails, and
+	// the next one sends the difference again.
+	for _, tag := range touched {
+		held, err := inboundUsers(tag)
+		if err != nil {
+			return false, err
+		}
+		if !maps.Equal(held, want) {
+			return false, fmt.Errorf("the %s inbound does not hold the users sent to it", tag)
 		}
 	}
 	restart := false
@@ -514,17 +535,25 @@ func gatewayApply() (bool, error) {
 		}
 		fmt.Fprintln(os.Stderr, "gateway: the routing Xray holds is not the gateway's: replacing it")
 	}
-	if len(removed) > 0 {
+	for e, id := range gwPending {
+		if want[e] == id {
+			delete(gwPending, e) // back as it was
+		}
+	}
+	if len(gwPending) > 0 {
 		online, err := onlineUsers()
 		if err != nil {
 			return false, err
 		}
 		var cut []string
-		for _, e := range removed {
+		for _, e := range slices.Sorted(maps.Keys(gwPending)) {
 			if online[e] {
 				cut = append(cut, e)
 			}
 		}
+		// Offline, they are done; online, the restart cuts them, and is tried
+		// again till it does (gwRestartDue).
+		clear(gwPending)
 		if len(cut) > 0 {
 			fmt.Fprintf(os.Stderr, "gateway: %s removed while connected: restarting Xray, which alone cuts a user's open connections\n", strings.Join(cut, ", "))
 			restart = true
