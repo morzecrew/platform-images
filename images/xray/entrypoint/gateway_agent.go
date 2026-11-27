@@ -213,8 +213,9 @@ func newUUID() string {
 // state: live while one leg serves it, refused while none does and one
 // answers that there is none (404), which drops the group's devices, as a
 // server no longer listing this relay must not keep letting them in; down
-// otherwise, keeping the list it had, since its devices can't get through
-// anyway. A change is logged, never with an id or a token.
+// otherwise, a list that isn't one included, keeping the list it had, since
+// its devices can't get through anyway. A change is logged, never with an id
+// or a token.
 func (st *gwGroupState) fetch(g gwGroup) {
 	token := listToken(g.id)
 	st.legs = st.legs[:0]
@@ -231,7 +232,8 @@ func (st *gwGroupState) fetch(g gwGroup) {
 		case code == http.StatusOK:
 			e, n, perr := parseList(body)
 			if perr != nil {
-				ls.State, ls.Error = "refused", perr.Error()
+				// Not an answer that this relay is unlisted: only a 404 is.
+				ls.Error = perr.Error()
 				break
 			}
 			ls.State, ls.MS = "ok", time.Since(start).Milliseconds()
@@ -251,11 +253,8 @@ func (st *gwGroupState) fetch(g gwGroup) {
 		st.state, st.list, st.skipped, st.listed = "live", entries, skipped, time.Now()
 		sum := sha256.Sum256(got)
 		st.digest = hex.EncodeToString(sum[:4])
-	case refused || slices.ContainsFunc(st.legs, func(l gwLegStatus) bool { return l.State == "refused" }):
-		st.state = "refused"
-		if refused {
-			st.list, st.digest = nil, ""
-		}
+	case refused:
+		st.state, st.list, st.digest = "refused", nil, ""
 	default:
 		st.state = "down"
 	}
@@ -296,6 +295,11 @@ func fetchList(probe int, token string) (int, []byte, error) {
 		return 0, nil, fmt.Errorf("no answer (%s)", strings.ReplaceAll(err.Error(), token, "…"))
 	}
 	defer resp.Body.Close()
+	// A status says it all but for a list, whose body alone is read: a 404's
+	// page, however large, must still say the relay is unlisted.
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, nil, nil
+	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, gwListMax+1))
 	switch {
 	case err != nil:

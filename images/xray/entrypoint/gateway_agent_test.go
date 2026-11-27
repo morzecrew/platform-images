@@ -383,6 +383,17 @@ func TestGatewayRounds(t *testing.T) {
 		t.Errorf("status %+v", st.Groups[1])
 	}
 
+	// Round 5b: b's server answers a 200 that is no list: b is down, not
+	// refused, and keeps what it had (none, after the 404).
+	lists[10902] = struct {
+		code int
+		body string
+	}{200, "<html>a captive portal</html>"}
+	gatewayRound("", "", nil)
+	if st := readStatus(t, status); st.Groups[1].State != "down" || st.Groups[1].Legs[0].Error != "not a dotdash relay list v1" {
+		t.Errorf("a 200 that is no list: %+v", st.Groups[1])
+	}
+
 	// Round 6: the API doesn't answer: said, the round's time kept, and the
 	// next round sooner.
 	before := readStatus(t, status).Round
@@ -510,6 +521,9 @@ func TestFetchListThroughTheProbe(t *testing.T) {
 		switch {
 		case r.URL.Host != "list.sub.dotdash.internal":
 			w.WriteHeader(http.StatusBadGateway)
+		case r.URL.Path == "/big404":
+			w.WriteHeader(http.StatusNotFound)
+			w.Write(bytes.Repeat([]byte("x"), gwListMax+10))
 		case r.URL.Path == "/"+token:
 			fmt.Fprint(w, list(devA+" phone"))
 		case r.URL.Path == "/moved":
@@ -526,6 +540,9 @@ func TestFetchListThroughTheProbe(t *testing.T) {
 	}
 	if code, _, err := fetchList(port, listToken(clientB)); err != nil || code != 404 {
 		t.Errorf("another token: %d %v", code, err)
+	}
+	if code, _, err := fetchList(port, "big404"); err != nil || code != 404 {
+		t.Errorf("a 404 with a page larger than a list: %d %v", code, err)
 	}
 	if code, _, err := fetchList(port, "moved"); err != nil || code != 302 {
 		t.Errorf("a redirect is not followed: %d %v", code, err)
