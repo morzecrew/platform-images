@@ -109,7 +109,7 @@ func (im *Image) Summary(w io.Writer, version string, configs []*Config) {
 		for _, r := range c.Refs {
 			from := r.File
 			if r.Kind != File.Key {
-				from = r.Kind + " " + r.File
+				from = strings.TrimSpace(r.Kind + " " + r.File)
 			}
 			if r.Note != "" {
 				from += " " + r.Note

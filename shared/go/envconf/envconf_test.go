@@ -2,6 +2,7 @@ package envconf
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,10 +24,19 @@ var demo = &Image{
 	Upstream: map[string]bool{"DEMO_OWN": true},
 }
 
-// Both reference forms the tests resolve: $file, and one whose value is not
-// a string and is not secret.
-var refs = []Reference{File, {"$count", func(string) (Resolution, error) {
+// The reference forms the tests resolve: $file, one whose value is not a
+// string and is not secret, and one that also takes a target other than a
+// path.
+var refs = []Reference{File, {Key: "$count", Resolve: func(string) (Resolution, error) {
 	return Resolution{Value: []any{1, 2}, Note: "(2 items)"}, nil
+}}, {Key: "$pair", Resolve: func(file string) (Resolution, error) {
+	return Resolution{Value: file}, nil
+}, Value: func(target any) (Resolution, error) {
+	m, ok := target.(map[string]any)
+	if !ok {
+		return Resolution{}, errors.New("takes a path or an object")
+	}
+	return Resolution{Value: len(m), Note: "(an object)"}, nil
 }}}
 
 func write(t *testing.T, path, content string, mode os.FileMode) string {
@@ -91,6 +101,32 @@ func TestResolveReplacesReferencesAndNothingElse(t *testing.T) {
 	}
 	if m, ok := c.Doc.(map[string]any); !ok || m["s"] != "<&>" {
 		t.Errorf("doc = %v", c.Doc)
+	}
+}
+
+// A reference with Value takes a path as any does, and any other target
+// through Value, whose error is named by the JSON path alone.
+func TestResolveValueTargets(t *testing.T) {
+	dir := t.TempDir()
+	src := write(t, filepath.Join(dir, "c.json"), `{"p": {"$pair": "/a/path"}, "o": {"$pair": {"x": 1, "y": 2}}}`, 0o600)
+	c, err := ResolveFile(src, refs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"o":2,"p":"/a/path"}` + "\n"; string(c.Out) != want {
+		t.Errorf("resolved\n got %s\nwant %s", c.Out, want)
+	}
+	if len(c.Refs) != 2 || c.Refs[0] != (Ref{"o", "$pair", "", "(an object)"}) || c.Refs[1] != (Ref{"p", "$pair", "/a/path", ""}) {
+		t.Errorf("refs = %v", c.Refs)
+	}
+	var out bytes.Buffer
+	demo.Summary(&out, "v", []*Config{c})
+	if !strings.Contains(out.String(), "o <- $pair (an object)   (") {
+		t.Errorf("summary:\n%s", out.String())
+	}
+	src = write(t, filepath.Join(dir, "c.json"), `{"a": {"$pair": 7}}`, 0o600)
+	if _, err := ResolveFile(src, refs); err == nil || err.Error() != src+": a: takes a path or an object" {
+		t.Errorf("err = %v", err)
 	}
 }
 

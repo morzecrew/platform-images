@@ -74,6 +74,7 @@ of these. Everything else in the config stays as written.
 | `{"$file": "/abs/path"}` | the file's content as a JSON string, minus one trailing newline |
 | `{"$vlessDecryption": "/abs/path"}` | the VLESS Encryption server key derived from the seed in the file (see below) |
 | `{"$vlessClients": "/abs/path"}` | a VLESS inbound's `clients` array, one client per line of the file (see below) |
+| `{"$vlessClients": {"devices": …, "relays": …, "seed": …}}` | the same, and one client per dotdash relay, its id derived from the seed (see below) |
 | `{"$hysteriaUsers": "/abs/path"}` | a Hysteria2 inbound's `users` array, from the same file (see below) |
 | `{"$proxy": "/abs/path"}` | a socks or http outbound's `settings`, split from the `[user:pass@]host:port` in the file (see below) |
 | `{"$wireguard": "/abs/path"}` | a wireguard outbound's `settings`, from the wg-quick client config in the file (see below) |
@@ -114,8 +115,9 @@ file, the JSON path and the referenced path, never a value.
   missing), over 64 KiB, not UTF-8, or holding a NUL byte. These are the
   checks the shared `_FILE` contract makes.
 - An object holding `$file`, `$vlessDecryption`, `$vlessClients`,
-  `$hysteriaUsers`, `$proxy`, `$wireguard` or `$upstreams` and any other key, or a path that is not an absolute path in a string. A near
-  miss would otherwise reach Xray as a literal.
+  `$hysteriaUsers`, `$proxy`, `$wireguard` or `$upstreams` and any other key, or a path that is not an absolute path in a string
+  (`$vlessClients` also takes [an object](#a-servers-relays), with its own
+  checks). A near miss would otherwise reach Xray as a literal.
 - A seed file that is not exactly 128 hex characters.
 - A client list with a line it refuses (see below).
 - A proxy file that is not one `[user:pass@]host:port` (see below).
@@ -202,6 +204,69 @@ Each of these exits 78. The message names the line, never an id:
 
 The summary shows the count, not the ids, and the ids are redacted from
 `xray run -test` output like every other resolved value.
+
+### A server's relays
+
+A dotdash server lets its relays in by ids it works out itself, so nobody
+types a relay's id into `vless_clients`. `$vlessClients` takes an object for
+that, in place of the path:
+
+```json
+"clients": {"$vlessClients": {"devices": "/run/secrets/vless_clients", "relays": "/run/secrets/relays", "seed": "/run/secrets/relay_seed"}}
+```
+
+It resolves to the clients `devices` lists, as the path form does, then one
+client per `relay/1` line in `relays`: its id is the relay's id on this
+server, its email `relay-<name>`. `relays` may also be the lines themselves,
+an array of strings, as a template writes them out of a parameter (only the
+`relay/1` ones, as a template can pick them by their first word):
+
+```json
+"relays": ["relay/1 r1 0123456789abcdef r1.example.net r1.example.net <pbk> <sid> <enc> xhttp=<path>"]
+```
+
+- **A relay/1 line** is what a relay's `relay-entry` prints:
+  `relay/1 <name> <nonce> <host> <site> <pbk> <sid> <enc>`, then optional
+  `key=value` fields in any order. Blank lines and `#` comments are skipped.
+  The name is 1 to 24 of `A-Z a-z 0-9 . _ -`, unique ignoring case; the nonce
+  16 lowercase hex characters; the host a DNS name, an IPv4 or an IPv6
+  address; the site a DNS name; the public key 43 base64url characters; the
+  short id 1 to 16 lowercase hex characters; the encryption `none` or
+  `mlkem768x25519plus.<…>`; `xhttp=` 1 to 128 of `A-Z a-z 0-9 . _ ~ -`.
+  `kcp=`, `hy2=`, `cdn=`, `cdnpath=`, `origin=` and `cdn-only` are the
+  server's links' business and pass unread. A `key=` it doesn't know is left
+  out with a warning naming the line, so a new optional field needs no new
+  version.
+- **The id** is the version 4 UUID made of the first 16 bytes of
+  `sha256("<seed>:relay:<name>:<nonce>")`: byte 6 is `(b & 0x0f) | 0x40`,
+  byte 8 `(b & 0x3f) | 0x80`. The seed is the server group's own, so a
+  relay's ids on two groups are unrelated; the nonce is the relay's own, made
+  once at its install, so a new relay that takes a removed one's name gets
+  another id. Deleting a line revokes that relay; a new seed revokes them all.
+  [`relay-id`](#a-relays-id) prints one, and
+  [`testdata/relay-id.json`](entrypoint/testdata/relay-id.json) holds the
+  vectors every implementation is tested against.
+- With no `relay/1` line, the seed is not read.
+- The summary names the files and counts the clients, relays included.
+
+Each of these exits 78. The message names the file and the line, never what
+is on the line, which is as sensitive as a device's link:
+
+- A line whose first field is not `relay/1`: today's relay lines, which have
+  no tag, a `server/1` line, or a version this image doesn't read.
+- A head of fewer than 8 fields, or a field outside its shape above.
+- Two lines with one name, ignoring case.
+- A seed file that is not 64 lowercase hex characters, the form morzer's
+  `hex` generator writes: the hash takes the text, so another case would make
+  other ids.
+- A relay's client name, `relay-<name>`, that a client in `devices` has,
+  ignoring case, such as the line a relay had there before: rename that one,
+  or drop it once the relay has its `relay/1` line.
+- A derived id that differs from a client's only in bytes 6 and 7: give the
+  relay another nonce.
+- An object with a key other than `devices`, `relays` and `seed`, a
+  `devices` or `seed` that is not an absolute path, or a `relays` that is
+  neither an absolute path nor an array of one-line strings.
 
 ## An upstream proxy from one secret
 
@@ -544,6 +609,25 @@ docker run --rm -v ./secrets/vless_seed:/run/secrets/vless_seed:ro \
 
 A bad seed file exits 78 here too.
 
+## A relay's id
+
+`xray-entrypoint relay-id <seed file> <name> <nonce>` prints a dotdash relay's
+id on this server, [derived](#a-servers-relays) from the relay seed in the
+file and the relay's name and nonce, plus a newline and nothing else, for the
+server's tasks that print a relay its line. The seed is read from the file,
+so it never shows on a command line.
+
+```sh
+docker run --rm -v ./secrets/relay_seed:/run/secrets/relay_seed:ro \
+  ghcr.io/morzecrew/xray:26.10.31 relay-id /run/secrets/relay_seed r1 0123456789abcdef
+```
+
+A seed file that is not 64 lowercase hex characters exits 78; a name or a
+nonce outside its shape, a missing argument, or a first argument that is
+not an absolute path (and so may be the seed itself, which is not repeated)
+exits 2. Where the relay fetches its device list is the first 32 hex
+characters of `sha256("<relay id>:list")`, which the vectors carry too.
+
 ## REALITY public key
 
 A REALITY server needs nothing from the image: its private key reaches Xray as
@@ -707,7 +791,7 @@ and in the healthcheck's output.
 ## Other commands
 
 Any first argument other than `run`, `healthcheck`, `fetch`,
-`vless-encryption` or `reality-password` goes straight to `xray`, so
+`vless-encryption`, `reality-password` or `relay-id` goes straight to `xray`, so
 upstream's tools work:
 
 ```sh
@@ -758,7 +842,10 @@ and tzdata current.
   [`shared/go/envconf`](../../shared/go/envconf), with their tests, which
   mihomo uses too.
   `testdata/vlessenc.txt` is a key pair `xray vlessenc` printed on 26.10.31,
-  which the derivation must reproduce.
+  which the derivation must reproduce. `testdata/relay-id.json` holds relay
+  ids and list tokens a separate Python implementation computed: `relay-id`
+  must reproduce them, and so must dotdash's server and manager, which test
+  their own against a copy.
 - `smoke.sh`: rootless Podman. Covers the references, the seeded key pair end
   to end, both client-side commands against upstream's own derivation, a socks
   and an http upstream with a password holding `:` and `@`, the healthcheck,
