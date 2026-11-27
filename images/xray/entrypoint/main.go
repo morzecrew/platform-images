@@ -178,6 +178,7 @@ func start(extra []string) error {
 		}
 		return err
 	}
+	gatewayInstall()
 	img.Summary(os.Stderr, version, configs)
 	if gw.api != "" {
 		if err := gatewaySettings(); err != nil {

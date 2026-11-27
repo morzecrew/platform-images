@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -175,10 +176,11 @@ func gwAgent(t *testing.T) (*fakeAPI, fakeLists, string) {
 	t.Setenv("XRAY_GATEWAY_STATUS", status)
 	t.Setenv("XRAY_GATEWAY_INTERVAL", "")
 	gw.users, gw.prefixes, gwStates, gwDropped, gwLastErr, gwRound, gwRestartDue = nil, nil, map[string]*gwGroupState{}, nil, nil, time.Time{}, false
-	_, configs, err := gwSource(t, server1("a", "a1.example.com,a2.example.com", clientA)+"\n"+server1("b", "b.example.com", clientB), "", "")
+	src, configs, err := gwSource(t, server1("a", "a1.example.com,a2.example.com", clientA)+"\n"+server1("b", "b.example.com", clientB), "", "")
 	if err != nil || len(configs) != 2 {
 		t.Fatal(err)
 	}
+	gwTestSrc = src
 	if err := gatewaySettings(); err != nil {
 		t.Fatal(err)
 	}
@@ -193,6 +195,21 @@ func gwAgent(t *testing.T) (*fakeAPI, fakeLists, string) {
 		gw.users, gw.prefixes = nil, nil
 	})
 	return f, lists, status
+}
+
+// The source gwAgent resolved, for a test that resolves it again.
+var gwTestSrc string
+
+// stubXray stands in for the xray binary: `xray run -test` passes.
+func stubXray(t *testing.T) {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "xray")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'Xray 0.0.0'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := img.Bin
+	img.Bin = bin
+	t.Cleanup(func() { img.Bin = old })
 }
 
 func readStatus(t *testing.T, p string) gwStatus {
@@ -491,6 +508,77 @@ func TestGatewayMutationsAreReadBack(t *testing.T) {
 	f.calls = nil
 	if gatewayRound("", "", nil) || slices.Contains(f.calls, "statsgetallonlineusers") {
 		t.Errorf("checked again once Xray was replaced: %v", f.calls)
+	}
+}
+
+// A resolve whose config Xray never runs changes nothing the agent goes by:
+// with a's prefix moved, an adrules that fails and a restart whose config
+// fails its test, the next round still sends the new routing.
+func TestGatewayCandidateIsNotInstalled(t *testing.T) {
+	f, lists, _ := gwAgent(t)
+	gwReload = func(src, run string, extra []string) error {
+		_, _, err := reload(src, run, extra)
+		return err
+	}
+	fakeXray(t, "never") // every config fails its test
+	lists[10902] = struct {
+		code int
+		body string
+	}{200, list(devB + " tablet 0123456789ab")}
+	gatewayRound(gwTestSrc, t.TempDir(), nil)
+	installed := gw.routing
+	lists[10902] = struct {
+		code int
+		body string
+	}{200, list(devB + " tablet ba9876543210")}
+	f.fail, gwRestartDue = "adrules", true
+	gatewayRound(gwTestSrc, t.TempDir(), nil)
+	if gw.routing != installed || gw.next.routing == installed {
+		t.Errorf("a failed reload's routing was taken for the one Xray holds")
+	}
+	f.fail, f.calls = "", nil
+	stubXray(t)
+	gwRestartDue = false
+	gatewayRound(gwTestSrc, t.TempDir(), nil)
+	if !slices.Contains(f.calls, "adrules") || gw.routing == installed {
+		t.Errorf("the new routing was not sent: %v", f.calls)
+	}
+}
+
+// A restart for geodata alone resolves the gateway's config again first: the
+// runtime directory still holds a device the agent removed since.
+func TestGeodataRestartTakesTheGatewaysDevices(t *testing.T) {
+	_, lists, _ := gwAgent(t)
+	stubXray(t)
+	run := t.TempDir()
+	lists[10902] = struct {
+		code int
+		body string
+	}{200, list(devB+" tablet", devC+" laptop")}
+	gatewayRound(gwTestSrc, run, nil)
+	if ok, _, err := reload(gwTestSrc, run, nil); !ok || !strings.Contains(read(t, filepath.Join(run, "xray.json")), "laptop@b") {
+		t.Fatalf("the runtime config: %v", err)
+	}
+	lists[10902] = struct {
+		code int
+		body string
+	}{200, list(devB + " tablet")}
+	if gatewayRound(gwTestSrc, run, nil) {
+		t.Fatal("a restart for a device that is not connected")
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("pinned data")) }))
+	defer srv.Close()
+	geoSetup(t, srv.URL, "pinned data")
+	if err := geodataPrepare(); err != nil {
+		t.Fatal(err)
+	}
+	fakeXray(t, "pinned data")
+	if !refresh(gwTestSrc, run, nil, subSettings{interval: time.Hour}) {
+		t.Fatal("no restart for a pinned file fetched")
+	}
+	if strings.Contains(read(t, filepath.Join(run, "xray.json")), "laptop@b") {
+		t.Error("Xray would restart on a config that lets laptop@b back in")
 	}
 }
 

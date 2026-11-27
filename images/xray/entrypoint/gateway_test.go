@@ -46,6 +46,9 @@ func gwSource(t *testing.T, servers, via, opts string) (string, []*envconf.Confi
 	write(t, filepath.Join(src, "gateway.json"), `{"$gateway": {`+obj+`}}`, 0o600)
 	write(t, filepath.Join(src, "xray.json"), gwDevices, 0o600)
 	configs, err := resolveDir(src)
+	if err == nil {
+		gatewayInstall()
+	}
 	return src, configs, err
 }
 

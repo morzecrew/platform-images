@@ -180,8 +180,6 @@ func gatewayRound(src, run string, extra []string) bool {
 		if err := gwReload(src, run, extra); err != nil {
 			fmt.Fprintf(os.Stderr, "gateway: Xray could not be restarted on the new lists (%v): it keeps the config it runs, and the restart is tried again next round\n", err)
 			restart, gwRestartDue = false, true
-		} else {
-			clear(gwPending) // the new Xray holds none of them
 		}
 	}
 	if err := writeGatewayStatus(); err != nil {

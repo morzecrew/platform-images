@@ -418,7 +418,26 @@ func refresh(src, run string, extra []string, s subSettings) bool {
 		fmt.Fprintln(os.Stderr, "xray-entrypoint: XRAY_RUNTIME_DIR could not be put back; Xray keeps running on the config it loaded, and geodata waits")
 		return false
 	}
-	return refreshGeo(run, extra, s.proxy) || restart
+	if refreshGeo(run, extra, s.proxy) && !restart {
+		restart = geoRestart(src, run, extra)
+	}
+	return restart
+}
+
+// geoRestart says whether Xray may restart on a geodata file alone. With a
+// gateway, the runtime directory holds the devices of the last resolve, and
+// the agent has changed them since through Xray's API: a revoked device
+// would get back in. So the source is resolved again on the gateway's
+// devices and routes now, and Xray restarts only once that passes.
+func geoRestart(src, run string, extra []string) bool {
+	if gw.api == "" {
+		return true
+	}
+	if ok, _, err := reload(src, run, extra); !ok {
+		fmt.Fprintf(os.Stderr, "geodata: the config could not be resolved again on the gateway's devices (%v); Xray keeps running on the files it loaded\n", err)
+		return false
+	}
+	return true
 }
 
 // refreshSubs fetches each subscription that is due, every one once their
@@ -502,6 +521,7 @@ func reload(src, run string, extra []string) (bool, bool, error) {
 		return false, writeRuntime(run, running) == nil, err
 	}
 	running = configs
+	gatewayInstall() // each caller restarts Xray on it
 	return true, true, nil
 }
 
