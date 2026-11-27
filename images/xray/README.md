@@ -675,9 +675,12 @@ second after Xray starts and every `XRAY_GATEWAY_INTERVAL` from then on:
    connections drop. A restart whose config fails is tried again every round
    till it passes. Xray counts nobody online from `127.0.0.1`.
 
-Lists live in memory and in the runtime directory's resolved config, both
-gone when the container stops: after a start, each group's devices get in
-once its first round has its list.
+The agent keeps the lists in memory, gone when the container stops: after a
+start, each group's devices get in once its first round has its list. The
+resolved config in `XRAY_RUNTIME_DIR` holds the devices of the last start or
+restart, every id among them, till the next start empties it: on the
+container's own layer or a volume, that is after a stop as well. Mount a
+tmpfs there, as [Usage](#usage) does, for them to go with the container.
 
 **The status.** After each round the agent writes `XRAY_GATEWAY_STATUS`, a
 JSON file, whole, mode 0644, for the relay's tasks:
