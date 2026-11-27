@@ -580,6 +580,7 @@ clients and users from `$gatewayClients`:
 | `ipv6` | `allow` | `block`: an IPv6 destination goes nowhere. |
 | `probeURL` | `https://www.gstatic.com/generate_204` | What the observatory fetches through each leg. |
 | `tunnelGroup` | the first group | The group the `tunnel` inbound goes to. One no line names is warned of, and the first group's. |
+| `listen` | `0.0.0.0` | The address the `subscriptions` and `tunnel` inbounds listen on, such as the container's address on the network it shares with Caddy alone. |
 
 **A server/1 line** is
 `server/1 <name> <host>[,<host>…] <port> <pbk> <sid> <enc> <relay id>`, then
@@ -599,8 +600,8 @@ order, which the relay dials in place of the name.
   leg per server, tagged `<group>-<n>`, as this relay's id on the group; or,
   with `via`, a leg per relay there instead, `<group>-v<n>`, on port 443, still
   as this relay's id on the group, which that relay's server lists for it.
-- **Inbounds.** `subscriptions` (http, `0.0.0.0:10810`) and `tunnel` (http,
-  `0.0.0.0:10811`), for the relay's Caddy on the project's network; and a
+- **Inbounds.** `subscriptions` (http, port 10810) and `tunnel` (http,
+  port 10811), on `listen`, for the relay's Caddy on the project's network; and a
   `probe-<leg>` per leg (http, `127.0.0.1`, from port 10900 in the legs'
   order), for the agent.
 - **A balancer per group**, tagged with its name, `leastPing` over its legs
@@ -614,7 +615,7 @@ order, which the relay dials in place of the name.
 | `internal` | a device (`user: regexp:@`) asking for a `dotdash.internal` name | `block` |
 | `probe-<leg>` | that leg's probe inbound | that leg |
 | `tunnel` | the `tunnel` inbound | the tunnel group |
-| `sub-<group>` | the `subscriptions` inbound, for `<prefix>.sub.dotdash.internal`, a prefix of the group's | the group |
+| `sub-<group>-<digest>` | the `subscriptions` inbound, for `<prefix>.sub.dotdash.internal`, a prefix of the group's; the digest, of the prefixes, is how a replace is read back, as Xray lists a rule by its tag and outbound alone | the group |
 | `users-<group>` | a device named `<device>@<group>` | the group |
 | `block` | anything else (`network: tcp,udp`) | `block` |
 
@@ -629,6 +630,94 @@ names: `internal` keeps devices from asking.
 or `"hysteria"` in a Hysteria2 inbound's `settings.users`: the gateway's
 devices, each named `<device>@<group>`, none at the first start. The inbound's
 `settings.flow` gives a VLESS client its flow, as for `$vlessClients`.
+
+### The agent
+
+With a `$gateway`, the entrypoint stays Xray's parent and runs an agent, a
+second after Xray starts and every `XRAY_GATEWAY_INTERVAL` from then on:
+
+1. **Each group's list**, through each of its legs' probe inbounds:
+   `GET http://list.sub.dotdash.internal/<list token>`, the token the first 32
+   hex characters of `sha256("<relay id>:list")`. The server hands the name to
+   its own Caddy, for relays alone. A list is
+   ```text
+   # dotdash relay list v1
+   <id> [<name> [<first 12 hex of the device's subscription token>]]
+   ```
+   and a line that is not an entry is left out and counted. A list without
+   that first line counts as none.
+2. **The group's state.** `live` while one leg serves its list; `refused`
+   while none does and one answers that there is none (404), which drops the
+   group's devices: a server that no longer lists this relay must not keep
+   letting them in through it; `down` otherwise, keeping the list it had,
+   since its devices can't get through anyway; `starting` before the first
+   round.
+3. **The union**: every group's entries, each named `<name>@<group>` (an
+   unnamed one `#<8 hex of the sha256 of its id>@<group>`), and each group's
+   checker, `#check@<group>`, with a random id made at start, for a probe of
+   the relay's own entries that needs no device's id. An id two entries
+   share once bytes 6 and 7 are zeroed goes from every group, as does a name a
+   group lists twice: one copied id must not take every group down, nor let
+   a device in as another group's. A subscription prefix two groups share
+   gets no route. Each is named in the status and the log.
+4. **Xray's API.** Each device inbound's users are read back
+   (`inbounduser`), and those that differ are removed (`rmu`) and added
+   (`adu`, a VLESS client with the inbound's flow). When the prefixes
+   changed, the routing is replaced (`adrules`), balancers and all; every
+   round it is read back (`lsrules`): the rules' tags are the ones sent, the
+   last to `block`. Rules that differ are replaced again; still different,
+   Xray restarts.
+5. **A restart, for a removed device still connected.** The API cannot cut a
+   user's open connections, and Hysteria2 takes new requests on one that
+   logged in, so when a removed device is still online
+   (`statsgetallonlineusers`), Xray restarts on the config resolved again from
+   the lists in memory, tested first as a subscription's is. Every device's
+   connections drop. A restart whose config fails is tried again every round
+   till it passes. Xray counts nobody online from `127.0.0.1`.
+
+The agent keeps the lists in memory, gone when the container stops: after a
+start, each group's devices get in once its first round has its list. The
+resolved config in `XRAY_RUNTIME_DIR` holds the devices of the last start or
+restart, every id among them, till the next start empties it: on the
+container's own layer or a volume, that is after a stop as well. Mount a
+tmpfs there, as [Usage](#usage) does, for them to go with the container.
+
+**The status.** After each round the agent writes `XRAY_GATEWAY_STATUS`, a
+JSON file, whole, mode 0644, for the relay's tasks:
+
+```json
+{"round": "2026-11-27T12:00:00Z",
+ "groups": [{"name": "a", "state": "live", "check": "<the checker's id>", "devices": 14, "digest": "3f9a1c2b",
+             "listed": "2026-11-27T11:59:58Z",
+             "legs": [{"tag": "a-0", "host": "a1.example.com", "probe": 10900, "state": "ok", "ms": 41},
+                      {"tag": "a-1", "host": "a2.example.com", "probe": 10901, "state": "down", "error": "503 Service Unavailable"}]}],
+ "dropped": ["phone@a, phone@b: one id, once bytes 6 and 7 are zeroed"]}
+```
+
+`round` is the last round that reached Xray's API, and `error` what stopped
+a later one, which is tried again 5 seconds on. `digest` is the first 8 hex
+characters of the sha256 of the list as served, `listed` when it was
+fetched, `skipped` its lines left out. The checkers' ids let in only through
+the relay's own entries. Its directory must be writable by 65532: a tmpfs
+the tasks share, with a read-only root.
+
+**`xray-entrypoint gateway-status`** prints it, a line per group, and exits
+0 while the last round that reached Xray's API is at most two minutes old
+(or two intervals): the relay's machinery works, whatever its groups' states.
+A health check takes that; a group's state is for the tasks and the metrics.
+
+```text
+a                live     a1.example.com ok 41 ms, a2.example.com down (503 Service Unavailable); 14 devices, digest 3f9a1c2b, list 42 s old
+b                refused  b.example.com refused (no list for this relay (404))
+c                down     c.example.com down (no answer (…)); 6 devices kept from the last list, digest 0d1e2f3a, list 240 s old
+gateway: last round 12 s ago
+```
+
+**The log** says when a group changes state, how many devices a round added
+and removed, what it dropped, and why Xray restarts, naming devices, never an
+id or a token: `gateway: group b down: no leg answers (b.example.com: 503
+Service Unavailable)`, `gateway: phone@a removed while connected: restarting
+Xray`.
 
 **What the rest of the config holds.** Xray merges `-confdir` files, a later
 file's outbounds before the earlier ones' and its routing in place of theirs,
@@ -662,6 +751,10 @@ is on the line:
 - `$gatewayClients` with no `$gateway`; a word other than `vless` and
   `hysteria`; anywhere but a VLESS inbound's `settings.clients` or a Hysteria2
   inbound's `settings.users`, of an inbound with a tag and a port.
+- `XRAY_GATEWAY_INTERVAL` under a second; an `XRAY_GATEWAY_STATUS` that is
+  not an absolute path, in a directory in or around `XRAY_SOURCE_DIR` or
+  `XRAY_RUNTIME_DIR` (Xray would read it there as config), or whose
+  directory 65532 cannot write.
 
 ## Geodata from a URL
 
@@ -803,7 +896,8 @@ inbound. `http`, `https`, `socks5` and `socks5h` proxy URLs work.
   fits a static exit IP. A rotating pool needs an ASN or country check, which
   the image does not make.
 - With `XRAY_HEALTHCHECK_PROXY` unset, the check passes if Xray runs (as PID 1,
-  or under the entrypoint with a subscription) and the runtime config exists.
+  or under the entrypoint with a subscription or a gateway) and the runtime config exists.
+  A gateway's [`gateway-status`](#the-agent) also says its agent's rounds run.
   It says on stderr that egress was not probed.
 - The image bakes no `HEALTHCHECK`, because the probe needs an inbound only
   your config can declare. Add the `healthcheck:` block shown under
@@ -869,6 +963,8 @@ fi
 | `XRAY_SUBSCRIPTION_CACHE` | unset | A writable directory, outside `XRAY_SOURCE_DIR` and `XRAY_RUNTIME_DIR`, where each subscription's last accepted outbounds are kept, for a start while its URL is unreachable, such as `/var/lib/xray` with a volume on it: the image's is empty and 65532's, so a new volume there is writable. Unset means none. |
 | `XRAY_GEOIP` | unset | `<url> <sha256>`: a [`geoip.dat`](#geodata-from-a-url) fetched in place of the image's. |
 | `XRAY_GEOSITE` | unset | `<url> <sha256>`: a [`geosite.dat`](#geodata-from-a-url) fetched in place of the image's. |
+| `XRAY_GATEWAY_INTERVAL` | `1m` | How often a [gateway's agent](#the-agent) fetches its groups' lists. A Go duration, 1s or more. |
+| `XRAY_GATEWAY_STATUS` | `/run/gateway/status.json` | Where the agent writes its status, in a directory 65532 can write: the image's, or a tmpfs on it. |
 | `XRAY_GEODATA_DIR` | unset | A writable directory, outside `XRAY_SOURCE_DIR` and `XRAY_RUNTIME_DIR`, where fetched geodata is kept, such as `/var/lib/xray/geodata` with a volume on `/var/lib/xray`. Needed by `XRAY_GEOIP` and `XRAY_GEOSITE`. |
 
 A value set to the empty string takes the default. A bad URL, timeout or
@@ -909,7 +1005,7 @@ and in the healthcheck's output.
 ## Other commands
 
 Any first argument other than `run`, `healthcheck`, `fetch`,
-`vless-encryption`, `reality-password` or `relay-id` goes straight to `xray`, so
+`vless-encryption`, `reality-password`, `relay-id` or `gateway-status` goes straight to `xray`, so
 upstream's tools work:
 
 ```sh
@@ -970,4 +1066,17 @@ and tzdata current.
   and an http upstream with a password holding `:` and `@`, the healthcheck,
   `fetch` through the probe inbound and through a dead proxy, the refusals an
   operator is most likely to meet, and the absence of every secret from the
-  output, and that Xray takes each shape of a gateway's config.
+  output, and that Xray takes each shape of a gateway's config; then
+  `smoke-gateway.sh`.
+- `smoke-gateway.sh`: a gateway end to end, on loopback, with no image but
+  this one: a relay in front of two stand-in server groups, each an Xray of
+  this image letting the relay in by its derived id, with its own exit and,
+  on the host, a Python stand-in for its internal endpoint. Devices of each group get in
+  through the API by REALITY and Hysteria2 with no restart, reach their own
+  group's exit and subscriptions, and are kept from the internal names; a
+  device added gets in; an id two groups share is dropped from both; one
+  removed while connected restarts Xray and loses its open download; a group
+  whose server is down, also before the first round, or answers it has no
+  list, gets nothing while the other is unaffected. Each refusal is checked
+  to have reached the client, beside a request known to work. It needs the
+  gateway's fixed ports, 10810, 10811 and 10900 up, free on loopback.

@@ -13,6 +13,9 @@ package main
 // named <device>@<group>, which the rules route by.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -135,6 +138,7 @@ type gwOptions struct {
 	ipv6           string // allow, or block
 	probeURL       string
 	tunnelGroup    string // "": the first group
+	listen         string // the subscriptions and tunnel inbounds'
 }
 
 var gwEnums = map[string][]string{
@@ -146,7 +150,7 @@ var gwEnums = map[string][]string{
 
 func gatewayOptions(target any) (gwOptions, error) {
 	o := gwOptions{serverLink: "reality", viaLink: "reality", viaFingerprint: "chrome", ipv6: "allow",
-		probeURL: "https://www.gstatic.com/generate_204"}
+		probeURL: "https://www.gstatic.com/generate_204", listen: "0.0.0.0"}
 	obj, ok := target.(map[string]any)
 	if !ok {
 		return o, errors.New(`"$gateway" takes an object: {"servers": "<absolute path>", ...}`)
@@ -182,13 +186,18 @@ func gatewayOptions(target any) (gwOptions, error) {
 				return o, errors.New(`"$gateway": "probeURL" is not an http or https URL`)
 			}
 			o.probeURL = s
+		case "listen":
+			if net.ParseIP(s) == nil {
+				return o, errors.New(`"$gateway": "listen" is not an IP address`)
+			}
+			o.listen = s
 		case "tunnelGroup":
 			if s != "" && !upstreamGroupRE.MatchString(s) {
 				return o, errors.New(`"$gateway": "tunnelGroup" is not a group's name`)
 			}
 			o.tunnelGroup = s
 		default:
-			return o, fmt.Errorf(`"$gateway" takes servers, via, serverLink, viaLink, viaFingerprint, ipv6, probeURL and tunnelGroup, and this one also holds %q`, k)
+			return o, fmt.Errorf(`"$gateway" takes servers, via, serverLink, viaLink, viaFingerprint, ipv6, probeURL, tunnelGroup and listen, and this one also holds %q`, k)
 		}
 	}
 	if o.servers == "" {
@@ -213,17 +222,32 @@ type gwLeg struct {
 	out   map[string]any
 }
 
-// What the agent and $gatewayClients need of the gateway the source holds:
-// its groups, its options, the device inbounds and the API, set each time it
-// is resolved; and what the agent has made of the groups' lists, which a
-// restart's config starts on.
-var gw struct {
+// What the agent needs of a gateway config: its groups, its options, the
+// device inbounds, the API and the routing.
+type gwSetup struct {
 	groups   []gwGroup
 	opts     gwOptions
 	inbounds []gwInbound
 	api      string
-	users    []gwUser            // the devices of every group, as Xray holds them
+	routing  string // as JSON
+}
+
+// The gateway: the setup Xray runs on, the one the last resolve made, which
+// is installed once Xray starts on it (gatewayInstall), so a resolve whose
+// config never runs changes nothing the agent goes by; and what the agent
+// has made of the groups' lists, which every resolve starts from.
+var gw struct {
+	gwSetup
+	next     gwSetup
+	users    []gwUser            // the devices of every group, as Xray is to hold them
 	prefixes map[string][]string // each group's subscription token prefixes
+}
+
+// gatewayInstall makes the last resolve's setup the one Xray runs on, as it
+// starts on that config. The devices removed and pending are not in it.
+func gatewayInstall() {
+	gw.gwSetup = gw.next
+	clear(gwPending)
 }
 
 // A device as the gateway holds it: its id, and its name tagged @<group>.
@@ -272,8 +296,11 @@ func gateway(target any) (envconf.Resolution, error) {
 		}
 		o.tunnelGroup = groups[0].name
 	}
-	gw.groups, gw.opts = groups, o
-	r := envconf.Resolution{Value: gatewayDoc(groups, o, gw.prefixes)}
+	gw.next.groups, gw.next.opts = groups, o
+	doc := gatewayDoc(groups, o, gw.prefixes)
+	routing, _ := json.Marshal(doc["routing"])
+	gw.next.routing = string(routing)
+	r := envconf.Resolution{Value: doc}
 	var notes []string
 	for _, g := range groups {
 		r.Secrets = append(r.Secrets, g.id, g.sid, g.enc, g.pbk, g.xrPath)
@@ -352,8 +379,8 @@ func gatewayGroups(lines []serverLine, hops []relayLine, o gwOptions) []gwGroup 
 // subscription prefixes routed to it.
 func gatewayDoc(groups []gwGroup, o gwOptions, prefixes map[string][]string) map[string]any {
 	inbounds := []any{
-		map[string]any{"tag": "subscriptions", "listen": "0.0.0.0", "port": gwSubscriptionsPort, "protocol": "http"},
-		map[string]any{"tag": "tunnel", "listen": "0.0.0.0", "port": gwTunnelPort, "protocol": "http"},
+		map[string]any{"tag": "subscriptions", "listen": o.listen, "port": gwSubscriptionsPort, "protocol": "http"},
+		map[string]any{"tag": "tunnel", "listen": o.listen, "port": gwTunnelPort, "protocol": "http"},
 	}
 	outbounds := []any{map[string]any{"tag": "block", "protocol": "blackhole"}}
 	var selectors []string
@@ -382,7 +409,7 @@ func gatewayDoc(groups []gwGroup, o gwOptions, prefixes map[string][]string) map
 //	internal   a device asking for a dotdash.internal name: block
 //	probe-<leg> the agent's probe of one leg: that leg
 //	tunnel     a cover app's tunnel host: the tunnel group
-//	sub-<g>    a subscription whose token's prefix is <g>'s: <g>
+//	sub-<g>-<digest> a subscription whose token's prefix is <g>'s: <g>
 //	users-<g>  a device of <g>, named <device>@<g>: <g>
 //	block      anything else: block
 func gatewayRouting(groups []gwGroup, o gwOptions, prefixes map[string][]string) map[string]any {
@@ -411,7 +438,11 @@ func gatewayRouting(groups []gwGroup, o gwOptions, prefixes map[string][]string)
 			for i := range p {
 				names[i] = "full:" + p[i] + "." + subZone
 			}
-			rule("sub-"+g.name, map[string]any{"inboundTag": []string{"subscriptions"}, "domain": names, "balancerTag": g.name})
+			// Xray reads a rule back as its tag and outbound, never its
+			// domains: the tag carries a digest of the prefixes, so a
+			// replace that did not take shows.
+			sum := sha256.Sum256([]byte(strings.Join(p, ",")))
+			rule("sub-"+g.name+"-"+hex.EncodeToString(sum[:4]), map[string]any{"inboundTag": []string{"subscriptions"}, "domain": names, "balancerTag": g.name})
 		}
 	}
 	for _, g := range groups {
@@ -465,9 +496,9 @@ var gwClientsPathRE = regexp.MustCompile(`^inbounds\[(\d+)\]\.settings\.(clients
 // loopback with the services the agent calls; online counts per user, by
 // which it tells a revoked device still connected; and each $gatewayClients
 // in a device inbound's clients or users. It records the inbounds and the API
-// for the agent.
+// for the agent, in the setup to install.
 func gatewayCheck(configs []*envconf.Config) error {
-	gw.inbounds, gw.api = nil, ""
+	gw.next.inbounds, gw.next.api = nil, ""
 	var src string
 	type at struct {
 		c *envconf.Config
@@ -494,7 +525,7 @@ func gatewayCheck(configs []*envconf.Config) error {
 		if len(fill) > 0 {
 			return fmt.Errorf("%s: %s: $gatewayClients fills an inbound from a $gateway, and no file holds one", fill[0].c.Src, fill[0].r.Path)
 		}
-		gw.groups = nil
+		gw.next.groups = nil
 		return nil
 	}
 	// Xray takes a later file's api, stats and policy in place of an earlier
@@ -530,7 +561,7 @@ func gatewayCheck(configs []*envconf.Config) error {
 	if _, ok := last["stats"].(map[string]any); !ok || level0["statsUserOnline"] != true {
 		return errors.New(`$gateway's agent tells a removed device still connected by its online count: the config needs "stats": {} and "policy": {"levels": {"0": {"statsUserOnline": true}}}`)
 	}
-	gw.api = listen
+	gw.next.api = listen
 	for _, f := range fill {
 		m := gwClientsPathRE.FindStringSubmatch(f.r.Path)
 		fail := fmt.Errorf("%s: %s: $gatewayClients is \"vless\" in a VLESS inbound's settings.clients, or \"hysteria\" in a Hysteria2 inbound's settings.users, of an inbound with a tag and a port", f.c.Src, f.r.Path)
@@ -553,7 +584,7 @@ func gatewayCheck(configs []*envconf.Config) error {
 		if in.tag == "" || err != nil || !(m[2] == "clients" && in.protocol == "vless" && isVLESS || m[2] == "users" && in.protocol == "hysteria" && isHysteria) {
 			return fail
 		}
-		gw.inbounds = append(gw.inbounds, in)
+		gw.next.inbounds = append(gw.next.inbounds, in)
 	}
 	return nil
 }

@@ -11,6 +11,9 @@
 //	xray-entrypoint relay-id <seed> <name> <nonce>
 //	                                           print a relay's id on this server
 //	                                           (relays.go)
+//	xray-entrypoint gateway-status             print a gateway's groups, healthy
+//	                                           while its agent's rounds run
+//	                                           (gateway_agent.go)
 //	xray-entrypoint <anything else...>         exec xray with those arguments
 //
 // Xray reads no value from a file and expands no variable, so a secret can
@@ -32,7 +35,8 @@
 // every XRAY_SUBSCRIPTION_INTERVAL (subscription.go), or exactly
 // {"$gateway": {...}} with a dotdash relay's config to its server groups,
 // and {"$gatewayClients": "vless"} or "hysteria" with their devices
-// (gateway.go), and changes nothing else. The contract is in
+// (gateway.go), kept current by the gateway's agent (gateway_agent.go),
+// and changes nothing else. The contract is in
 // images/xray/README.md.
 package main
 
@@ -79,6 +83,8 @@ var img = &envconf.Image{
 		{Name: "XRAY_GEOIP", Default: ""},
 		{Name: "XRAY_GEOSITE", Default: ""},
 		{Name: "XRAY_GEODATA_DIR", Default: ""},
+		{Name: "XRAY_GATEWAY_INTERVAL", Default: "1m"},
+		{Name: "XRAY_GATEWAY_STATUS", Default: "/run/gateway/status.json"},
 	},
 	Upstream: map[string]bool{
 		"XRAY_LOCATION_ASSET": true, "XRAY_LOCATION_CERT": true,
@@ -101,6 +107,9 @@ func main() {
 	}
 	if len(args) > 0 && args[0] == "relay-id" {
 		os.Exit(relayIDCmd(args[1:]))
+	}
+	if len(args) > 0 && args[0] == "gateway-status" {
+		os.Exit(gatewayStatusCmd(os.Stdout))
 	}
 	if len(args) > 0 {
 		if derive, ok := clientValues[args[0]]; ok {
@@ -169,8 +178,14 @@ func start(extra []string) error {
 		}
 		return err
 	}
+	gatewayInstall()
 	img.Summary(os.Stderr, version, configs)
-	if len(subs) > 0 || geoWaiting() {
+	if gw.api != "" {
+		if err := gatewaySettings(); err != nil {
+			return err
+		}
+	}
+	if len(subs) > 0 || geoWaiting() || gw.api != "" {
 		writeCaches()
 		return supervise(src, run, extra, subSet)
 	}

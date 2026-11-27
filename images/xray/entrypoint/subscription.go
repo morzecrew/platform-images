@@ -324,9 +324,17 @@ func supervise(src, run string, extra []string, s subSettings) error {
 	}
 	subsDue = time.Now().Add(s.interval) // fetched at start
 	timer := time.NewTimer(next(s))
-	// Set while a refresh runs, in the background so a signal is not held up
-	// by a fetch. Till it answers, subs is the refresh's alone.
-	var refreshed chan bool
+	// The gateway's rounds, when the config has one (gateway_agent.go).
+	var gwC <-chan time.Time
+	gwTimer := time.NewTimer(gwFirstRound)
+	if gw.api != "" {
+		gwC = gwTimer.C
+	}
+	// Set while a refresh or a round runs, in the background so a signal is
+	// not held up by a fetch. One runs at a time: each may resolve the source
+	// and rewrite the runtime directory. Till it answers, subs and gw are its
+	// alone.
+	var refreshed, rounded chan bool
 	for {
 		select {
 		case sig := <-sigs:
@@ -337,8 +345,19 @@ func supervise(src, run string, extra []string, s subSettings) error {
 			fmt.Fprintf(os.Stderr, "xray-entrypoint: Xray exited (%v)\n", err)
 			os.Exit(exitCode(cmd.ProcessState))
 		case <-timer.C:
+			if rounded != nil {
+				timer.Reset(time.Second)
+				continue
+			}
 			refreshed = make(chan bool, 1)
 			go func(c chan bool) { c <- refresh(src, run, extra, s) }(refreshed)
+		case <-gwC:
+			if refreshed != nil {
+				gwTimer.Reset(time.Second)
+				continue
+			}
+			rounded = make(chan bool, 1)
+			go func(c chan bool) { c <- gatewayRound(src, run, extra) }(rounded)
 		case restart := <-refreshed:
 			refreshed = nil
 			if restart {
@@ -348,6 +367,15 @@ func supervise(src, run string, extra []string, s subSettings) error {
 				}
 			}
 			timer.Reset(next(s))
+		case restart := <-rounded:
+			rounded = nil
+			if restart {
+				stop(cmd, done)
+				if cmd, done, err = launch(run, extra); err != nil {
+					return err
+				}
+			}
+			gwTimer.Reset(gwNext())
 		}
 	}
 }
@@ -361,7 +389,7 @@ func exitCode(ps *os.ProcessState) int {
 }
 
 func next(s subSettings) time.Duration {
-	if geoWaiting() {
+	if geoWaiting() || geoRestartDue {
 		return min(subRetry, s.interval)
 	}
 	for name, b := range subs {
@@ -390,7 +418,33 @@ func refresh(src, run string, extra []string, s subSettings) bool {
 		fmt.Fprintln(os.Stderr, "xray-entrypoint: XRAY_RUNTIME_DIR could not be put back; Xray keeps running on the config it loaded, and geodata waits")
 		return false
 	}
-	return refreshGeo(run, extra, s.proxy) || restart
+	if (refreshGeo(run, extra, s.proxy) || geoRestartDue) && !restart {
+		// Kept till Xray starts on the files installed: they are ready, so
+		// no later refresh would ask for it again.
+		restart = geoRestart(src, run, extra)
+		geoRestartDue = !restart
+	}
+	return restart
+}
+
+// A restart geodata asked for and a gateway's resolve held back, tried again
+// every subRetry till one passes.
+var geoRestartDue bool
+
+// geoRestart says whether Xray may restart on a geodata file alone. With a
+// gateway, the runtime directory holds the devices of the last resolve, and
+// the agent has changed them since through Xray's API: a revoked device
+// would get back in. So the source is resolved again on the gateway's
+// devices and routes now, and Xray restarts only once that passes.
+func geoRestart(src, run string, extra []string) bool {
+	if gw.api == "" {
+		return true
+	}
+	if ok, _, err := reload(src, run, extra); !ok {
+		fmt.Fprintf(os.Stderr, "geodata: the config could not be resolved again on the gateway's devices (%v); Xray keeps running on the files it loaded\n", err)
+		return false
+	}
+	return true
 }
 
 // refreshSubs fetches each subscription that is due, every one once their
@@ -431,35 +485,14 @@ func refreshSubs(src, run string, extra []string, s subSettings) (bool, bool) {
 	if !changed {
 		return false, true
 	}
-	revert := func(err error) (bool, bool) {
+	ok, intact, err := reload(src, run, extra)
+	if !ok {
 		fmt.Fprintf(os.Stderr, "subscription: %v; Xray keeps the config it runs\n", err)
 		subs = old
-		return false, true
+		return false, intact
 	}
-	configs, err := resolveDir(src)
-	if err != nil {
-		return revert(err)
-	}
-	stage, err := os.MkdirTemp(run, ".next-")
-	if err != nil {
-		return revert(fmt.Errorf("XRAY_RUNTIME_DIR is not writable (%v)", envconf.Cause(err)))
-	}
-	defer os.RemoveAll(stage)
-	if err := writeRuntime(stage, configs); err != nil {
-		return revert(err)
-	}
-	if _, err := testConfig(stage, extra, configs); err != nil {
-		return revert(err)
-	}
-	if err := writeRuntime(run, configs); err != nil {
-		// The runtime directory is emptied before it is written: put back the
-		// config Xray runs, which a later restart (geodata's) starts on.
-		revert(err)
-		return false, writeRuntime(run, running) == nil
-	}
-	running = configs
 	writeCaches()
-	for _, c := range configs {
+	for _, c := range running {
 		for _, r := range c.Refs {
 			if r.Kind == "$subscription" {
 				fmt.Fprintf(os.Stderr, "subscription: %s: %s; restarting Xray on it\n", r.File, r.Note)
@@ -467,6 +500,37 @@ func refreshSubs(src, run string, extra []string, s subSettings) (bool, bool) {
 		}
 	}
 	return true, true
+}
+
+// reload resolves the source again and writes it to the runtime directory
+// once `xray run -test` passes it in a directory beside the running config,
+// for Xray to restart on. It reports whether the runtime directory holds
+// it, and whether it holds a whole config, the old one or the new.
+func reload(src, run string, extra []string) (bool, bool, error) {
+	configs, err := resolveDir(src)
+	if err != nil {
+		return false, true, err
+	}
+	stage, err := os.MkdirTemp(run, ".next-")
+	if err != nil {
+		return false, true, fmt.Errorf("XRAY_RUNTIME_DIR is not writable (%v)", envconf.Cause(err))
+	}
+	defer os.RemoveAll(stage)
+	if err := writeRuntime(stage, configs); err != nil {
+		return false, true, err
+	}
+	if _, err := testConfig(stage, extra, configs); err != nil {
+		return false, true, err
+	}
+	if err := writeRuntime(run, configs); err != nil {
+		// The runtime directory is emptied before it is written: put back the
+		// config Xray runs, which a later restart (geodata's) starts on.
+		return false, writeRuntime(run, running) == nil, err
+	}
+	running = configs
+	gatewayInstall()      // each caller restarts Xray on it,
+	geoRestartDue = false // and on the geodata files installed
+	return true, true, nil
 }
 
 func launch(run string, extra []string) (*exec.Cmd, chan error, error) {
