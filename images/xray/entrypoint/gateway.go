@@ -515,7 +515,10 @@ func gatewayCheck(configs []*envconf.Config) error {
 	}
 	api, _ := last["api"].(map[string]any)
 	listen, _ := api["listen"].(string)
-	host, _, err := net.SplitHostPort(listen)
+	host, port, err := net.SplitHostPort(listen)
+	if n, perr := strconv.ParseUint(port, 10, 16); perr != nil || n == 0 {
+		err = errors.New("no port")
+	}
 	services, _ := api["services"].([]any)
 	if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() ||
 		!slices.Contains(services, any("HandlerService")) || !slices.Contains(services, any("RoutingService")) || !slices.Contains(services, any("StatsService")) {

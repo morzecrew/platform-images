@@ -407,6 +407,8 @@ func TestGatewayRefusals(t *testing.T) {
 		{"an outbound in another file", map[string]string{"gateway.json": gateway, "xray.json": strings.Replace(gwDevices, `"stats"`, `"outbounds": [{"protocol": "freedom"}], "stats"`, 1)}, "xray.json holds outbounds, which only $gateway may"},
 		{"no API", map[string]string{"gateway.json": gateway, "xray.json": strings.Replace(gwDevices, `"api"`, `"x"`, 1)}, `the config needs "api": {"listen": "127.0.0.1:<port>"`},
 		{"an API on every address", map[string]string{"gateway.json": gateway, "xray.json": strings.Replace(gwDevices, "127.0.0.1:10085", "0.0.0.0:10085", 1)}, `the config needs "api"`},
+		{"an API on no port", map[string]string{"gateway.json": gateway, "xray.json": strings.Replace(gwDevices, "127.0.0.1:10085", "127.0.0.1:api", 1)}, `the config needs "api"`},
+		{"an API on port 0", map[string]string{"gateway.json": gateway, "xray.json": strings.Replace(gwDevices, "127.0.0.1:10085", "127.0.0.1:0", 1)}, `the config needs "api"`},
 		{"an API without the handler", map[string]string{"gateway.json": gateway, "xray.json": strings.Replace(gwDevices, `"HandlerService", `, "", 1)}, `the config needs "api"`},
 		{"a later file's API, which Xray takes", map[string]string{"gateway.json": gateway, "xray.json": gwDevices, "zz.json": `{"api": {"tag": "api", "listen": "127.0.0.1:1", "services": ["StatsService"]}}`}, `the config needs "api"`},
 		{"no online counts", map[string]string{"gateway.json": gateway, "xray.json": strings.Replace(gwDevices, `"statsUserOnline": true`, `"statsUserOnline": false`, 1)}, `"policy": {"levels": {"0": {"statsUserOnline": true}}}`},
