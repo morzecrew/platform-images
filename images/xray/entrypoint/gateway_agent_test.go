@@ -626,6 +626,10 @@ func TestGatewayStatusCommand(t *testing.T) {
 		body string
 	}{404, ""}
 	gatewayRound("", "", nil)
+	// Ages counted from a clock of the test's, so a slow run reads the same.
+	at := gwRound
+	gwNow = func() time.Time { return at }
+	t.Cleanup(func() { gwNow = time.Now })
 	out.Reset()
 	if gatewayStatusCmd(&out) != 0 {
 		t.Errorf("after a round: %s", out.String())
@@ -640,7 +644,7 @@ func TestGatewayStatusCommand(t *testing.T) {
 			t.Errorf("status lacks %q:\n%s", want, out.String())
 		}
 	}
-	gwRound = time.Now().Add(-3 * time.Minute)
+	gwRound = at.Add(-3 * time.Minute)
 	writeGatewayStatus()
 	out.Reset()
 	if gatewayStatusCmd(&out) != 1 || !strings.Contains(out.String(), "the last round that reached Xray's API was 180 s ago") {

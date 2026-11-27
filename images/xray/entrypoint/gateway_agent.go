@@ -109,6 +109,7 @@ type gwGroupStatus struct {
 var (
 	gwFetch  = fetchList
 	xrayAPI  = runXrayAPI
+	gwNow    = time.Now // what gateway-status counts ages from
 	gwReload = func(src, run string, extra []string) error {
 		ok, _, err := reload(src, run, extra)
 		if !ok {
@@ -745,7 +746,7 @@ func gatewayStatusCmd(w io.Writer) int {
 		fmt.Fprintf(w, "gateway: %s is not the agent's status\n", p)
 		return 1
 	}
-	now := time.Now()
+	now := gwNow()
 	for _, g := range st.Groups {
 		var legs []string
 		for _, l := range g.Legs {
